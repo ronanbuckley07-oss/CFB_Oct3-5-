@@ -232,7 +232,25 @@ header.top{align-items:center}
 .mkpin{margin-top:6px;font-size:13px;color:var(--muted)}
 .mkpin summary{cursor:pointer}
 .mkpin input{width:100%;margin:4px 0}
-.boxline{max-width:560px}.boxteam{max-width:760px}
+.cboxes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:stretch}
+@media (max-width:900px){.cboxes{grid-template-columns:1fr}}
+.cbox{border:1px solid var(--line);border-top:4px solid var(--c);border-radius:12px;padding:14px;background:var(--paper)}
+.cbox header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:10px}
+.cbox h3{font:800 22px "Barlow Condensed",sans-serif;margin:0}.cbox h3 a{color:inherit}
+.cbox h4{font:700 13px Barlow,sans-serif;color:var(--muted);margin:14px 0 4px;padding-top:10px;border-top:1px solid var(--line)}
+.cwin{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cwin div{display:flex;flex-direction:column}.cwin span{font-size:13px;color:var(--muted)}
+.cwin b{font:800 34px/1.05 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums}
+.cbar{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0 2px;background:var(--line)}
+.crow{display:grid;grid-template-columns:minmax(0,1fr) auto 48px;gap:8px;align-items:baseline;padding:4px 0;font-size:14px;font-variant-numeric:tabular-nums}
+.crow b{font-weight:700;text-align:right}
+.cbox.m .crow{grid-template-columns:minmax(0,1fr) auto}
+.cbox .gap{font-size:12px;font-weight:700;text-align:right}.cbox .gap.up{color:var(--good)}.cbox .gap.down{color:var(--bad)}
+.cwin .gap{font-size:12px;text-align:left}
+.na{color:var(--muted);font-weight:500}
+.mini.on{border-color:var(--gold);color:var(--gold)}
+.boxline{max-width:560px}
+.pre td{padding:3px 6px}.pre td:last-child{white-space:nowrap}.pre td:first-child{color:var(--muted)}.pre tr.avg td{font-weight:700;color:var(--ink);border-top:2px solid var(--line)}.boxteam{max-width:760px}
 .boxline td:first-child,.boxline th:first-child{text-align:left}
 .boxteam td:first-child{color:var(--muted)}
 .boxteam td.lead{font-weight:700}
@@ -331,23 +349,29 @@ header.top{align-items:center}
     <div class="sec"><h3>Next points scored</h3><div id="gNext"></div></div>
     <div class="sec"><h3>Model vs. markets</h3><div id="gMkt"><p class="small" style="margin:0">Market prices load when you go live.</p></div></div>
     <div class="sec"><h3>Model vs. the betting line</h3><div id="gLine"></div></div>
+    <div class="sec"><h3>Starting point</h3><div id="gPre"><p class="small" style="margin:0">Loads when you go live.</p></div></div>
   </section>
 </div>
 
-<nav class="tabs" role="tablist" aria-label="More analysis"><button type="button" role="tab" id="t-box" aria-controls="tab-box" aria-selected="false" tabindex="-1">Box score</button><button type="button" role="tab" id="t-flow" aria-controls="tab-flow" aria-selected="false" tabindex="-1">Game flow</button><button type="button" role="tab" id="t-dists" aria-controls="tab-dists" aria-selected="false" tabindex="-1">Score distributions</button><button type="button" role="tab" id="t-check" aria-controls="tab-check" aria-selected="false" tabindex="-1">Model check</button><button type="button" role="tab" id="t-whatif" aria-controls="tab-whatif" aria-selected="false" tabindex="-1">What if</button><button type="button" role="tab" id="t-season" aria-controls="tab-season" aria-selected="false" tabindex="-1">Season</button><button type="button" role="tab" id="t-backtest" aria-controls="tab-backtest" aria-selected="false" tabindex="-1">Backtest</button><button type="button" role="tab" id="t-inputs" aria-controls="tab-inputs" aria-selected="false" tabindex="-1">Under the hood</button><button type="button" role="tab" id="t-manual" aria-controls="tab-manual" aria-selected="false" tabindex="-1">Manual entry</button></nav>
+<nav class="tabs" role="tablist" aria-label="More analysis"><button type="button" role="tab" id="t-box" aria-controls="tab-box" aria-selected="false" tabindex="-1">Box score</button><button type="button" role="tab" id="t-cmp" aria-controls="tab-cmp" aria-selected="false" tabindex="-1">Markets vs. model</button><button type="button" role="tab" id="t-flow" aria-controls="tab-flow" aria-selected="false" tabindex="-1">Game flow</button><button type="button" role="tab" id="t-dists" aria-controls="tab-dists" aria-selected="false" tabindex="-1">Score distributions</button><button type="button" role="tab" id="t-check" aria-controls="tab-check" aria-selected="false" tabindex="-1">Model check</button><button type="button" role="tab" id="t-whatif" aria-controls="tab-whatif" aria-selected="false" tabindex="-1">What if</button><button type="button" role="tab" id="t-season" aria-controls="tab-season" aria-selected="false" tabindex="-1">Season</button><button type="button" role="tab" id="t-backtest" aria-controls="tab-backtest" aria-selected="false" tabindex="-1">Backtest</button><button type="button" role="tab" id="t-inputs" aria-controls="tab-inputs" aria-selected="false" tabindex="-1">Under the hood</button><button type="button" role="tab" id="t-manual" aria-controls="tab-manual" aria-selected="false" tabindex="-1">Manual entry</button></nav>
 <section class="panel flow tabpanel" id="tab-flow" role="tabpanel" aria-labelledby="t-flow" hidden>
   <div class="flowhead"><h2>Game flow</h2>
     <div class="zoom" role="group" aria-label="Chart zoom">
       <button type="button" class="mini" data-z="out" aria-label="Zoom out">−</button><button type="button" class="mini" data-z="in" aria-label="Zoom in">+</button>
       <button type="button" class="mini" data-z="1">Q1</button><button type="button" class="mini" data-z="2">Q2</button><button type="button" class="mini" data-z="3">Q3</button><button type="button" class="mini" data-z="4">Q4</button>
-      <button type="button" class="mini" data-z="now">Last 10 min</button><button type="button" class="mini" data-z="all">Full game</button>
+      <button type="button" class="mini" data-z="now">Last 10 min</button><button type="button" class="mini" data-z="all">Full game</button><button type="button" class="mini" id="yFit" aria-pressed="true">Fit to lines</button>
     </div>
   </div>
   <div class="wplegend" id="wpLegend"></div>
+  <p class="small" id="wpFill" style="margin:-2px 0 6px;min-height:1.2em"></p>
   <div class="wpwrap" id="wpWrap"><svg class="wpchart" id="wpchart" viewBox="0 0 960 360" role="img" aria-label="Win probability over game time"></svg><div class="wptip" id="wpTip" hidden></div></div>
   <p class="small" style="margin:4px 0 14px">Scroll or pinch to zoom, drag to pan, hover or tap for exact numbers. Dots mark scores.</p>
   <div class="loghead"><h3>Plays and win-probability swings</h3><span class="small" id="bigswing"></span></div>
   <ol class="plog" id="plog"></ol>
+</section>
+<section class="panel tabpanel" id="tab-cmp" role="tabpanel" aria-labelledby="t-cmp" hidden>
+  <div class="flowhead"><h2>Markets vs. model</h2><span class="small" id="cmpNote"></span></div>
+  <div class="cboxes" id="cmpBoxes"><p class="small">Go live to load market prices.</p></div>
 </section>
 <section class="panel tabpanel" id="tab-box" role="tabpanel" aria-labelledby="t-box" hidden>
   <div class="flowhead"><h2>Box score</h2><span class="small" id="boxNote"></span></div>
@@ -399,7 +423,7 @@ header.top{align-items:center}
 </section>
 <section class="panel extra tabpanel" id="tab-backtest" role="tabpanel" aria-labelledby="t-backtest" hidden>
   <h2>Backtest on finished games</h2>
-  <p class="small">Replays real games through the model. At each sampled snap it simulates the rest of the game from that exact spot, then scores the win probability against who actually won, next to ESPN's own number from the same moment. Lower Brier score and log loss are better. Team strength comes from each game's betting line, so this tests the in-game engine, not the line. Timeouts aren't in ESPN's play data, so every replayed snap assumes three each.</p>
+  <p class="small">Replays real games through the model. At each sampled snap it simulates the rest of the game from that exact spot, then scores the win probability against who actually won, next to ESPN's own number from the same moment. Lower Brier score and log loss are better. Team strength comes from each game's closing betting line, or from the spread implied by ESPN's pregame win probability when ESPN kept no line, so this tests the in-game engine, not the pregame read. Timeouts aren't in ESPN's play data, so every replayed snap assumes three each.</p>
   <div class="row"><label>Game day</label><input type="date" id="btDate" style="width:auto"><button class="mini" id="btFind">Find finished games</button><span class="small" id="btFound"></span></div>
   <div class="btlist" id="btList"></div>
   <div class="row"><label>Sims/snap</label><input type="number" id="btN" value="1000" min="250" step="250"><label style="width:auto">Every</label><input type="number" id="btEvery" value="2" min="1" max="10" style="width:52px"><span class="small">snaps</span></div>
@@ -427,10 +451,10 @@ header.top{align-items:center}
   <div class="row"><label>Score</label><span class="small" data-tm="ND">ND</span><input type="number" id="nd" min="0"><span class="small" data-tm="UNC">UNC</span><input type="number" id="unc" min="0"></div>
   <div class="row"><label>Timeouts</label><span class="small" data-tm="ND">ND</span><input type="number" id="tond" min="0" max="3" style="width:52px"><span class="small" data-tm="UNC">UNC</span><input type="number" id="tounc" min="0" max="3" style="width:52px"></div>
   <div class="row"><label>2nd half ball</label><div class="seg" id="h2Seg"><button data-v="ND" data-tm="ND">ND</button><button data-v="UNC" data-tm="UNC">UNC</button></div></div>
-  <div class="row"><label><span data-tm="ND">ND</span> edge</label><input type="range" id="edge" min="-40" max="40" step="0.5"><span class="num" id="edgev" style="width:46px;font-weight:700"></span></div>
-  <p class="small" style="margin:-4px 0 10px">Points <span data-tm="ND">ND</span> is favored by. Live mode sets it from the betting line.</p>
+  <div class="row"><label><span data-tm="ND">ND</span> edge</label><input type="range" id="edge" min="-40" max="40" step="0.1"><span class="num" id="edgev" style="width:46px;font-weight:700"></span></div>
+  <p class="small" style="margin:-4px 0 10px">Points <span data-tm="ND">ND</span> is favored by. Going live sets it to the average of the sportsbook line, ESPN's FPI and the prediction markets.</p>
   <div class="row"><label>Over/under</label><input type="number" id="total" step="0.5" min="0"><span class="small">game total line</span></div>
-  <div class="row"><label>Strength ±</label><input type="range" id="esd" min="0" max="10" step="0.5"><span class="num" id="esdv" style="width:46px;font-weight:700"></span></div>
+  <div class="row"><label>Strength ±</label><input type="range" id="esd" min="0" max="12" step="0.1"><span class="num" id="esdv" style="width:46px;font-weight:700"></span></div>
   <p class="small" style="margin:-4px 0 10px">How unsure the line is about team strength, in points. Each sim draws its own <span data-tm="ND">ND</span> edge. At 5.5, pregame margins scatter about 15.5 points around the spread, in line with the 15 to 16 points seen in real college games.</p>
   <div class="row"><label>Seed</label><input type="text" id="seed" inputmode="numeric" placeholder="random" style="width:110px"><span class="small">fixed seed repeats results on this device</span></div>
   <button class="go" id="run">Run 25,000 simulations</button></div>
@@ -815,9 +839,9 @@ function applyTeams(){
   $('gameTitle').textContent=GAME.title; document.title=`${GAME.title}: live play simulator`;
 }
 const DEF={poss:'ND',pos:25,down:1,dist:10,qtr:1,secs:900,nd:0,unc:0,half2Recv:'UNC',edge:21.5,total:46.5,toND:3,toUNC:3,esd:5.5,seed:''};
-let S=Object.assign({},DEF), hist=[], wpHist=[], plog=[], espnWP=[], mkHist=[], MK=null;
+let PRE=null, S=Object.assign({},DEF), hist=[], wpHist=[], plog=[], espnWP=[], mkHist=[], MK=null, lastAgg=null, WALL=[], MKH={k:[],p:[]};
 try{const raw=localStorage.getItem('ndsim5');if(raw){const o=JSON.parse(raw);S=Object.assign(S,o.S||{});wpHist=o.wp||[];plog=o.log||[];espnWP=o.es||[];mkHist=o.mk||[];}}catch(e){}
-function save(){try{localStorage.setItem('ndsim5',JSON.stringify({S,wp:wpHist.slice(-300),log:plog.slice(-200),es:espnWP.slice(-400),mk:mkHist.slice(-600)}));}catch(e){}}
+function save(){try{localStorage.setItem('ndsim5',JSON.stringify({S,wp:wpHist.slice(-700),log:plog.slice(-200),es:espnWP.slice(-400),mk:mkHist.slice(-600)}));}catch(e){}}
 const ord=n=>['','1st','2nd','3rd','4th'][n]||n+'th';
 const fmt=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
 function spotName(pos,poss){ // pos from poss own goal
@@ -947,7 +971,9 @@ function prepS0(st,spread,total){
 }
 let seedPhase=0; const nextSeed=()=>S.seed?(+S.seed+7919*(seedPhase++)):null;
 const elapsed=s=>(Math.min(4,s.qtr)-1)*900+(900-s.secs);
-async function runSims(){
+let simBusy=0;
+async function runSims(){ simBusy++; try{ await runSimsInner(); } finally{ simBusy--; } }
+async function runSimsInner(){
   readInputs(); renderBoard(); save();
   const id=++runId; seedPhase=0; const S0=prepS0(S,S.edge,S.total);
   $('prog').textContent=`Quick read from ${N_QUICK.toLocaleString()} sims…`;
@@ -1008,17 +1034,17 @@ function render(A,final){
   $('gProj').textContent=`Median final: ${TA('ND')} ${med(A.ndH)}, ${TA('UNC')} ${med(A.ucH)}. Average margin ${TA('ND')} ${A.marSum/N>=0?'+':''}${(A.marSum/N).toFixed(1)}. Goes to overtime in ${pct(A.ot/N)} of sims.`;
   bars('gMar',['ND by 15+','ND by 8–14','ND by 1–7','UNC by 1–7','UNC by 8–14','UNC by 15+'].map(k=>[tmLbl(k),P(A.mar[k]),k.startsWith('ND')?'':'bad']));
   const nx=A.next; bars('gNext',[[`${TA('ND')} touchdown`,P(nx['ND TD']),'good'],[`${TA('ND')} field goal`,P(nx['ND FG']),'gold'],[`${TA('UNC')} touchdown`,P(nx['UNC TD']),'bad'],[`${TA('UNC')} field goal`,P(nx['UNC FG']),'bad'],['Safety',P(nx['ND Safety'])+P(nx['UNC Safety'])],['Nothing until overtime',P(nx['ND OT'])+P(nx['UNC OT'])],['No more scoring',P(nx['No more scoring'])]]);
-  const sp=S.edge, cov=A.cover/N, ov=A.over/N;
+  const sp=bookEdge(), ov=A.over/N; let cn=0,cc=0; A.marH.forEach((v,i)=>{const m=i-60; if(m>sp) cc+=v; if(m!==sp) cn+=v;}); const cov=cn?cc/cn:A.cover/N;
   $('gLine').innerHTML=`<div class="bar"><span>${TA('ND')} covers ${sp>0?'−'+sp:'+'+(-sp)}</span><div class="tr"><div class="fl" style="width:${(cov*100).toFixed(1)}%"></div></div><span class="v">${Math.round(cov*100)}%</span></div>
    <div class="bar"><span>Over ${S.total}</span><div class="tr"><div class="fl gold" style="width:${(ov*100).toFixed(1)}%"></div></div><span class="v">${Math.round(ov*100)}%</span></div>
    <p class="small" style="margin:6px 0 0">Scoring is calibrated to the total and strength to the spread, so before kickoff both sit near 50%. Once the game starts, the gap from 50% is where the model and the pregame line disagree.</p>`;
-  lastProj=projFrom(A); drawField(lastProj); renderInputs(); drawDists(A); makePred(A);
+  lastProj=projFrom(A); drawField(lastProj); renderInputs(); drawDists(A); makePred(A); if(final) lastAgg=A;
   if(final){
     lastWP=wp;
     const key=JSON.stringify([S.poss,S.pos,S.down,S.dist,S.qtr,S.secs,S.nd,S.unc,S.edge]);
     const last=wpHist[wpHist.length-1]; if(!last||last.k!==key) wpHist.push({k:key,wp,t:elapsed(S)}); else {last.wp=wp;last.t=elapsed(S);}
     for(const en of plog) if(en.after==null) en.after=wp;
-    drawChart(); renderLog(); renderCLT(); renderSeason(); renderMarkets(); save();
+    drawChart(); renderLog(); renderCLT(); renderSeason(); renderMarkets(); renderCompare(); save();
   }
 }
 async function runFourth(S0,id){
@@ -1040,32 +1066,41 @@ async function runFourth(S0,id){
 // ===== Game flow chart: model, ESPN and market lines, zoomable =====
 const CW=960, CHH=360, CL=50, CR=74, CT=18, CB=44;
 let CH={x0:0,x1:3600}, chartHover=null;
-const chX=t=>CL+(CW-CL-CR)*(t-CH.x0)/(CH.x1-CH.x0), chY=p=>CT+(CHH-CT-CB)*(1-p);
+let YR={lo:0,hi:1}, yFit=true;
+const chX=t=>CL+(CW-CL-CR)*(t-CH.x0)/(CH.x1-CH.x0), chY=p=>CT+(CHH-CT-CB)*(1-(p-YR.lo)/(YR.hi-YR.lo));
 const tLabel=t=>{const q=Math.min(4,Math.floor(Math.min(t,3599.9)/900)+1); return `Q${q} ${fmt(q*900-t)}`;};
 function chartSeries(){
   const sort=a=>a.filter(h=>h.t!=null&&h.v!=null).sort((x,y)=>x.t-y.t);
   return [
     {k:'model',name:'This model',color:'var(--gold)',w:3.2,pts:sort(wpHist.map(h=>({t:h.t,v:h.wp})))},
-    {k:'espn',name:'ESPN',color:'var(--muted)',w:2,dash:'7 5',pts:sort(espnWP.map(h=>({t:h.t,v:h.wp})))},
-    {k:'kalshi',name:'Kalshi',color:'#2FA36B',w:2.2,pts:sort(mkHist.map(h=>({t:h.t,v:h.k})))},
-    {k:'poly',name:'Polymarket',color:'#5B8DEF',w:2.2,pts:sort(mkHist.map(h=>({t:h.t,v:h.p})))},
+    {k:'espn',name:'ESPN',color:'#9AA8BA',w:1.8,pts:sort(espnWP.map(h=>({t:h.t,v:h.wp})))},
+    {k:'kalshi',name:'Kalshi',color:'#2FA36B',w:2.2,pts:MKH.k.length?MKH.k.slice():sort(mkHist.map(h=>({t:h.t,v:h.k})))},
+    {k:'poly',name:'Polymarket',color:'#5B8DEF',w:2.2,pts:MKH.p.length?MKH.p.slice():sort(mkHist.map(h=>({t:h.t,v:h.p})))},
   ].filter(x=>x.pts.length);
 }
 const valAt=(pts,t)=>{let v=null; for(const p of pts){ if(p.t<=t) v=p.v; else break; } return v;};
 function stepPath(pts){
   let d='', last=null;
-  for(const p of pts){ const x=chX(p.t).toFixed(1), y=chY(p.v).toFixed(1); d+= last==null?`M${x},${y}`:`H${x}V${y}`; last=p; }
+  for(const p of pts){ const x=chX(p.t).toFixed(1), y=chY(p.v).toFixed(1); d+= last==null?`M${x},${y}`:`L${x},${y}`; last=p; }
+  if(pts.length===1) d+=`h0.1`;
   return d;
 }
 function drawChart(){
   const span=CH.x1-CH.x0, ser=chartSeries(), plotW=CW-CL-CR, plotH=CHH-CT-CB;
+  // Fit the y axis to what's on screen so a 85-97% game isn't squashed against the top edge
+  YR={lo:0,hi:1};
+  if(yFit){ const vs=[]; for(const x of ser) for(const p of x.pts) if(p.t>=CH.x0-60&&p.t<=CH.x1+60) vs.push(p.v);
+    if(vs.length){ let lo=Math.min(...vs), hi=Math.max(...vs); const pad=Math.max(.04,(hi-lo)*.12); lo=Math.max(0,Math.floor((lo-pad)*20)/20); hi=Math.min(1,Math.ceil((hi+pad)*20)/20); if(hi-lo<.2){const m=(hi+lo)/2; lo=Math.max(0,m-.1); hi=Math.min(1,lo+.2); lo=hi-.2;} YR={lo,hi}; } }
+  const yStep=YR.hi-YR.lo>.6?.25:YR.hi-YR.lo>.3?.1:.05, yTicks=[]; for(let v=Math.ceil(YR.lo/yStep-1e-9)*yStep;v<=YR.hi+1e-9;v+=yStep) yTicks.push(+v.toFixed(3));
   let g=`<defs><clipPath id="wpclip"><rect x="${CL}" y="${CT-6}" width="${plotW}" height="${plotH+12}"/></clipPath></defs>`;
   g+=`<rect x="${CL}" y="${CT}" width="${plotW}" height="${plotH}" fill="var(--paper)" rx="4"/>`;
   // shade each team's half lightly in its color
-  g+=`<rect x="${CL}" y="${CT}" width="${plotW}" height="${plotH/2}" fill="${TM.ND.color}" opacity=".07"/><rect x="${CL}" y="${CT+plotH/2}" width="${plotW}" height="${plotH/2}" fill="${TM.UNC.zone}" opacity=".07"/>`;
-  for(const p of [0,.25,.5,.75,1]){ const y=chY(p);
+  const y50=Math.max(CT,Math.min(CT+plotH,chY(.5)));
+  if(y50>CT) g+=`<rect x="${CL}" y="${CT}" width="${plotW}" height="${y50-CT}" fill="${TM.ND.color}" opacity=".08"/>`;
+  if(y50<CT+plotH) g+=`<rect x="${CL}" y="${y50}" width="${plotW}" height="${CT+plotH-y50}" fill="${TM.UNC.zone}" opacity=".08"/>`;
+  for(const p of yTicks){ const y=chY(p);
     g+=`<line x1="${CL}" x2="${CW-CR}" y1="${y}" y2="${y}" stroke="${p===.5?'var(--muted)':'var(--line)'}" ${p===.5?'stroke-dasharray="5 5"':''} stroke-width="1"/>`;
-    g+=`<text x="${CL-8}" y="${y+5}" font-size="14" fill="var(--muted)" text-anchor="end">${p*100}%</text>`; }
+    g+=`<text x="${CL-8}" y="${y+5}" font-size="14" fill="var(--muted)" text-anchor="end">${Math.round(p*100)}%</text>`; }
   // time axis: quarters when zoomed out, minutes when zoomed in
   for(let q=0;q<=4;q++){ const t=q*900; if(t<CH.x0||t>CH.x1) continue; const x=chX(t);
     g+=`<line x1="${x}" x2="${x}" y1="${CT}" y2="${CT+plotH}" stroke="var(--line)" stroke-width="${q%2?1:1.5}"/>`; }
@@ -1091,13 +1126,15 @@ function drawChart(){
     for(const s2 of ser){ const v=valAt(s2.pts,chartHover); if(v!=null) body+=`<circle cx="${x}" cy="${chY(v)}" r="4" fill="${s2.color}" stroke="var(--card)" stroke-width="1.5"/>`; } }
   g+=`<g clip-path="url(#wpclip)">${body}</g>`;
   $('wpchart').innerHTML=g;
-  $('wpLegend').innerHTML=ser.map(x=>{const v=x.pts[x.pts.length-1].v; return `<span><i style="border-top:3px ${x.dash?'dashed':'solid'} ${x.color}"></i>${x.name} <b>${TA('ND')} ${(v*100).toFixed(x.k==='model'?1:0)}%</b></span>`;}).join('')||'<span>This model, ESPN, Kalshi and Polymarket lines appear once live mode is on.</span>';
+  $('yFit').classList.toggle('on',yFit); $('yFit').textContent=yFit?'Fit to lines':'0 to 100%';
+  $('wpLegend').innerHTML=ser.map(x=>{const v=x.pts[x.pts.length-1].v; return `<span><i style="border-top:3px solid ${x.color}"></i>${x.name} <b>${TA('ND')} ${(v*100).toFixed(x.k==='model'?1:0)}%</b></span>`;}).join('')||'<span>This model, ESPN, Kalshi and Polymarket lines appear once live mode is on.</span>';
   // zoom buttons reflect the current view
   document.querySelectorAll('[data-z]').forEach(b=>{const z=b.dataset.z; b.classList.toggle('on', z==='all'?span>=3599:(+z&&CH.x0===(+z-1)*900&&CH.x1===+z*900));});
 }
 function setView(a,b){ let span=Math.max(120,Math.min(3600,b-a)); a=Math.max(0,Math.min(3600-span,a)); CH={x0:a,x1:a+span}; drawChart(); updateTip(); }
 function zoomAt(t,f){ const a=t-(t-CH.x0)*f, b=t+(CH.x1-t)*f; setView(a,b); }
 function nowT(){ const m=wpHist.filter(h=>h.t!=null); return m.length?Math.max(...m.map(h=>h.t)):elapsed(S); }
+$('yFit').addEventListener('click',()=>{yFit=!yFit; $('yFit').setAttribute('aria-pressed',String(yFit)); drawChart();});
 document.querySelectorAll('[data-z]').forEach(b=>b.addEventListener('click',()=>{const z=b.dataset.z, mid=(CH.x0+CH.x1)/2;
   if(z==='in') zoomAt(mid,0.6); else if(z==='out') zoomAt(mid,1/0.6); else if(z==='all') setView(0,3600); else if(z==='now'){const t=nowT(); setView(t-540,t+60);} else setView((+z-1)*900,+z*900);}));
 {
@@ -1203,11 +1240,14 @@ const LIVE={event:'401858250',date:'20261003',teams:{'87':'ND','153':'UNC'},abbr
 let liveOn=false, liveTimer=null, lastKey='', lastPlayText=null, edgeSetFromLine=false, pollN=0;
 const clockT=(per,clk)=>{const c=clockToSecs(clk); return per&&c!=null?(Math.min(4,per)-1)*900+(900-c):null;};
 // ESPN's own win probability for the same game, drawn as the dashed line on the chart
+let SUMMARY=null;
 async function pullEspnWP(){
   try{const r=await fetch(`${LIVE.endpoint}?kind=summary&event=${LIVE.event}`,{cache:'no-store'}); if(!r.ok) return; const g=await r.json();
     const home=(g.comps||[]).find(c=>c.homeAway==='home'); if(!home||!g.wp||!g.wp.length) return; const ndHome=LIVE.teams[home.id]==='ND';
     const tOf={}; for(const p of g.plays||[]) if(p.period&&p.period<=4) tOf[p.id]=clockT(p.period,p.clock);
-    espnWP=g.wp.filter(w=>tOf[w.id]!=null&&w.home!=null).map(w=>({t:tOf[w.id],wp:ndHome?w.home:1-w.home})); drawChart(); save();
+    espnWP=g.wp.filter(w=>tOf[w.id]!=null&&w.home!=null).map(w=>({t:tOf[w.id],wp:ndHome?w.home:1-w.home}));
+    WALL=(g.plays||[]).filter(p=>p.wc&&tOf[p.id]!=null).map(p=>[Date.parse(p.wc),tOf[p.id]]).filter(x=>isFinite(x[0])).sort((a,b)=>a[0]-b[0]);
+    SUMMARY=g; buildMarketHist(); backfillModel(); drawChart(); save();
   }catch(e){}
 }
 function setLive(msg,state){$('liveMsg').textContent=msg;$('liveDot').dataset.s=state;}
@@ -1271,7 +1311,7 @@ function applyPoll(ev){
     const o=parseEspn(ev);
     const key=JSON.stringify([o.qtr,o.secs,o.nd,o.unc,o.poss,o.down,o.dist,o.pos]);
     $('lastPlay').textContent=o.lastPlay?`Last play: ${o.lastPlay}`:'';
-    $('lineInfo').textContent=o.line?`Line: ${o.line} (sets ${TA('ND')} edge)`:'';
+    if(!(PRE&&PRE.homeMargin!=null)) $('lineInfo').textContent=o.line?`Line: ${o.line} (sets ${TA('ND')} edge)`:''; else $('lineInfo').textContent=`Starting edge: ${TA(S.edge>=0?'ND':'UNC')} by ${Math.abs(S.edge).toFixed(1)} (average of ${PRE.sources.length} pregame reads). Book line ${o.line||'n/a'}.`;
     if(o.state==='pre'){applyLive(o); syncInputs(); setLive(`Connected. Game hasn't started (${o.detail||'scheduled'}).`,'ok'); if(key!==lastKey){lastKey=key;runSims();} return;}
     if(o.state==='post'){applyLive(o); syncInputs(); setLive(`Final: ${TA('ND')} ${o.nd}, ${TA('UNC')} ${o.unc}.`,'ok'); stopLive(); runSims(); pullEspnWP(); pullBox(); return;}
     if(!o.hasSit) setLive(`Live score and clock connected (${o.detail}). ESPN isn't sending down and distance right now, so check those by hand.`,'warn');
@@ -1322,12 +1362,13 @@ async function loadGame(g){
     upcoming:schedFrom(ua,g.event).upcoming||null, played:schedFrom(ua,g.event).played||[]};
   LIVE.event=g.event; if(g.date) LIVE.date=g.date; LIVE.teams={[g.A.id]:'ND',[g.B.id]:'UNC'};
   const keep={esd:S.esd,seed:S.seed}; S=Object.assign({},DEF,keep,{edge:0,total:52});
-  hist=[]; wpHist=[]; plog=[]; espnWP=[]; mkHist=[]; MK=null; lastWP=null; pred=null; lastKey=''; lastPlayText=null; edgeSetFromLine=false;
+  hist=[]; wpHist=[]; plog=[]; espnWP=[]; mkHist=[]; MK=null; MKH={k:[],p:[]}; WALL=[]; SUMMARY=null; PRE=null; bfRun++; lastAgg=null; lastWP=null; pred=null; lastKey=''; lastPlayText=null; edgeSetFromLine=false;
   try{ const r=await fetch(`${LIVE.endpoint}?event=${LIVE.event}&date=${LIVE.date}`,{cache:'no-store'}); if(r.ok){ const o=parseEspn(await r.json());
-      if(o.edge!=null){S.edge=o.edge; edgeSetFromLine=true;} if(o.total) S.total=o.total; $('lineInfo').textContent=o.line?`Line: ${o.line} (sets ${TA('ND')} edge)`:''; } }catch(e){}
+      if(o.edge!=null){S.edge=o.edge; edgeSetFromLine=true;} if(o.total) S.total=o.total; if(!(PRE&&PRE.homeMargin!=null)) $('lineInfo').textContent=o.line?`Line: ${o.line} (sets ${TA('ND')} edge)`:''; else $('lineInfo').textContent=`Starting edge: ${TA(S.edge>=0?'ND':'UNC')} by ${Math.abs(S.edge).toFixed(1)} (average of ${PRE.sources.length} pregame reads). Book line ${o.line||'n/a'}.`; } }catch(e){}
   if(!edgeSetFromLine||S.total===52||true){ try{ const r=await fetch(`${LIVE.endpoint}?kind=summary&event=${LIVE.event}`); if(r.ok){ const s=await r.json(), od=s.odds||{};
       const R=readOdds(od.raw||od,GAME.homeId===TM.ND.id?'ND':'UNC'); if(R.total) S.total=R.total; if(!edgeSetFromLine&&R.edge!=null){S.edge=R.edge; edgeSetFromLine=true;}
       $('lineInfo').textContent=edgeSetFromLine?`Line: ${TA(S.edge>=0?'ND':'UNC')} by ${Math.abs(S.edge)}, O/U ${S.total}`:'No betting line from ESPN yet. Set the edge and total by hand.'; } }catch(e){} }
+  await applyPregame(true);
   try{localStorage.setItem('ndsim-game',JSON.stringify({TM,GAME,usage:{ND:DATA.teams.ND,UNC:DATA.teams.UNC},LIVE:{event:LIVE.event,date:LIVE.date,teams:LIVE.teams}}));}catch(e){}
   $('gameId').value=LIVE.event; applyTeams(); usageNoteText(); seasonRows(); renderSeason(); syncInputs(); drawChart(); renderLog(); renderCLT(); save(); runSims();
   const when=g.kickoff?new Date(g.kickoff).toLocaleString([], {weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
@@ -1415,12 +1456,23 @@ let btStop=false, btGames=[];
 $('btFind').addEventListener('click',async()=>{
   $('btFound').textContent='Looking…'; $('btList').innerHTML='';
   try{const r=await fetch(`${LIVE.endpoint}?kind=list&date=${$('btDate').value.replace(/-/g,'')}`); const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status);
-    btGames=j.games||[]; const withLine=btGames.filter(g=>g.line);
-    $('btFound').textContent=`${btGames.length} finished FBS games, ${withLine.length} with a betting line.`;
-    $('btList').innerHTML=withLine.map(g=>`<label><input type="checkbox" value="${g.id}" ${BT.games[g.id]?'':'checked'}> ${g.name}${BT.games[g.id]?' <span class="small">(done)</span>':''}</label>`).join('');
+    btGames=j.games||[]; const withLine=btGames.filter(g=>g.line), usable=btGames.filter(g=>g.line||g.pregame);
+    $('btFound').textContent=`${btGames.length} finished FBS games, ${withLine.length} with a closing betting line${usable.length>withLine.length?`, ${usable.length-withLine.length} more using ESPN's pregame win probability instead`:''}.`;
+    $('btList').innerHTML=usable.map(g=>`<label><input type="checkbox" value="${g.id}" ${BT.games[g.id]?'':'checked'}> ${g.name}${g.line?` <span class="small">${g.line}</span>`:' <span class="small">(no line)</span>'}${BT.games[g.id]?' <span class="small">(done)</span>':''}</label>`).join('')||'<p class="small">None of these games have a line or a pregame win probability from ESPN.</p>';
   }catch(e){$('btFound').textContent=`Couldn't load games (${e.message}). This needs the site's server, so it won't work from a local file.`;}
 });
 // ESPN summary -> pre-snap states in engine terms. Home team takes the 'ND' slot, away the 'UNC' slot.
+// Inverse of the normal CDF (Acklam's approximation), for turning a win probability into a spread
+function invPhi(p){
+  const a=[-39.69683028665376,220.9460984245205,-275.9285104469687,138.357751867269,-30.66479806614716,2.506628277459239],
+    b=[-54.47609879822406,161.5858368580409,-155.6989798598866,66.80131188771972,-13.28068155288572],
+    c=[-.007784894002430293,-.3223964580411365,-2.400758277161838,-2.549732539343734,4.374664141464968,2.938163982698783],
+    d=[.007784695709041462,.3224671290700398,2.445134137142996,3.754408661907416];
+  const pl=.02425; let q,r;
+  if(p<pl){q=Math.sqrt(-2*Math.log(p)); return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+  if(p>1-pl){q=Math.sqrt(-2*Math.log(1-p)); return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);}
+  q=p-.5; r=q*q; return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+}
 function btStates(g){
   const home=(g.comps||[]).find(c=>c.homeAway==='home'), away=(g.comps||[]).find(c=>c.homeAway==='away');
   if(!home||!away) return {err:'missing teams'};
@@ -1428,7 +1480,10 @@ function btStates(g){
   if(m){const v=-parseFloat(m[2]); if(m[1]===home.abbr) edge=v; else if(m[1]===away.abbr) edge=-v;}
   else if(det&&/even|pk|pick/i.test(det)) edge=0;
   if(edge==null&&g.odds&&g.odds.spread!=null) edge=-(+g.odds.spread);
-  if(edge==null) return {err:'no line'};
+  let lineSrc='book';
+  // No betting line: turn ESPN's pregame win probability into the spread it implies (margins ~ normal, 15.5-point SD)
+  if(edge==null){ const w0=(g.wp||[]).find(w=>w.home!=null); if(w0){ const pw=Math.min(.995,Math.max(.005,+w0.home)); edge=+(SIG*invPhi(pw)).toFixed(1); lineSrc='espn'; } }
+  if(edge==null) return {err:'no line or pregame odds'};
   const total=+(g.odds&&g.odds.overUnder)||52;
   const slot=id=>String(id)===home.id?'ND':String(id)===away.id?'UNC':null;
   const wp={}; for(const w of g.wp||[]) wp[w.id]=w.home;
@@ -1441,7 +1496,7 @@ function btStates(g){
     if(p.hs!=null) hs=+p.hs; if(p.as!=null) as=+p.as; if(wp[p.id]!=null) espnPrev=wp[p.id];
   }
   if(out.length<20) return {err:'too few plays'};
-  return {edge,total,y:home.score>away.score?1:0,name:`${away.abbr} at ${home.abbr}`,states:out};
+  return {edge,total,lineSrc,y:home.score>away.score?1:0,name:`${away.abbr} at ${home.abbr}`,states:out};
 }
 $('btRun').addEventListener('click',async()=>{
   const ids=[...document.querySelectorAll('#btList input:checked')].map(x=>x.value);
@@ -1565,7 +1620,7 @@ async function goLive(){
   const btn=$('gateGo'); gateBusy=true; btn.disabled=true; btn.textContent='Loading rosters and the line…';
   const resume=SAVED_GAME&&SAVED_GAME.LIVE&&SAVED_GAME.LIVE.event===EVENT&&LIVE.event===EVENT&&SAVED_GAME.TM&&SAVED_GAME.TM.ND.id===sidePick;
   let ok=true;
-  if(resume){ applyTeams(); syncInputs(); runSims(); }
+  if(resume){ applyTeams(); await applyPregame(false); syncInputs(); runSims(); }
   else ok=await findAndLoad(`event=${EVENT}`,sidePick);
   if(!ok){ gateBusy=false; btn.disabled=false; btn.textContent='Try again'; $('gateNote').textContent=$('liveMsg').textContent; return; }
   SAVED_GAME=null; clearInterval(gateTimer);
@@ -1580,11 +1635,11 @@ function getPins(){try{return JSON.parse(localStorage.getItem(pinKey())||'{}');}
 async function pullMarkets(){
   try{ const pin=getPins(); const q=`${pin.k?`&kalshi=${encodeURIComponent(pin.k)}`:''}${pin.p?`&poly=${encodeURIComponent(pin.p)}`:''}`;
     const r=await fetch(`${LIVE.endpoint}?kind=markets&event=${LIVE.event}${q}`,{cache:'no-store'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||r.status);
-    MK=j; const side=x=>x&&x.found&&x.away?(TM.ND.id===String(j.awayId)?x.away.p:x.home.p):null;
+    MK=j; buildMarketHist(); const side=x=>x&&x.found&&x.away?(TM.ND.id===String(j.awayId)?x.away.p:x.home.p):null;
     const k=side(j.kalshi), p=side(j.poly), t=elapsed(S), last=mkHist[mkHist.length-1];
     if((k!=null||p!=null)&&!(last&&last.t===t&&last.k===k&&last.p===p)) mkHist.push({t,k,p});
   }catch(e){ MK={error:String(e.message||e)}; }
-  renderMarkets(); drawChart(); save();
+  renderMarkets(); renderCompare(); drawChart(); save();
 }
 function renderMarkets(){
   const el=$('gMkt'); if(!el) return;
@@ -1608,6 +1663,152 @@ function renderMarkets(){
     <button type="button" class="mini" id="pinSave">Use these</button></details>`;
   el.innerHTML=h;
   $('pinSave').addEventListener('click',()=>{try{localStorage.setItem(pinKey(),JSON.stringify({k:$('pinK').value.trim(),p:$('pinP').value.trim()}));}catch(e){} toast('Market pinned'); pullMarkets();});
+}
+
+
+// Real time -> game clock, using ESPN's wall-clock stamp on every play. Halftime and timeouts map to a flat clock.
+function wallToT(ms){
+  if(WALL.length<2||ms<WALL[0][0]-20*60000) return null;
+  if(ms<=WALL[0][0]) return 0;
+  if(ms>=WALL[WALL.length-1][0]) return MK&&MK.final?null:WALL[WALL.length-1][1];
+  let lo=0,hi=WALL.length-1; while(hi-lo>1){const m=(lo+hi)>>1; if(WALL[m][0]<=ms) lo=m; else hi=m;}
+  const [a,ta]=WALL[lo],[b,tb]=WALL[hi]; return b>a?ta+(tb-ta)*(ms-a)/(b-a):ta;
+}
+function buildMarketHist(){
+  if(!MK) return; const mine=TM.ND.id===String(MK.awayId);
+  for(const [key,src] of [['k',MK.kalshi],['p',MK.poly]]){
+    const h=src&&src.hist&&src.hist.away; if(!h||!h.length||WALL.length<2) continue;
+    const pts=[]; for(const [ms,v] of h){const t=wallToT(ms); if(t!=null) pts.push({t,v:mine?v:1-v});}
+    // one point per game second is plenty
+    const ded=[]; for(const p of pts){ if(ded.length&&Math.abs(ded[ded.length-1].t-p.t)<1) ded[ded.length-1]=p; else ded.push(p); }
+    MKH[key]=ded;
+  }
+}
+
+// ===== Fill in the model's line for plays before you went live =====
+let bfRun=0;
+function histStates(g){
+  const slot=id=>LIVE.teams[String(id)]||null, home=(g.comps||[]).find(c=>c.homeAway==='home');
+  if(!home) return [];
+  const homeSlot=slot(home.id); if(!homeSlot) return [];
+  const firstTeam=slot((g.plays||[]).find(p=>slot(p.team)&&p.down>=1)?.team), half2Recv=firstTeam==='ND'?'UNC':'ND';
+  let hs=0, as=0; const out=[];
+  for(const p of g.plays||[]){
+    const poss=slot(p.team), cs=clockToSecs(p.clock), skip=/kickoff|timeout|end of|extra point|two-point|conversion|coin toss/i.test(p.type+' '+p.text);
+    if(!skip&&poss&&p.period>=1&&p.period<=4&&p.down>=1&&p.down<=4&&p.ytez>=1&&p.ytez<=99&&cs!=null&&p.dist>=1){
+      const nd=homeSlot==='ND'?hs:as, unc=homeSlot==='ND'?as:hs;
+      out.push({poss,pos:100-p.ytez,down:p.down,dist:Math.min(p.dist,p.ytez),qtr:p.period,secs:Math.max(1,cs),nd,unc,half2Recv,toND:3,toUNC:3});}
+    if(p.hs!=null) hs=+p.hs; if(p.as!=null) as=+p.as;
+  }
+  return out;
+}
+let bfActive=false;
+async function backfillModel(){
+  if(bfActive||!SUMMARY||!liveOn&&SUMMARY.state!=='post') return;
+  bfActive=true; try{ await backfillInner(); } finally{ bfActive=false; }
+}
+async function backfillInner(){
+  const id=bfRun, states=histStates(SUMMARY); if(!states.length) return;
+  const have=wpHist.filter(h=>h.t!=null).map(h=>h.t);
+  const upTo=SUMMARY.state==='post'?3601:elapsed(S);
+  // every other snap up to the current play, only where the line has no point within 25 game-seconds
+  const todo=states.filter((st,i)=>i%2===0).map(st=>({st,t:elapsed(st)})).filter(x=>x.t>0&&x.t<upTo-5&&!have.some(t=>Math.abs(t-x.t)<25));
+  if(!todo.length) return;
+  for(let i=0;i<todo.length;i++){
+    while(simBusy) { await new Promise(r=>setTimeout(r,400)); if(id!==bfRun) return; }
+    if(id!==bfRun) return;
+    $('wpFill').textContent=`Filling in the model's line for earlier plays: ${i+1} of ${todo.length}`;
+    const st=Object.assign({},todo[i].st,{esd:S.esd});
+    const A=await runPar(prepS0(st,S.edge,S.total),1500,null,null); if(id!==bfRun) return;
+    wpHist.push({k:JSON.stringify([st.poss,st.pos,st.down,st.dist,st.qtr,st.secs,st.nd,st.unc,S.edge]),wp:A.win/A.n,t:todo[i].t,bf:true});
+    if(i%6===5||i===todo.length-1){ wpHist.sort((a,b)=>(a.t??0)-(b.t??0)); drawChart(); save(); }
+  }
+  $('wpFill').textContent='Earlier plays use 1,500 sims each and assume three timeouts, since ESPN\u2019s play data doesn\u2019t carry them.';
+}
+
+// ===== Compare tab: Polymarket, Kalshi and this model side by side =====
+function modelCover(side,by){ // P(that team's final margin > by)
+  const A=lastAgg; if(!A) return null; let n=0,c=0; const mine=side===sideOfA();
+  A.marH.forEach((v,i)=>{const m=i-60, mm=mine?m:-m; n+=v; if(mm>by) c+=v; else if(mm===by) n-=v;}); return n?c/n:null;
+}
+function modelOver(line){ const A=lastAgg; if(!A) return null; let n=0,c=0; A.totH.forEach((v,i)=>{n+=v; if(i>line) c+=v; else if(i===line) n-=v;}); return n?c/n:null; }
+const sideOfA=()=>MK&&TM.ND.id===String(MK.homeId)?'home':'away';
+const teamOf=side=>side===sideOfA()?'ND':'UNC';
+function nearestHalf(arr,key){ if(!arr||!arr.length) return null; return arr.slice().sort((a,b)=>Math.abs(a.p-.5)-Math.abs(b.p-.5))[0]; }
+function renderCompare(){
+  const el=$('cmpBoxes'); if(!el) return;
+  const k=MK&&MK.kalshi&&MK.kalshi.found?MK.kalshi:null, p=MK&&MK.poly&&MK.poly.found?MK.poly:null;
+  const aSide=sideOfA(), bSide=aSide==='away'?'home':'away';
+  // rows every box shares: the book line plus each market's most balanced line
+  const spreadRows=[], totalRows=[];
+  const addS=(side,by)=>{ if(side&&isFinite(by)&&!spreadRows.some(r=>r.side===side&&r.by===by)) spreadRows.push({side,by}); };
+  const addT=line=>{ if(isFinite(line)&&!totalRows.some(r=>r.line===line)) totalRows.push({line}); };
+  { const be=bookEdge(); if(be) addS(be>0?aSide:bSide,Math.abs(be)); } addT(PRE&&PRE.total!=null?PRE.total:S.total);
+  for(const src of [p,k]){ const ms=nearestHalf(src&&src.spreads); if(ms) addS(ms.side,ms.by); const mt=nearestHalf(src&&src.totals); if(mt) addT(mt.line); }
+  spreadRows.sort((a,b)=>(a.side===aSide?a.by:-a.by)-(b.side===aSide?b.by:-b.by)); totalRows.sort((a,b)=>a.line-b.line);
+  const nameS=r=>`${TA(teamOf(r.side))} ${r.by>=0?`by ${r.by}+`:`within ${-r.by}`}`;
+  const find=(src,r)=>{ if(!src) return null; if(r.line!=null){const x=(src.totals||[]).find(x=>x.line===r.line); return x?x.p:null;}
+    const x=(src.spreads||[]).find(x=>x.side===r.side&&x.by===r.by); if(x) return x.p; const y=(src.spreads||[]).find(x=>x.side!==r.side&&x.by===-r.by); return y?1-y.p:null; };
+  const win=(src,slot)=>{ if(src==='model') return lastWP==null?null:slot==='ND'?lastWP:1-lastWP; if(!src) return null; const sd=slot==='ND'?aSide:bSide; return src[sd]?src[sd].p:null; };
+  const f=v=>v==null?'<span class="na">–</span>':(v*100).toFixed(1)+'%';
+  const gap=(v,ref)=>v==null||ref==null?'':`<span class="gap ${v-ref>0?'up':'down'}">${v-ref>0?'+':''}${((v-ref)*100).toFixed(1)}</span>`;
+  const box=(name,src,color,url,extra)=>{
+    const isM=src==='model', S2=isM?null:src;
+    const val=r=>isM?(r.line!=null?modelOver(r.line):modelCover(r.side,r.by)):find(S2,r);
+    const mk=r=>{ const vs=[p&&find(p,r),k&&find(k,r)].filter(v=>v!=null); return vs.length?vs.reduce((a,b)=>a+b,0)/vs.length:null; };
+    const wA=win(src,'ND'), wB=win(src,'UNC');
+    const mkw=[p&&p[aSide]&&p[aSide].p,k&&k[aSide]&&k[aSide].p].filter(v=>v!=null), mkwa=mkw.length?mkw.reduce((a,b)=>a+b,0)/mkw.length:null;
+    return `<section class="cbox${isM?'':' m'}" style="--c:${color}"><header><h3>${url?`<a href="${url}" target="_blank" rel="noopener">${name}</a>`:name}</h3><span class="small">${isM?'25,000 sims':src?'live price':'not listed'}</span></header>
+      ${!isM&&!src?`<p class="small">No ${name} market matched this game. Smaller games often aren't listed.</p>`:`
+      <div class="cwin"><div><span>${TA('ND')}</span><b>${f(wA)}</b>${isM?gap(wA,mkwa):''}</div><div><span>${TA('UNC')}</span><b>${f(wB)}</b></div></div>
+      <div class="cbar"><i style="width:${wA!=null?(wA*100).toFixed(1):50}%;background:${TM.ND.color}"></i><i style="flex:1;background:${TM.UNC.zone}"></i></div>
+      <h4>Point spread</h4>${spreadRows.map(r=>{const v=val(r); return `<div class="crow"><span>${nameS(r)}</span><b>${f(v)}</b>${isM?gap(v,mk(r)):''}</div>`;}).join('')||'<p class="small">No spread listed.</p>'}
+      <h4>Total points</h4>${totalRows.map(r=>{const v=val(r); return `<div class="crow"><span>Over ${r.line}</span><b>${f(v)}</b>${isM?gap(v,mk(r)):''}</div>`;}).join('')||'<p class="small">No total listed.</p>'}
+      ${extra||''}`}</section>`;
+  };
+  const A=lastAgg, med=h=>{if(!A)return'–'; let c=0;for(let i=0;i<h.length;i++){c+=h[i];if(c>=A.n/2)return i;}return 0;};
+  let tot=0; if(A) A.totH.forEach((c,i)=>tot+=c*i);
+  const modelExtra=A?`<h4>Projected finish</h4>
+    <div class="crow"><span>Median score</span><b>${TA('ND')} ${med(A.ndH)}, ${TA('UNC')} ${med(A.ucH)}</b></div>
+    <div class="crow"><span>Average margin</span><b>${TA('ND')} ${sgn(A.marSum/A.n)}</b></div>
+    <div class="crow"><span>Average total</span><b>${(tot/A.n).toFixed(1)}</b></div>
+    <div class="crow"><span>Overtime</span><b>${pct(A.ot/A.n)}</b></div>
+    <p class="small">Small numbers next to the model's figures are its gap from the market average, in percentage points.</p>`:'';
+  const mkExtra=src=>{ if(!src) return ''; const a=src[aSide]; const rows=[];
+    if(a&&a.bid!=null&&a.ask!=null) rows.push(`<div class="crow"><span>${TA('ND')} bid / ask</span><b>${(a.bid*100).toFixed(0)}¢ / ${(a.ask*100).toFixed(0)}¢</b></div>`);
+    if(a&&a.vol) rows.push(`<div class="crow"><span>Volume</span><b>${Math.round(a.vol).toLocaleString()}</b></div>`);
+    rows.push(`<div class="crow"><span>Lines listed</span><b>${(src.spreads||[]).length} spread, ${(src.totals||[]).length} total</b></div>`);
+    return `<h4>Market</h4>${rows.join('')}`; };
+  el.innerHTML=!MK?'<p class="small">Go live to load market prices.</p>':
+    box('Polymarket',p,'#5B8DEF',p&&p.url,mkExtra(p))+box('Kalshi',k,'#2FA36B',k&&k.url,mkExtra(k))+box('This model','model','var(--gold)',null,modelExtra);
+  $('cmpNote').textContent=MK?`Prices as of ${new Date(MK.at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'})}. A "–" means that market doesn't list that exact line.`:'';
+}
+
+
+// ===== Starting point: average three pregame reads into the ND edge and its uncertainty =====
+const ESD_BASE=5.5;
+function bookEdge(){ if(PRE&&PRE.book!=null) return TM.ND.id===PRE.homeId?PRE.book:-PRE.book; return S.edge; }
+async function applyPregame(set){
+  try{ const r=await fetch(`${LIVE.endpoint}?kind=pregame&event=${LIVE.event}`); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||r.status);
+    PRE=j;
+    if(set&&j.homeMargin!=null){ const aHome=TM.ND.id===j.homeId;
+      S.edge=+((aHome?1:-1)*j.homeMargin).toFixed(1);
+      // disagreement between the sources widens the strength uncertainty each sim draws from
+      S.esd=+Math.sqrt(ESD_BASE*ESD_BASE+j.sd*j.sd).toFixed(1);
+      if(j.total!=null) S.total=j.total;
+      edgeSetFromLine=true;
+      $('lineInfo').textContent=`Starting edge: ${TA(S.edge>=0?'ND':'UNC')} by ${Math.abs(S.edge).toFixed(1)}, averaged from ${j.sources.length} source${j.sources.length>1?'s':''}. O/U ${S.total}.`;
+    }
+  }catch(e){ PRE=null; }
+  renderPre();
+}
+function renderPre(){
+  const el=$('gPre'); if(!el) return;
+  if(!PRE||!PRE.sources||!PRE.sources.length){ el.innerHTML='<p class="small" style="margin:0">No pregame numbers from ESPN or the markets, so the edge comes from the betting line alone.</p>'; return; }
+  const aHome=TM.ND.id===PRE.homeId, fmtE=hm=>{const e=(aHome?1:-1)*hm; return Math.abs(e)<0.05?'Even':`${TA(e>0?'ND':'UNC')} by ${Math.abs(e).toFixed(1)}`;};
+  el.innerHTML=`<table class="pre"><tbody>${PRE.sources.map(x=>`<tr><td title="${(x.detail||'').replace(/"/g,'&quot;')}">${x.name}</td><td>${fmtE(x.homeMargin)}</td></tr>`).join('')}
+    <tr class="avg"><td>Average (used)</td><td>${fmtE(PRE.homeMargin)}</td></tr></tbody></table>
+    <p class="small" style="margin:6px 0 0">FPI and market win chances are turned into spreads assuming final margins scatter about 15.5 points around the spread. ${PRE.sources.length>1?`The sources disagree by ±${PRE.sd.toFixed(1)} points, so each sim draws team strength with ±${Math.sqrt(ESD_BASE*ESD_BASE+PRE.sd*PRE.sd).toFixed(1)} uncertainty instead of ±${ESD_BASE}.`:''}${PRE.book!=null?` The cover numbers above still use the sportsbook line, ${fmtE(PRE.book)}.`:''}</p>`;
 }
 
 // ===== Box score =====
