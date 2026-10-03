@@ -1,0 +1,12 @@
+{
+  "name": "cfb-live-sim",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Live college football board and Monte Carlo play simulator",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

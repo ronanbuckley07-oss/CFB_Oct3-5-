@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: cfb-live-sim
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.mjs
+    healthCheckPath: /healthz
+    autoDeploy: true
