@@ -2,8 +2,8 @@
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>College football live board</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏈</text></svg>">
+<title>CFB Live Sim: every game, live</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -21,6 +21,8 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 
 /* Masthead: the title is set like a stadium board, big and condensed */
 .mast{display:flex;justify-content:space-between;align-items:flex-end;gap:16px 24px;flex-wrap:wrap;padding-bottom:14px;border-bottom:3px solid var(--ink);margin-bottom:18px}
+.brand{display:inline-flex;align-items:center;gap:9px;text-decoration:none;margin-bottom:10px;font:800 21px/1 "Barlow Condensed",sans-serif;letter-spacing:.2px}
+.brand img{border-radius:8px;display:block}
 .mast h1{font-size:clamp(34px,6vw,58px);line-height:.9;margin:0;font-weight:800;letter-spacing:-.5px}
 .mast p{margin:8px 0 0;color:var(--muted);max-width:56ch}
 .ctl{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
@@ -62,7 +64,10 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .team .ball{width:8px;height:8px;border-radius:50%;background:var(--gold);justify-self:center}
 .team .sc{font:800 28px/1 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums;min-width:2ch;text-align:right}
 .card.post .team.lost{opacity:.55}
-.sit{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-top:1px solid var(--line);padding-top:8px}
+.sit{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border-top:1px solid var(--line);padding-top:8px;min-height:36px}
+.sit span{text-align:right}
+.strip.off{opacity:.45}
+.wp.off .tr{background:var(--line)}
 .sit b{font:800 19px "Barlow Condensed",sans-serif}
 .sit span{font-size:13px;color:var(--muted)}
 .strip{width:100%;height:auto;display:block;border-radius:5px}
@@ -70,7 +75,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .wp .tr{height:8px;border-radius:4px;overflow:hidden;display:flex;background:var(--paper)}
 .wp .tr i{display:block;height:100%}
 .wp b{font-weight:600}
-.last{font-size:13px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:0}
+.last{font-size:13px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:0;min-height:2.9em;line-height:1.45}
 .foot{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:auto;padding-top:2px}
 .open{font-weight:600;color:var(--ink)}
 .card:hover .open{color:var(--gold)}
@@ -85,6 +90,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 <body><div class="wrap">
 <header class="mast">
   <div>
+    <a class="brand" href="/" aria-label="CFB Live Sim home"><img src="/logo.svg" alt="" width="34" height="34"><span>CFB Live Sim</span></a>
     <h1>College football, live</h1>
     <p>Scores, down and distance, and ESPN's win probability for every game on the board, refreshed every 30 seconds. Open a game to run the simulator on it.</p>
   </div>
@@ -190,12 +196,12 @@ function teamRow(t,g,side){
 }
 // Field strip, oriented like a broadcast: away team defends the left end zone, home the right
 function strip(g){
-  const s=g.sit; if(!s||s.pos==null||!s.poss) return '';
-  const X=d=>12+d*1.76, dir=s.poss==='away'?1:-1, a=s.poss==='away'?s.pos:100-s.pos;
-  const ytg=100-s.pos, togo=s.dist?Math.min(s.dist,ytg):null, fd=togo!=null?a+dir*togo:null;
-  const ac=g.away.color||'#556', hc=g.home.color||'#556';
+  const s=g.sit, ac=g.away.color||'#556', hc=g.home.color||'#556', X=d=>12+d*1.76;
   let v=`<rect width="200" height="18" fill="var(--turf)"/><rect x="0" width="12" height="18" fill="${ac}"/><rect x="188" width="12" height="18" fill="${hc}"/>`;
   for(let d=10;d<100;d+=10) v+=`<line x1="${X(d)}" x2="${X(d)}" y1="0" y2="18" stroke="rgba(255,255,255,${d===50?.6:.25})" stroke-width=".6"/>`;
+  if(!s||s.pos==null||!s.poss) return `<svg class="strip off" viewBox="0 0 200 18" aria-hidden="true">${v}</svg>`;
+  const dir=s.poss==='away'?1:-1, a=s.poss==='away'?s.pos:100-s.pos;
+  const ytg=100-s.pos, togo=s.dist?Math.min(s.dist,ytg):null, fd=togo!=null?a+dir*togo:null;
   if(fd!=null){const x1=X(Math.min(a,fd)),x2=X(Math.max(a,fd)); v+=`<rect x="${x1}" y="2" width="${Math.max(.8,x2-x1)}" height="14" fill="#F5D547" opacity=".35"/>`;
     if(togo<ytg) v+=`<line x1="${X(fd)}" x2="${X(fd)}" y1="0" y2="18" stroke="#F5D547" stroke-width="1.6"/>`;}
   v+=`<line x1="${X(a)}" x2="${X(a)}" y1="0" y2="18" stroke="#3B82F6" stroke-width="1.6"/><ellipse cx="${X(a)}" cy="9" rx="2.6" ry="1.7" fill="#7A3E1D" stroke="#fff" stroke-width=".5"/>`;
@@ -203,15 +209,20 @@ function strip(g){
   return `<svg class="strip" viewBox="0 0 200 18" role="img" aria-label="${esc(off.short)} ball, ${esc(s.spot||'')}, ${togo??''} yards to the line to gain">${v}</svg>`;
 }
 function sitLine(g){
-  const s=g.sit; if(!s) return '';
-  const off=s.poss==='away'?g.away:s.poss==='home'?g.home:null;
-  if(!s.down) return `<div class="sit"><b>${off?esc(off.short)+' ball':'Between plays'}</b><span>${esc(s.spot||'')}</span></div>`;
-  const goal=s.pos!=null&&s.dist>=100-s.pos;
-  return `<div class="sit"><b>${ord(s.down)} &amp; ${goal?'Goal':s.dist}</b><span>${off?esc(off.abbr)+' ball at ':''}${esc(s.spot||'')}</span></div>`;
+  const s=g.sit||{}, off=s.poss==='away'?g.away:s.poss==='home'?g.home:null;
+  const q=['','1st','2nd','3rd','4th'][g.period]||'';
+  let big, small;
+  if(g.phase==='half'){ big='Halftime'; small='3rd quarter next'; }
+  else if(g.phase==='break'){ big=`End of ${q||'quarter'}`; small=off?`${esc(off.abbr)} ball${s.spot?' at '+esc(s.spot):''}`:''; }
+  else if(s.down){ const goal=s.pos!=null&&s.dist>=100-s.pos; big=`${ord(s.down)} &amp; ${goal?'Goal':s.dist}`; small=`${off?esc(off.abbr)+' ball':'Ball'}${s.spot?' at '+esc(s.spot):''}`; }
+  else { big=off?`${esc(off.abbr)} ball`:'Between plays'; small=s.spot?esc(s.spot):'Kickoff or try'; }
+  return `<div class="sit"><b>${big}</b><span>${small}</span></div>`;
 }
 function wpRow(g){
-  let p=g.wpHome; if(p==null) return '';
-  const ac=g.away.color||'#667', hc=g.home.color||'#334', lead=p>=.5?g.home:g.away, lp=Math.max(p,1-p);
+  const p=g.wpHome, ac=g.away.color||'#667', hc=g.home.color||'#334';
+  if(p==null) return `<div class="wp off"><span>${esc(g.away.abbr)}</span><span class="tr"></span><span>${esc(g.home.abbr)}</span></div>
+  <div class="foot" style="margin:0;padding:0"><span>ESPN win probability</span><b>Not posted yet</b></div>`;
+  const lead=p>=.5?g.home:g.away, lp=Math.max(p,1-p);
   return `<div class="wp"><span>${esc(g.away.abbr)}</span><span class="tr" title="ESPN win probability"><i style="width:${((1-p)*100).toFixed(1)}%;background:${ac}"></i><i style="flex:1;background:${hc}"></i></span><span>${esc(g.home.abbr)}</span></div>
   <div class="foot" style="margin:0;padding:0"><span>ESPN win probability</span><b>${esc(lead.abbr)} ${(lp*100).toFixed(0)}%</b></div>`;
 }
@@ -225,8 +236,7 @@ function card(g){
   return `<a class="card ${st}" data-id="${g.id}" href="/game?event=${g.id}" style="--ac:${esc(g.away.color||'#888')};--hc:${esc(g.home.color||'#888')}">
     <div class="top"><span class="when">${when}</span><span class="tags">${tags.join('')}</span></div>
     ${teamRow(g.away,g,'away')}${teamRow(g.home,g,'home')}
-    ${st==='in'?sitLine(g)+strip(g)+wpRow(g):''}
-    ${st==='in'&&s?.lastPlay?`<p class="last">${esc(s.lastPlay)}</p>`:''}
+    ${st==='in'?sitLine(g)+strip(g)+wpRow(g)+`<p class="last">${s?.lastPlay?esc(s.lastPlay):'Waiting for the next play.'}</p>`:''}
     <div class="foot"><span>${line||(g.neutral?'Neutral site':'')}</span><span class="open">${cta}</span></div>
   </a>`;
 }

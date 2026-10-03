@@ -2,7 +2,8 @@
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ND at North Carolina: live play simulator</title>
+<title>CFB Live Sim</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -204,12 +205,52 @@ header.top{align-items:center}
 .tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--gold)}
 .tabpanel{margin-top:0}
 .duo.manual{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+.tvtag{display:inline-block;vertical-align:middle;margin-left:10px;font:600 14px/1 Barlow,sans-serif;letter-spacing:0;padding:5px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);position:relative;top:-3px}
+.brandrow{display:flex;align-items:center;gap:14px}
+.brand{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--ink);font:800 19px/1 "Barlow Condensed",sans-serif}
+.brand img{border-radius:7px;display:block}
+.flowhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.flowhead h2{margin:0}
+.zoom{display:flex;gap:4px;flex-wrap:wrap}
+.zoom .mini{padding:5px 9px;font-size:13px}
+.wplegend{gap:6px 18px;margin:6px 0 8px;font-size:13.5px}
+.wplegend span{display:inline-flex;align-items:center;gap:6px}
+.wplegend b{color:var(--ink);font-variant-numeric:tabular-nums}
+.wplegend i{width:20px;margin:0;border-top-width:3px}
+.wpwrap{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.wpwrap.drag{cursor:grabbing}
+.wpwrap .wpchart{margin:0}
+.wptip{position:absolute;top:8px;pointer-events:none;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;box-shadow:0 6px 18px -8px rgba(0,0,0,.5);min-width:150px;font-variant-numeric:tabular-nums}
+.wptip b{display:block;margin-bottom:3px}
+.wptip div{display:flex;justify-content:space-between;gap:12px}
+.wptip i{display:inline-block;width:10px;height:3px;margin-right:6px;vertical-align:middle}
+.mkrow{display:grid;grid-template-columns:minmax(100px,140px) minmax(0,1fr) 52px;align-items:center;gap:8px;margin:5px 0;font-size:14px}
+.mkrow .tr{height:12px;background:var(--paper);border-radius:6px;overflow:hidden;border:1px solid var(--line)}
+.mkrow .tr i{display:block;height:100%;border-radius:6px}
+.mkrow .v{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.mkrow a{color:inherit}
+.mkpin{margin-top:6px;font-size:13px;color:var(--muted)}
+.mkpin summary{cursor:pointer}
+.mkpin input{width:100%;margin:4px 0}
+.boxline{max-width:560px}.boxteam{max-width:760px}
+.boxline td:first-child,.boxline th:first-child{text-align:left}
+.boxteam td:first-child{color:var(--muted)}
+.boxteam td.lead{font-weight:700}
+.boxteam .split{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:3px;background:var(--line)}
+.boxp h3{margin-top:14px}
+.boxp h4{font:700 14px Barlow,sans-serif;color:var(--muted);margin:12px 0 0}
+.boxp table td:first-child,.boxp table th:first-child{text-align:left;white-space:nowrap}
+.boxp details{margin-top:10px}.boxp summary{cursor:pointer;color:var(--muted);font-weight:600}
+.tblwrap{overflow-x:auto}
+.sched tr.done td{color:var(--muted)}
+.sched td.res{font-weight:700;white-space:nowrap}.sched td.res.w{color:var(--good)}.sched td.res.l{color:var(--bad)}
+.sched td .src{font-size:11px;color:var(--muted);margin-left:4px;font-weight:600}
 </style></head>
 <body><div class="wrap">
 <header class="top">
   <div class="titles">
-    <a class="back" href="/">All games</a>
-    <h1><span id="gameTitle">Loading game</span><small id="meta">Live Monte Carlo built on real play-by-play</small></h1>
+    <div class="brandrow"><a class="brand" href="/" aria-label="CFB Live Sim home"><img src="/logo.svg" alt="" width="30" height="30"><span>CFB Live Sim</span></a><a class="back" href="/">All games</a></div>
+    <h1><span id="gameTitle">Loading game</span><span class="tvtag" id="gameTv" hidden></span><small id="meta">Live Monte Carlo built on real play-by-play</small></h1>
   </div>
   <div class="board" aria-live="polite">
     <div class="t nd" id="boardA"><span><span data-tms="ND">Notre Dame</span><i id="pnd"></i></span><b id="snd">0</b></div>
@@ -288,17 +329,31 @@ header.top{align-items:center}
     <div class="small" id="gProj"></div>
     <div class="sec"><h3>Final margin (<span data-tm="ND">ND</span> minus <span data-tm="UNC">UNC</span>)</h3><div id="gMar"></div></div>
     <div class="sec"><h3>Next points scored</h3><div id="gNext"></div></div>
+    <div class="sec"><h3>Model vs. markets</h3><div id="gMkt"><p class="small" style="margin:0">Market prices load when you go live.</p></div></div>
     <div class="sec"><h3>Model vs. the betting line</h3><div id="gLine"></div></div>
   </section>
 </div>
 
-<nav class="tabs" role="tablist" aria-label="More analysis"><button type="button" role="tab" id="t-flow" aria-controls="tab-flow" aria-selected="false" tabindex="-1">Game flow</button><button type="button" role="tab" id="t-dists" aria-controls="tab-dists" aria-selected="false" tabindex="-1">Score distributions</button><button type="button" role="tab" id="t-check" aria-controls="tab-check" aria-selected="false" tabindex="-1">Model check</button><button type="button" role="tab" id="t-whatif" aria-controls="tab-whatif" aria-selected="false" tabindex="-1">What if</button><button type="button" role="tab" id="t-season" aria-controls="tab-season" aria-selected="false" tabindex="-1">Season</button><button type="button" role="tab" id="t-backtest" aria-controls="tab-backtest" aria-selected="false" tabindex="-1">Backtest</button><button type="button" role="tab" id="t-inputs" aria-controls="tab-inputs" aria-selected="false" tabindex="-1">Under the hood</button><button type="button" role="tab" id="t-manual" aria-controls="tab-manual" aria-selected="false" tabindex="-1">Manual entry</button></nav>
+<nav class="tabs" role="tablist" aria-label="More analysis"><button type="button" role="tab" id="t-box" aria-controls="tab-box" aria-selected="false" tabindex="-1">Box score</button><button type="button" role="tab" id="t-flow" aria-controls="tab-flow" aria-selected="false" tabindex="-1">Game flow</button><button type="button" role="tab" id="t-dists" aria-controls="tab-dists" aria-selected="false" tabindex="-1">Score distributions</button><button type="button" role="tab" id="t-check" aria-controls="tab-check" aria-selected="false" tabindex="-1">Model check</button><button type="button" role="tab" id="t-whatif" aria-controls="tab-whatif" aria-selected="false" tabindex="-1">What if</button><button type="button" role="tab" id="t-season" aria-controls="tab-season" aria-selected="false" tabindex="-1">Season</button><button type="button" role="tab" id="t-backtest" aria-controls="tab-backtest" aria-selected="false" tabindex="-1">Backtest</button><button type="button" role="tab" id="t-inputs" aria-controls="tab-inputs" aria-selected="false" tabindex="-1">Under the hood</button><button type="button" role="tab" id="t-manual" aria-controls="tab-manual" aria-selected="false" tabindex="-1">Manual entry</button></nav>
 <section class="panel flow tabpanel" id="tab-flow" role="tabpanel" aria-labelledby="t-flow" hidden>
-  <h2>Game flow</h2>
-  <div class="wplegend"><span><i></i>This model</span><span><i class="es"></i>ESPN win probability (live mode)</span></div>
-  <svg class="wpchart" id="wpchart" viewBox="0 0 720 220" role="img" aria-label="Win probability over game time"></svg>
+  <div class="flowhead"><h2>Game flow</h2>
+    <div class="zoom" role="group" aria-label="Chart zoom">
+      <button type="button" class="mini" data-z="out" aria-label="Zoom out">−</button><button type="button" class="mini" data-z="in" aria-label="Zoom in">+</button>
+      <button type="button" class="mini" data-z="1">Q1</button><button type="button" class="mini" data-z="2">Q2</button><button type="button" class="mini" data-z="3">Q3</button><button type="button" class="mini" data-z="4">Q4</button>
+      <button type="button" class="mini" data-z="now">Last 10 min</button><button type="button" class="mini" data-z="all">Full game</button>
+    </div>
+  </div>
+  <div class="wplegend" id="wpLegend"></div>
+  <div class="wpwrap" id="wpWrap"><svg class="wpchart" id="wpchart" viewBox="0 0 960 360" role="img" aria-label="Win probability over game time"></svg><div class="wptip" id="wpTip" hidden></div></div>
+  <p class="small" style="margin:4px 0 14px">Scroll or pinch to zoom, drag to pan, hover or tap for exact numbers. Dots mark scores.</p>
   <div class="loghead"><h3>Plays and win-probability swings</h3><span class="small" id="bigswing"></span></div>
   <ol class="plog" id="plog"></ol>
+</section>
+<section class="panel tabpanel" id="tab-box" role="tabpanel" aria-labelledby="t-box" hidden>
+  <div class="flowhead"><h2>Box score</h2><span class="small" id="boxNote"></span></div>
+  <div id="boxLine"></div>
+  <div id="boxTeam"></div>
+  <div class="teams" id="boxPlayers"></div>
 </section>
 <section class="panel dists tabpanel" id="tab-dists" role="tabpanel" aria-labelledby="t-dists" hidden>
   <h2>Outcome distributions</h2>
@@ -333,10 +388,10 @@ header.top{align-items:center}
 </section>
 <section class="panel extra tabpanel" id="tab-season" role="tabpanel" aria-labelledby="t-season" hidden>
   <h2>Season projection: <span data-tmn="ND">Notre Dame</span></h2>
-  <p class="small">Today's game uses the live win probability above. Every other game converts its line to a win chance, assuming final margins land around the spread with a 15.5-point standard deviation. Fill in lines as they come out. Games without a line are left out of the count.</p>
+  <p class="small">Games already played count as they finished. Today's game uses the live win probability above. Future games use a betting line if you type one in (converted with a 15.5-point standard deviation around the spread), otherwise ESPN's FPI matchup projection.</p>
   <div class="duo">
     <div>
-      <div class="row"><label style="width:auto">Wins before today</label><input type="number" id="seW" min="0" max="12" style="width:52px"></div>
+      <div class="row"><label style="width:auto">Wins before today</label><input type="number" id="seW" min="0" max="15" style="width:52px"><span class="small" id="seRec"></span></div>
       <table class="sched"><thead><tr><th>Opponent</th><th><span data-tm="ND">ND</span> favored by</th><th>Win</th></tr></thead><tbody id="seRows"></tbody></table>
     </div>
     <div><div class="big" id="seExp">–</div><div class="sub">expected regular-season wins</div><div id="seBars"></div><p class="small" id="seNote"></p></div>
@@ -760,9 +815,9 @@ function applyTeams(){
   $('gameTitle').textContent=GAME.title; document.title=`${GAME.title}: live play simulator`;
 }
 const DEF={poss:'ND',pos:25,down:1,dist:10,qtr:1,secs:900,nd:0,unc:0,half2Recv:'UNC',edge:21.5,total:46.5,toND:3,toUNC:3,esd:5.5,seed:''};
-let S=Object.assign({},DEF), hist=[], wpHist=[], plog=[], espnWP=[];
-try{const raw=localStorage.getItem('ndsim5');if(raw){const o=JSON.parse(raw);S=Object.assign(S,o.S||{});wpHist=o.wp||[];plog=o.log||[];espnWP=o.es||[];}}catch(e){}
-function save(){try{localStorage.setItem('ndsim5',JSON.stringify({S,wp:wpHist.slice(-300),log:plog.slice(-200),es:espnWP.slice(-400)}));}catch(e){}}
+let S=Object.assign({},DEF), hist=[], wpHist=[], plog=[], espnWP=[], mkHist=[], MK=null;
+try{const raw=localStorage.getItem('ndsim5');if(raw){const o=JSON.parse(raw);S=Object.assign(S,o.S||{});wpHist=o.wp||[];plog=o.log||[];espnWP=o.es||[];mkHist=o.mk||[];}}catch(e){}
+function save(){try{localStorage.setItem('ndsim5',JSON.stringify({S,wp:wpHist.slice(-300),log:plog.slice(-200),es:espnWP.slice(-400),mk:mkHist.slice(-600)}));}catch(e){}}
 const ord=n=>['','1st','2nd','3rd','4th'][n]||n+'th';
 const fmt=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
 function spotName(pos,poss){ // pos from poss own goal
@@ -963,7 +1018,7 @@ function render(A,final){
     const key=JSON.stringify([S.poss,S.pos,S.down,S.dist,S.qtr,S.secs,S.nd,S.unc,S.edge]);
     const last=wpHist[wpHist.length-1]; if(!last||last.k!==key) wpHist.push({k:key,wp,t:elapsed(S)}); else {last.wp=wp;last.t=elapsed(S);}
     for(const en of plog) if(en.after==null) en.after=wp;
-    drawChart(); renderLog(); renderCLT(); renderSeason(); save();
+    drawChart(); renderLog(); renderCLT(); renderSeason(); renderMarkets(); save();
   }
 }
 async function runFourth(S0,id){
@@ -982,24 +1037,95 @@ async function runFourth(S0,id){
   const r=callRow(S).row, n=r[0], go=r[1]+r[2];
   $('f4coach').textContent=`In ${n.toLocaleString()} real FBS plays from this spot, coaches went for it ${Math.round(go/n*100)}%, punted ${Math.round(r[3]/n*100)}% and kicked ${Math.round(r[4]/n*100)}% of the time.`;
 }
+// ===== Game flow chart: model, ESPN and market lines, zoomable =====
+const CW=960, CHH=360, CL=50, CR=74, CT=18, CB=44;
+let CH={x0:0,x1:3600}, chartHover=null;
+const chX=t=>CL+(CW-CL-CR)*(t-CH.x0)/(CH.x1-CH.x0), chY=p=>CT+(CHH-CT-CB)*(1-p);
+const tLabel=t=>{const q=Math.min(4,Math.floor(Math.min(t,3599.9)/900)+1); return `Q${q} ${fmt(q*900-t)}`;};
+function chartSeries(){
+  const sort=a=>a.filter(h=>h.t!=null&&h.v!=null).sort((x,y)=>x.t-y.t);
+  return [
+    {k:'model',name:'This model',color:'var(--gold)',w:3.2,pts:sort(wpHist.map(h=>({t:h.t,v:h.wp})))},
+    {k:'espn',name:'ESPN',color:'var(--muted)',w:2,dash:'7 5',pts:sort(espnWP.map(h=>({t:h.t,v:h.wp})))},
+    {k:'kalshi',name:'Kalshi',color:'#2FA36B',w:2.2,pts:sort(mkHist.map(h=>({t:h.t,v:h.k})))},
+    {k:'poly',name:'Polymarket',color:'#5B8DEF',w:2.2,pts:sort(mkHist.map(h=>({t:h.t,v:h.p})))},
+  ].filter(x=>x.pts.length);
+}
+const valAt=(pts,t)=>{let v=null; for(const p of pts){ if(p.t<=t) v=p.v; else break; } return v;};
+function stepPath(pts){
+  let d='', last=null;
+  for(const p of pts){ const x=chX(p.t).toFixed(1), y=chY(p.v).toFixed(1); d+= last==null?`M${x},${y}`:`H${x}V${y}`; last=p; }
+  return d;
+}
 function drawChart(){
-  const W=720,H=220,L=34,R=8,T=10,B=24, X=t=>L+(W-L-R)*Math.min(1,Math.max(0,t/3600)), Y=p=>T+(H-T-B)*(1-p);
-  let g=`<rect x="${L}" y="${T}" width="${W-L-R}" height="${H-T-B}" fill="var(--paper)"/>`;
-  for(let q=1;q<4;q++) g+=`<line x1="${X(q*900)}" y1="${T}" x2="${X(q*900)}" y2="${H-B}" stroke="var(--line)"/>`;
-  for(let q=0;q<4;q++) g+=`<text x="${X(q*900+450)}" y="${H-6}" font-size="12" fill="var(--muted)" text-anchor="middle">Q${q+1}</text>`;
-  for(const p of [0,.5,1]) g+=`<text x="${L-5}" y="${Y(p)+4}" font-size="11" fill="var(--muted)" text-anchor="end">${p*100}%</text>`;
-  g+=`<line x1="${L}" y1="${Y(.5)}" x2="${W-R}" y2="${Y(.5)}" stroke="var(--muted)" stroke-dasharray="4 4" opacity=".6"/>`;
-  const pts=wpHist.filter(h=>h.t!=null).sort((a,b)=>a.t-b.t);
-  if(pts.length){
-    const path=pts.map((h,i)=>`${i?'L':'M'}${X(h.t).toFixed(1)},${Y(h.wp).toFixed(1)}`).join('');
-    g+=`<path d="${path} L${X(pts[pts.length-1].t).toFixed(1)},${Y(.5)} L${X(pts[0].t).toFixed(1)},${Y(.5)} Z" fill="#0C2340" opacity=".10"/>`;
-    g+=`<path d="${path}" fill="none" stroke="var(--gold)" stroke-width="2.5"/>`;
-    const lp=pts[pts.length-1]; g+=`<circle cx="${X(lp.t)}" cy="${Y(lp.wp)}" r="4" fill="var(--gold)"/>`;
-  } else g+=`<text x="${(W)/2}" y="${H/2}" font-size="13" fill="var(--muted)" text-anchor="middle">The line builds as plays come in</text>`;
-  const es=espnWP.filter(h=>h.t!=null).sort((a,b)=>a.t-b.t);
-  if(es.length>1) g+=`<path d="${es.map((h,i)=>`${i?'L':'M'}${X(h.t).toFixed(1)},${Y(h.wp).toFixed(1)}`).join('')}" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-dasharray="5 4"/>`;
-  g+=`<text x="${W-R-6}" y="${T+14}" font-size="12" fill="var(--muted)" text-anchor="end">${TA('ND')} wins</text><text x="${W-R-6}" y="${H-B-6}" font-size="12" fill="var(--muted)" text-anchor="end">${TA('UNC')} wins</text>`;
+  const span=CH.x1-CH.x0, ser=chartSeries(), plotW=CW-CL-CR, plotH=CHH-CT-CB;
+  let g=`<defs><clipPath id="wpclip"><rect x="${CL}" y="${CT-6}" width="${plotW}" height="${plotH+12}"/></clipPath></defs>`;
+  g+=`<rect x="${CL}" y="${CT}" width="${plotW}" height="${plotH}" fill="var(--paper)" rx="4"/>`;
+  // shade each team's half lightly in its color
+  g+=`<rect x="${CL}" y="${CT}" width="${plotW}" height="${plotH/2}" fill="${TM.ND.color}" opacity=".07"/><rect x="${CL}" y="${CT+plotH/2}" width="${plotW}" height="${plotH/2}" fill="${TM.UNC.zone}" opacity=".07"/>`;
+  for(const p of [0,.25,.5,.75,1]){ const y=chY(p);
+    g+=`<line x1="${CL}" x2="${CW-CR}" y1="${y}" y2="${y}" stroke="${p===.5?'var(--muted)':'var(--line)'}" ${p===.5?'stroke-dasharray="5 5"':''} stroke-width="1"/>`;
+    g+=`<text x="${CL-8}" y="${y+5}" font-size="14" fill="var(--muted)" text-anchor="end">${p*100}%</text>`; }
+  // time axis: quarters when zoomed out, minutes when zoomed in
+  for(let q=0;q<=4;q++){ const t=q*900; if(t<CH.x0||t>CH.x1) continue; const x=chX(t);
+    g+=`<line x1="${x}" x2="${x}" y1="${CT}" y2="${CT+plotH}" stroke="var(--line)" stroke-width="${q%2?1:1.5}"/>`; }
+  if(span>1500){ for(let q=0;q<4;q++){ const a=Math.max(CH.x0,q*900), b=Math.min(CH.x1,q*900+900); if(b-a<120) continue;
+      g+=`<text x="${(chX(a)+chX(b))/2}" y="${CHH-16}" font-size="15" font-weight="600" fill="var(--muted)" text-anchor="middle">${q===1&&b-a>400?'2nd quarter':q===0&&b-a>400?'1st quarter':q===2&&b-a>400?'3rd quarter':q===3&&b-a>400?'4th quarter':'Q'+(q+1)}</text>`; } }
+  else { const step=span>700?180:span>300?60:30; for(let t=Math.ceil(CH.x0/step)*step;t<=CH.x1;t+=step){ const x=chX(t);
+      g+=`<line x1="${x}" x2="${x}" y1="${CT+plotH}" y2="${CT+plotH+5}" stroke="var(--muted)"/><text x="${x}" y="${CHH-16}" font-size="13" fill="var(--muted)" text-anchor="middle">${tLabel(Math.min(t,3599))}</text>`; } }
+  g+=`<text x="${CW-CR+8}" y="${CT+14}" font-size="14" font-weight="700" fill="var(--ink)">${TA('ND')}</text><text x="${CW-CR+8}" y="${CT+30}" font-size="12" fill="var(--muted)">wins</text>`;
+  g+=`<text x="${CW-CR+8}" y="${CT+plotH-18}" font-size="14" font-weight="700" fill="var(--ink)">${TA('UNC')}</text><text x="${CW-CR+8}" y="${CT+plotH-2}" font-size="12" fill="var(--muted)">wins</text>`;
+  let body='';
+  const model=ser.find(x=>x.k==='model');
+  if(!ser.length) body+=`<text x="${CL+plotW/2}" y="${CT+plotH/2-12}" font-size="16" fill="var(--muted)" text-anchor="middle">The lines build as plays come in</text>`;
+  for(const x of ser.filter(x=>x.k!=='model')) body+=`<path d="${stepPath(x.pts)}" fill="none" stroke="${x.color}" stroke-width="${x.w}" ${x.dash?`stroke-dasharray="${x.dash}"`:''} stroke-linejoin="round" opacity=".9"/>`;
+  if(model){ body+=`<path d="${stepPath(model.pts)}" fill="none" stroke="var(--gold)" stroke-width="${model.w}" stroke-linejoin="round"/>`;
+    // scoring plays from the score in each saved state
+    let prev=null; for(const h of wpHist.slice().sort((a,b)=>a.t-b.t)){ let k; try{k=JSON.parse(h.k);}catch(e){continue;} const sc=[k[6],k[7]];
+      if(prev&&(sc[0]!==prev[0]||sc[1]!==prev[1])&&h.t>=CH.x0&&h.t<=CH.x1){ const who=sc[0]-prev[0]>sc[1]-prev[1]?'ND':'UNC', pts=Math.max(sc[0]-prev[0],sc[1]-prev[1]);
+        const x=chX(h.t), y=chY(h.wp); body+=`<circle cx="${x}" cy="${y}" r="6.5" fill="${who==='ND'?TM.ND.color:TM.UNC.zone}" stroke="var(--ink)" stroke-width="2"/>`;
+        if(span<2400) body+=`<text x="${x}" y="${y+(h.wp>.5?22:-12)}" font-size="12" font-weight="700" fill="var(--ink)" text-anchor="middle">${TA(who)} +${pts}</text>`; }
+      prev=sc; }
+    const lp=model.pts[model.pts.length-1]; if(lp.t>=CH.x0&&lp.t<=CH.x1) body+=`<circle cx="${chX(lp.t)}" cy="${chY(lp.v)}" r="5" fill="var(--gold)" stroke="var(--card)" stroke-width="2"/>`; }
+  if(chartHover!=null&&chartHover>=CH.x0&&chartHover<=CH.x1){ const x=chX(chartHover); body+=`<line x1="${x}" x2="${x}" y1="${CT}" y2="${CT+plotH}" stroke="var(--ink)" stroke-width="1" opacity=".5"/>`;
+    for(const s2 of ser){ const v=valAt(s2.pts,chartHover); if(v!=null) body+=`<circle cx="${x}" cy="${chY(v)}" r="4" fill="${s2.color}" stroke="var(--card)" stroke-width="1.5"/>`; } }
+  g+=`<g clip-path="url(#wpclip)">${body}</g>`;
   $('wpchart').innerHTML=g;
+  $('wpLegend').innerHTML=ser.map(x=>{const v=x.pts[x.pts.length-1].v; return `<span><i style="border-top:3px ${x.dash?'dashed':'solid'} ${x.color}"></i>${x.name} <b>${TA('ND')} ${(v*100).toFixed(x.k==='model'?1:0)}%</b></span>`;}).join('')||'<span>This model, ESPN, Kalshi and Polymarket lines appear once live mode is on.</span>';
+  // zoom buttons reflect the current view
+  document.querySelectorAll('[data-z]').forEach(b=>{const z=b.dataset.z; b.classList.toggle('on', z==='all'?span>=3599:(+z&&CH.x0===(+z-1)*900&&CH.x1===+z*900));});
+}
+function setView(a,b){ let span=Math.max(120,Math.min(3600,b-a)); a=Math.max(0,Math.min(3600-span,a)); CH={x0:a,x1:a+span}; drawChart(); updateTip(); }
+function zoomAt(t,f){ const a=t-(t-CH.x0)*f, b=t+(CH.x1-t)*f; setView(a,b); }
+function nowT(){ const m=wpHist.filter(h=>h.t!=null); return m.length?Math.max(...m.map(h=>h.t)):elapsed(S); }
+document.querySelectorAll('[data-z]').forEach(b=>b.addEventListener('click',()=>{const z=b.dataset.z, mid=(CH.x0+CH.x1)/2;
+  if(z==='in') zoomAt(mid,0.6); else if(z==='out') zoomAt(mid,1/0.6); else if(z==='all') setView(0,3600); else if(z==='now'){const t=nowT(); setView(t-540,t+60);} else setView((+z-1)*900,+z*900);}));
+{
+  const wrap=$('wpWrap'), svg=$('wpchart'), ptrs=new Map(); let drag=null, pinch=null;
+  const toT=clientX=>{const r=svg.getBoundingClientRect(); const vx=(clientX-r.left)/r.width*CW; return CH.x0+(vx-CL)/(CW-CL-CR)*(CH.x1-CH.x0);};
+  wrap.addEventListener('wheel',e=>{e.preventDefault(); zoomAt(toT(e.clientX),e.deltaY>0?1.2:1/1.2);},{passive:false});
+  wrap.addEventListener('pointerdown',e=>{ptrs.set(e.pointerId,e.clientX); wrap.setPointerCapture(e.pointerId);
+    if(ptrs.size===1) drag={x:e.clientX,a:CH.x0,b:CH.x1,moved:false};
+    if(ptrs.size===2){const xs=[...ptrs.values()]; pinch={d:Math.abs(xs[0]-xs[1])||1,a:CH.x0,b:CH.x1,mid:toT((xs[0]+xs[1])/2)}; drag=null;}});
+  wrap.addEventListener('pointermove',e=>{
+    if(ptrs.has(e.pointerId)) ptrs.set(e.pointerId,e.clientX);
+    if(pinch&&ptrs.size===2){const xs=[...ptrs.values()], f=pinch.d/(Math.abs(xs[0]-xs[1])||1); const a=pinch.mid-(pinch.mid-pinch.a)*f, b=pinch.mid+(pinch.b-pinch.mid)*f; setView(a,b); return;}
+    if(drag){const r=svg.getBoundingClientRect(), dt=(e.clientX-drag.x)/r.width*CW/(CW-CL-CR)*(drag.b-drag.a); if(Math.abs(e.clientX-drag.x)>4){drag.moved=true; wrap.classList.add('drag');} if(drag.moved){setView(drag.a-dt,drag.b-dt); return;}}
+    chartHover=Math.max(CH.x0,Math.min(CH.x1,toT(e.clientX))); drawChart(); updateTip(e.clientX);});
+  const end=e=>{ptrs.delete(e.pointerId); if(ptrs.size<2) pinch=null; if(!ptrs.size){drag=null; wrap.classList.remove('drag');}};
+  wrap.addEventListener('pointerup',end); wrap.addEventListener('pointercancel',end);
+  wrap.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse'){chartHover=null; drawChart(); updateTip();}});
+  wrap.addEventListener('dblclick',()=>setView(0,3600));
+}
+let tipX=null;
+function updateTip(clientX){
+  const tip=$('wpTip'); if(clientX!=null) tipX=clientX;
+  if(chartHover==null){tip.hidden=true; return;}
+  const ser=chartSeries(), rows=ser.map(x=>[x,valAt(x.pts,chartHover)]).filter(r=>r[1]!=null);
+  if(!rows.length){tip.hidden=true; return;}
+  tip.innerHTML=`<b>${tLabel(chartHover)}</b>`+rows.map(([x,v])=>`<div><span><i style="background:${x.color}"></i>${x.name}</span><span>${TA('ND')} ${(v*100).toFixed(1)}%</span></div>`).join('');
+  tip.hidden=false; const wr=$('wpWrap').getBoundingClientRect(), px=(tipX??wr.left)-wr.left, w=tip.offsetWidth;
+  tip.style.left=Math.max(4,Math.min(wr.width-w-4, px>wr.width/2?px-w-14:px+14))+'px';
 }
 function addLog(text,ev,pre){const s=pre||S; plog.push({when:`Q${s.qtr} ${fmt(s.secs)}`,text,before:lastWP,after:null,ev:ev||null});}
 function renderLog(){
@@ -1007,7 +1133,7 @@ function renderLog(){
   let big=null; for(const e of done){const d=Math.abs(e.after-e.before); if(!big||d>Math.abs(big.after-big.before)) big=e;}
   $('bigswing').textContent= big&&Math.abs(big.after-big.before)>=0.005 ? `Biggest swing: ${big.text} (${big.after>big.before?'+':''}${((big.after-big.before)*100).toFixed(1)} pts)` : '';
   $('plog').innerHTML=plog.slice().reverse().slice(0,40).map(e=>{const d=(e.before!=null&&e.after!=null)?e.after-e.before:null;
-    return `<li class="${e===big?'big':''}"><span class="when">${e.when}</span><span class="txt">${e.text}${e.ev?`<small>${evText(e.ev)}</small>`:''}</span><span class="dlt ${d==null?'':d>0.0005?'up':d<-0.0005?'down':''}">${d==null?'…':(d>0?'+':'')+(d*100).toFixed(1)}</span></li>`;}).join('')||'<li class="empty">Plays appear here as they happen, with how much each moved ND\u2019s win probability.</li>';
+    return `<li class="${e===big?'big':''}"><span class="when">${e.when}</span><span class="txt">${e.text}${e.ev?`<small>${evText(e.ev)}</small>`:''}</span><span class="dlt ${d==null?'':d>0.0005?'up':d<-0.0005?'down':''}">${d==null?'…':(d>0?'+':'')+(d*100).toFixed(1)}</span></li>`;}).join('')||`<li class="empty">Plays appear here as they happen, with how much each moved ${TA('ND')}\u2019s win probability.</li>`;
 }
 const YBL=['1–5','6–10','11–20','21–35','36–50','51–65','66–80','81–99'];
 const DBL=['1','2','3–4','5–7','8–10','11+'];
@@ -1033,7 +1159,7 @@ function flipTo(team,pos){S.poss=team;S.pos=Math.max(1,Math.min(99,pos));S.down=
 const other=t=>t==='ND'?'UNC':'ND';
 function logPlay(a){
   readInputs();
-  if(a==='reset'){ if(!confirm('Reset to 0-0 at kickoff? This clears the play log and win probability history.'))return; const ke=S.edge,kt=S.total; S=Object.assign({},DEF,{edge:ke,total:kt}); hist=[]; wpHist=[]; plog=[]; espnWP=[]; lastWP=null; pred=null; syncInputs(); runSims(); toast('Reset to kickoff'); return; }
+  if(a==='reset'){ if(!confirm('Reset to 0-0 at kickoff? This clears the play log and win probability history.'))return; const ke=S.edge,kt=S.total; S=Object.assign({},DEF,{edge:ke,total:kt}); hist=[]; wpHist=[]; plog=[]; espnWP=[]; mkHist=[]; lastWP=null; pred=null; syncInputs(); runSims(); toast('Reset to kickoff'); return; }
   if(a==='undo'){ if(!hist.length){toast('Nothing to undo');return;} S=hist.pop(); wpHist.pop(); plog.pop(); syncInputs(); runSims(); toast('Undid last play'); return; }
   const pre=Object.assign({},S); hist.push(pre);
   const y=parseInt($('ly').value)||0, off=S.poss;
@@ -1147,7 +1273,7 @@ function applyPoll(ev){
     $('lastPlay').textContent=o.lastPlay?`Last play: ${o.lastPlay}`:'';
     $('lineInfo').textContent=o.line?`Line: ${o.line} (sets ${TA('ND')} edge)`:'';
     if(o.state==='pre'){applyLive(o); syncInputs(); setLive(`Connected. Game hasn't started (${o.detail||'scheduled'}).`,'ok'); if(key!==lastKey){lastKey=key;runSims();} return;}
-    if(o.state==='post'){applyLive(o); syncInputs(); setLive(`Final: ${TA('ND')} ${o.nd}, ${TA('UNC')} ${o.unc}.`,'ok'); stopLive(); runSims(); return;}
+    if(o.state==='post'){applyLive(o); syncInputs(); setLive(`Final: ${TA('ND')} ${o.nd}, ${TA('UNC')} ${o.unc}.`,'ok'); stopLive(); runSims(); pullEspnWP(); pullBox(); return;}
     if(!o.hasSit) setLive(`Live score and clock connected (${o.detail}). ESPN isn't sending down and distance right now, so check those by hand.`,'warn');
     else setLive(`Live: ${o.detail}${o.downText?' · '+o.downText:''}. Updated ${new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'})}${liveDelay?`, held ${liveDelay}s to match your stream`:''}.`,'ok');
     const newPlay = o.lastPlay && o.lastPlay!==lastPlayText;
@@ -1156,7 +1282,7 @@ function applyPoll(ev){
       if(newPlay){ if(lastPlayText!==null){ const ev=(pred&&pred.key===coreKey(pre))?evaluate(observeLive(pre,S,o.lastPlay)):null; addLog(o.lastPlay,ev,pre);} lastPlayText=o.lastPlay; }
       syncInputs(); runSims();
     }
-    pullEspnWP(); pollN++; // polls are 30s apart now, so ESPN's line refreshes on every one
+    pullEspnWP(); pullMarkets(); pullBox(); pollN++; // polls are 30s apart, so ESPN, market prices and the box score refresh on every one
   }
 }
 function startLive(){liveOn=true;$('liveBtn').textContent='Pause live';pollLive();liveTimer=setInterval(pollLive,LIVE.every);}
@@ -1193,10 +1319,10 @@ async function loadGame(g){
   setData(DATA); if(workers) workers.forEach(w=>w.terminate()); workers=null; workersTried=false; // workers rebuild with the new rosters
   const aHome=g.homeId===g.A.id, home=aHome?g.A:g.B, away=aHome?g.B:g.A;
   GAME={title:`${away.short} at ${home.short}`,homeId:g.homeId,today:`${aHome?'vs.':'at'} ${g.B.short}`,
-    upcoming:ua&&ua.upcoming?ua.upcoming.filter(x=>x.id!==g.event).map(x=>[`${x.neutral?'vs.':x.away?'at':''} ${x.opp}`.trim(),new Date(x.date).toLocaleDateString([], {month:'numeric',day:'numeric'})]):null};
+    upcoming:schedFrom(ua,g.event).upcoming||null, played:schedFrom(ua,g.event).played||[]};
   LIVE.event=g.event; if(g.date) LIVE.date=g.date; LIVE.teams={[g.A.id]:'ND',[g.B.id]:'UNC'};
   const keep={esd:S.esd,seed:S.seed}; S=Object.assign({},DEF,keep,{edge:0,total:52});
-  hist=[]; wpHist=[]; plog=[]; espnWP=[]; lastWP=null; pred=null; lastKey=''; lastPlayText=null; edgeSetFromLine=false;
+  hist=[]; wpHist=[]; plog=[]; espnWP=[]; mkHist=[]; MK=null; lastWP=null; pred=null; lastKey=''; lastPlayText=null; edgeSetFromLine=false;
   try{ const r=await fetch(`${LIVE.endpoint}?event=${LIVE.event}&date=${LIVE.date}`,{cache:'no-store'}); if(r.ok){ const o=parseEspn(await r.json());
       if(o.edge!=null){S.edge=o.edge; edgeSetFromLine=true;} if(o.total) S.total=o.total; $('lineInfo').textContent=o.line?`Line: ${o.line} (sets ${TA('ND')} edge)`:''; } }catch(e){}
   if(!edgeSetFromLine||S.total===52||true){ try{ const r=await fetch(`${LIVE.endpoint}?kind=summary&event=${LIVE.event}`); if(r.ok){ const s=await r.json(), od=s.odds||{};
@@ -1207,6 +1333,7 @@ async function loadGame(g){
   const when=g.kickoff?new Date(g.kickoff).toLocaleString([], {weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
   setLive(`Loaded ${GAME.title}${when?`, ${when}`:''}. ${g.state==='in'?'The game is on, tap Go live.':g.state==='post'?'This game is final.':'Tap Go live at kickoff.'}${edgeSetFromLine?'':' No betting line yet, so set the edge by hand.'}`,'ok');
   try{history.replaceState(null,'',`/game?event=${g.event}`);}catch(e){}
+  fetch(`${LIVE.endpoint}?kind=card&event=${g.event}${g.date?`&date=${g.date}`:''}`).then(r=>r.ok?r.json():null).then(c=>setTv(c&&c.tv)).catch(()=>setTv(null));
   if(g.alternatives&&g.alternatives.length) toast(`Picked ${g.A.name}. Also matched: ${g.alternatives.join(', ')}`);
 }
 
@@ -1233,30 +1360,51 @@ $('wiRun').addEventListener('click',async()=>{
 
 // ===== Season projection: exact win distribution from per-game win chances =====
 const SCHED_ND=[['Stanford','10/10'],['at BYU','10/17'],['Navy (Foxborough)','10/31'],['Miami','11/7'],['Boston College','11/14'],['SMU','11/21'],['at Syracuse','11/28']];
-let SE={w:'',lines:{}}, SCHED=[];
+let SE={w:'',lines:{}}, SCHED=[], PLAYED=[];
 const SIG=15.5;
+const mdy=d=>new Date(d).toLocaleDateString([], {month:'numeric',day:'numeric'});
+// Schedule from the team endpoint: games played (with results) and games left (with ESPN's FPI chance)
+function schedFrom(ua,event){
+  if(!ua) return {};
+  const lab=x=>`${x.neutral?'vs.':x.away?'at':''} ${x.opp}`.trim();
+  return {played:(ua.played||[]).filter(x=>x.id!==event).map(x=>({id:x.id,label:lab(x),date:mdy(x.date),won:x.won,pf:x.pf,pa:x.pa})),
+    upcoming:(ua.upcoming||[]).filter(x=>x.id!==event).map(x=>({id:x.id,label:lab(x),date:mdy(x.date),fpi:x.fpi??null,line:x.line||null}))};
+}
+async function refreshSchedule(){
+  try{const r=await fetch(`${LIVE.endpoint}?kind=team&id=${TM.ND.id}`); if(!r.ok) return; const ua=await r.json(); const sc=schedFrom(ua,LIVE.event);
+    if(sc.upcoming){GAME.upcoming=sc.upcoming; GAME.played=sc.played; seasonRows(); renderSeason();}}catch(e){}
+}
 function seasonRows(){
   const sk='ndsim-season'+(TM.ND.id==='87'?'':'-'+TM.ND.id); SE={w:'',lines:{}}; try{SE=Object.assign(SE,JSON.parse(localStorage.getItem(sk)||'{}'));}catch(e){} SE._k=sk;
-  SCHED=GAME.upcoming||(TM.ND.id==='87'?SCHED_ND:[]);
-  $('seRows').innerHTML=`<tr><td>${GAME.today} (today)</td><td class="small">live</td><td id="seToday">–</td></tr>`+
-    SCHED.map(([o,dt],i)=>`<tr><td>${o} <span class="small">${dt}</span></td><td><input type="number" step="0.5" data-se="${i}" placeholder="line"></td><td id="seP${i}">–</td></tr>`).join('');
+  SCHED=(GAME.upcoming||(TM.ND.id==='87'?SCHED_ND:[])).map(x=>Array.isArray(x)?{label:x[0],date:x[1],fpi:null}:x);
+  PLAYED=GAME.played||[];
+  const done=PLAYED.map(x=>`<tr class="done"><td>${x.label} <span class="small">${x.date}</span></td><td class="small">final</td><td class="res ${x.won?'w':'l'}">${x.won?'W':'L'} ${x.pf??''}–${x.pa??''}</td></tr>`).join('');
+  $('seRows').innerHTML=done+`<tr><td><b>${GAME.today} (today)</b></td><td class="small">live</td><td id="seToday">–</td></tr>`+
+    SCHED.map((x,i)=>`<tr><td>${x.label} <span class="small">${x.date}</span></td><td><input type="number" step="0.5" data-se="${i}" placeholder="${x.fpi!=null?'FPI':'line'}" title="Points ${TA('ND')} is favored by. Leave blank to use ESPN's FPI."></td><td id="seP${i}">–</td></tr>`).join('');
   document.querySelectorAll('[data-se]').forEach(el=>{el.value=SE.lines[el.dataset.se]??''; el.addEventListener('input',()=>{SE.lines[el.dataset.se]=el.value; renderSeason();});});
-  $('seW').value=SE.w;
+  const w=PLAYED.filter(x=>x.won).length;
+  $('seW').value=SE.w!==''&&SE.w!=null?SE.w:(PLAYED.length?w:'');
+  $('seRec').textContent=PLAYED.length?(SE.w!==''&&SE.w!=null&&+SE.w!==w?`record says ${w}–${PLAYED.length-w}`:`from the ${w}–${PLAYED.length-w} record`):'';
 }
 $('seW').addEventListener('input',()=>{SE.w=$('seW').value; renderSeason();});
 seasonRows();
 function renderSeason(){
   try{localStorage.setItem(SE._k||'ndsim-season',JSON.stringify(SE));}catch(e){}
-  const w0=parseInt(SE.w)||0, ps=[];
+  const auto=PLAYED.filter(x=>x.won).length, w0=SE.w!==''&&SE.w!=null?(parseInt(SE.w)||0):auto, ps=[];
   const today=lastWP!=null?lastWP:null; $('seToday').textContent=today==null?'–':pct(today); if(today!=null) ps.push(today);
-  let missing=0; SCHED.forEach((_,i)=>{const v=SE.lines[i]; if(v===''||v==null||isNaN(+v)){$('seP'+i).textContent='–';missing++;return;} const p=Phi(+v/SIG); $('seP'+i).textContent=pct(p); ps.push(p);});
+  let missing=0, fromFpi=0;
+  SCHED.forEach((x,i)=>{const v=SE.lines[i], el=$('seP'+i); let p=null, src='';
+    if(v!==''&&v!=null&&!isNaN(+v)){p=Phi(+v/SIG); src='line';} else if(x.fpi!=null){p=x.fpi; src='FPI'; fromFpi++;}
+    if(p==null){el.textContent='–'; missing++; return;}
+    el.innerHTML=`${pct(p)}${src==='FPI'?'<span class="src">FPI</span>':''}`; ps.push(p);});
   let dist=[1]; for(const p of ps){const nx=new Array(dist.length+1).fill(0); dist.forEach((q,k)=>{nx[k]+=q*(1-p);nx[k+1]+=q*p;}); dist=nx;}
-  const exp=w0+ps.reduce((a,b)=>a+b,0); $('seExp').textContent=ps.length?exp.toFixed(1):'–';
-  const rows=[]; for(let k=dist.length-1;k>=0;k--) if(dist[k]>0.0005) rows.push([`${w0+k} wins`,dist[k],k===dist.length-1?'good':'']);
+  const exp=w0+ps.reduce((a,b)=>a+b,0); $('seExp').textContent=(ps.length||w0)?exp.toFixed(1):'–';
+  const rows=[]; for(let k=dist.length-1;k>=0;k--) if(dist[k]>0.0005) rows.push([`${w0+k} win${w0+k===1?'':'s'}`,dist[k],'']);
+  let mode=0; dist.forEach((q,k)=>{if(q>dist[mode]) mode=k;}); if(rows.length) rows.find(r=>r[0].startsWith(`${w0+mode} `))[2]='good';
   bars('seBars',rows);
-  const atLeast=n=>dist.reduce((a,q,k)=>a+(w0+k>=n?q:0),0), top=w0+dist.length-1;
-  $('seNote').textContent=!ps.length?'Run a sim or enter lines to fill this in.':
-    `${missing?`${missing} game${missing>1?'s':''} still need${missing>1?'':'s'} a line, so the top of this range is ${top} wins, not the full schedule. `:''}Chance of ${top-1}+ wins: ${pct(atLeast(top-1))}. Playoff odds would need a model of the committee, which this doesn't try to be.`;
+  const atLeast=n=>dist.reduce((a,q,k)=>a+(w0+k>=n?q:0),0), top=w0+dist.length-1, total=PLAYED.length+1+SCHED.length;
+  $('seNote').textContent=!ps.length?'Go live or enter lines to fill this in.':
+    `Most likely finish: ${w0+mode}–${total-(w0+mode)-missing}${missing?` with ${missing} game${missing>1?'s':''} unpriced`:''} (${pct(dist[mode])}). Chance of ${Math.max(w0,top-1)}+ wins: ${pct(atLeast(Math.max(w0,top-1)))}. ${fromFpi?`${fromFpi} game${fromFpi>1?'s use':' uses'} ESPN's FPI until you enter a line. `:''}${missing?`${missing} game${missing>1?'s have':' has'} neither a line nor an FPI number, so ${missing>1?'they are':'it is'} left out. `:''}Playoff odds would need a model of the committee, which this doesn't try to be.`;
 }
 renderSeason();
 
@@ -1387,6 +1535,7 @@ function gateTeam(t,c){
   const img=t.logo?`<picture>${t.logoDark?`<source media="(prefers-color-scheme: dark)" srcset="${escH(t.logoDark)}">`:''}<img src="${escH(t.logo)}" alt=""></picture>`:'';
   return `<div class="gm-team">${img}<span class="nm">${t.rank?`<i>${t.rank}</i>`:''}${escH(t.short)}</span><span class="rec">${escH(t.record||'')}</span>${c.state!=='pre'&&t.score!=null?`<span class="sc">${t.score}</span>`:''}</div>`;
 }
+function setTv(tv){const el=$('gameTv'); el.textContent=tv||''; el.hidden=!tv; el.title=tv?`On ${tv}`:'';}
 function renderGate(c){
   const kick=new Date(c.date).toLocaleString([],{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
   $('gateMatch').innerHTML=`${gateTeam(c.away,c)}<div class="gm-mid${c.state==='in'?' live':''}"><b>${c.state==='pre'?escH(kick):escH(c.detail||'')}</b>${c.neutral?'vs.':'at'}</div>${gateTeam(c.home,c)}`;
@@ -1399,7 +1548,7 @@ function renderGate(c){
   else st=`<b>Final</b>Going live loads the final state, so the play-by-play panels show how it ended.`;
   $('gateStatus').innerHTML=st;
   document.title=`${c.away.short} ${c.neutral?'vs.':'at'} ${c.home.short}: live simulator`;
-  $('gameTitle').textContent=`${c.away.short} ${c.neutral?'vs.':'at'} ${c.home.short}`;
+  $('gameTitle').textContent=`${c.away.short} ${c.neutral?'vs.':'at'} ${c.home.short}`; setTv(c.tv);
   if(!sidePick){ const saved=SAVED_GAME&&SAVED_GAME.LIVE&&SAVED_GAME.LIVE.event===EVENT&&SAVED_GAME.TM?SAVED_GAME.TM.ND.id:null;
     sidePick=saved||([c.away,c.home].find(t=>t.id==='87')||c.away).id; }
   $('sideSeg').innerHTML=[c.away,c.home].map(t=>`<button type="button" data-v="${t.id}" class="${t.id===sidePick?'on':''}">${escH(t.short)}</button>`).join('');
@@ -1422,8 +1571,80 @@ async function goLive(){
   SAVED_GAME=null; clearInterval(gateTimer);
   document.body.classList.remove('gated'); $('gate').hidden=true; $('app').hidden=false;
   if(lastProj!==undefined) drawField(lastProj);
-  startLive();
+  startLive(); refreshSchedule(); pullMarkets(); pullBox();
 }
+
+// ===== Prediction markets: Kalshi and Polymarket next to the model =====
+const pinKey=()=>'ndsim-pin-'+LIVE.event;
+function getPins(){try{return JSON.parse(localStorage.getItem(pinKey())||'{}');}catch(e){return {};}}
+async function pullMarkets(){
+  try{ const pin=getPins(); const q=`${pin.k?`&kalshi=${encodeURIComponent(pin.k)}`:''}${pin.p?`&poly=${encodeURIComponent(pin.p)}`:''}`;
+    const r=await fetch(`${LIVE.endpoint}?kind=markets&event=${LIVE.event}${q}`,{cache:'no-store'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||r.status);
+    MK=j; const side=x=>x&&x.found&&x.away?(TM.ND.id===String(j.awayId)?x.away.p:x.home.p):null;
+    const k=side(j.kalshi), p=side(j.poly), t=elapsed(S), last=mkHist[mkHist.length-1];
+    if((k!=null||p!=null)&&!(last&&last.t===t&&last.k===k&&last.p===p)) mkHist.push({t,k,p});
+  }catch(e){ MK={error:String(e.message||e)}; }
+  renderMarkets(); drawChart(); save();
+}
+function renderMarkets(){
+  const el=$('gMkt'); if(!el) return;
+  if(!MK){ el.innerHTML='<p class="small" style="margin:0">Market prices load when you go live.</p>'; return; }
+  const side=x=>x&&x.found&&x.away?(TM.ND.id===String(MK.awayId)?x.away:x.home):null;
+  const es=espnWP.length?espnWP.slice().sort((a,b)=>a.t-b.t).pop().wp:null;
+  const rows=[['This model',lastWP,'var(--gold)'],['ESPN',es,'var(--muted)']];
+  const k=side(MK.kalshi), p=side(MK.poly);
+  rows.push([MK.kalshi&&MK.kalshi.url&&k?`<a href="${MK.kalshi.url}" target="_blank" rel="noopener">Kalshi</a>`:'Kalshi',k?k.p:null,'#2FA36B',k]);
+  rows.push([MK.poly&&MK.poly.url&&p?`<a href="${MK.poly.url}" target="_blank" rel="noopener">Polymarket</a>`:'Polymarket',p?p.p:null,'#5B8DEF',p]);
+  let h=rows.map(([n,v,c,m])=>`<div class="mkrow"><span>${n}</span><span class="tr">${v!=null?`<i style="width:${(v*100).toFixed(1)}%;background:${c}"></i>`:''}</span><span class="v" title="${m&&m.bid!=null&&m.ask!=null?`bid ${(m.bid*100).toFixed(0)}¢, ask ${(m.ask*100).toFixed(0)}¢`:''}">${v!=null?(v*100).toFixed(1)+'%':'–'}</span></div>`).join('');
+  const mk=[k,p].filter(Boolean).map(x=>x.p);
+  if(mk.length&&lastWP!=null){ const avg=mk.reduce((a,b)=>a+b,0)/mk.length, d=(lastWP-avg)*100;
+    h+=`<p class="small" style="margin:6px 0 0">${Math.abs(d)<2?`The model and the market${mk.length>1?'s':''} agree within 2 points.`:`The model is ${Math.abs(d).toFixed(1)} points ${d>0?'higher':'lower'} on ${TA('ND')} than the market${mk.length>1?' average':''}.`} Market prices are the bid/ask midpoint, so they include a small fee margin and move with real money, not just new information.</p>`; }
+  const miss=[!k&&'Kalshi',!p&&'Polymarket'].filter(Boolean);
+  if(miss.length) h+=`<p class="small" style="margin:6px 0 0">${MK.error?`Couldn't load market prices (${MK.error}).`:`No ${miss.join(' or ')} market matched this game.`} Smaller games often aren't listed.</p>`;
+  const pin=getPins();
+  h+=`<details class="mkpin"${pin.k||pin.p?' open':''}><summary>Pick the market by hand</summary>
+    <label>Kalshi event ticker (from the market URL)<input type="text" id="pinK" value="${pin.k||''}" placeholder="KXNCAAFGAME-26OCT03OSUIOWA"></label>
+    <label>Polymarket event slug (from the URL)<input type="text" id="pinP" value="${pin.p||''}" placeholder="cfb-osu-iowa-2026-10-03"></label>
+    <button type="button" class="mini" id="pinSave">Use these</button></details>`;
+  el.innerHTML=h;
+  $('pinSave').addEventListener('click',()=>{try{localStorage.setItem(pinKey(),JSON.stringify({k:$('pinK').value.trim(),p:$('pinP').value.trim()}));}catch(e){} toast('Market pinned'); pullMarkets();});
+}
+
+// ===== Box score =====
+let BOX=null, boxAt=0;
+async function pullBox(){
+  if(!LIVE.event) return; boxAt=Date.now();
+  try{const r=await fetch(`${LIVE.endpoint}?kind=box&event=${LIVE.event}`,{cache:'no-store'}); const j=await r.json(); if(!r.ok||j.error) throw new Error(j.error||r.status); BOX=j; renderBox();}
+  catch(e){ $('boxNote').textContent=`Couldn't load the box score (${e.message}).`; }
+}
+const BOX_KEY=['firstDowns','totalYards','netPassingYards','rushingYards','yardsPerPass','yardsPerRushAttempt','thirdDownEff','fourthDownEff','turnovers','totalPenaltiesYards','possessionTime'];
+function renderBox(){
+  const b=BOX; if(!b) return;
+  const order=t=>t.slice().sort((x,y)=>(x.homeAway==='home')-(y.homeAway==='home'));
+  const teams=order(b.teams||[]);
+  if(!teams.length){ $('boxNote').textContent='ESPN posts the box score once the game starts.'; $('boxLine').innerHTML=''; $('boxTeam').innerHTML=''; $('boxPlayers').innerHTML=''; return; }
+  $('boxNote').textContent=`Updated ${new Date(boxAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}`;
+  const L=order(b.lines||[]); const nq=Math.max(4,...L.map(x=>x.q.length));
+  $('boxLine').innerHTML=L.length?`<div class="tblwrap"><table class="boxline"><thead><tr><th></th>${Array.from({length:nq},(_,i)=>`<th>${i<4?i+1:'OT'+(i>4?i-3:'')}</th>`).join('')}<th>T</th></tr></thead><tbody>${L.map(x=>`<tr><td><b>${x.abbr}</b></td>${Array.from({length:nq},(_,i)=>`<td>${x.q[i]??''}</td>`).join('')}<td><b>${x.score??''}</b></td></tr>`).join('')}</tbody></table></div>`:'';
+  const [A,B]=teams, map=t=>Object.fromEntries(t.stats.map(x=>[x.name,x])), mA=map(A), mB=B?map(B):{};
+  const names=[...BOX_KEY.filter(n=>mA[n]),...A.stats.map(x=>x.name).filter(n=>!BOX_KEY.includes(n))];
+  const numv=v=>{const m=String(v).match(/^-?\d+(\.\d+)?$/); return m?+v:null;};
+  const lowerBetter=n=>/turnover|penalt|fumblesLost|interceptions|sacksYardsLost/i.test(n);
+  const row=n=>{const a=mA[n], c=mB[n]; if(!a) return ''; const va=numv(a.value), vb=c?numv(c.value):null;
+    let la='',lb='',bar=''; if(va!=null&&vb!=null&&va!==vb){ const aBetter=lowerBetter(n)?va<vb:va>vb; la=aBetter?'lead':''; lb=aBetter?'':'lead'; }
+    if(va!=null&&vb!=null&&va+vb>0&&!lowerBetter(n)) bar=`<div class="split"><i style="width:${(va/(va+vb)*100).toFixed(1)}%;background:${A.color||'var(--ink)'}"></i><i style="flex:1;background:${(B&&B.color)||'var(--muted)'}"></i></div>`;
+    return `<tr><td>${a.label}${bar}</td><td class="${la}">${a.value}</td><td class="${lb}">${c?c.value:''}</td></tr>`;};
+  const key=names.filter(n=>BOX_KEY.includes(n)), rest=names.filter(n=>!BOX_KEY.includes(n));
+  $('boxTeam').innerHTML=`<h3 class="sh">Team stats</h3><table class="boxteam"><thead><tr><th></th><th>${A.abbr}</th><th>${B?B.abbr:''}</th></tr></thead><tbody>${key.map(row).join('')}</tbody></table>`+
+    (rest.length?`<details class="boxp"><summary>All team stats</summary><table class="boxteam"><tbody>${rest.map(row).join('')}</tbody></table></details>`:'');
+  const cats={passing:'Passing',rushing:'Rushing',receiving:'Receiving'};
+  $('boxPlayers').innerHTML=teams.map(t=>{const P=(b.players||[]).find(x=>x.id===t.id); if(!P) return '';
+    const tbl=c=>`<div class="tblwrap"><table><thead><tr><th>${cats[c.name]||c.title}</th>${c.labels.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>${c.rows.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join('')}</tr>`).join('')}${c.totals?`<tr><td><b>Team</b></td>${c.totals.map(v=>`<td><b>${v}</b></td>`).join('')}</tr>`:''}</tbody></table></div>`;
+    const main=P.cats.filter(c=>cats[c.name]), more=P.cats.filter(c=>!cats[c.name]&&c.rows.length);
+    return `<div class="boxp"><h3>${t.name||t.abbr}</h3>${main.map(tbl).join('')||'<p class="small">No player stats yet.</p>'}${more.length?`<details><summary>Defense, kicking and returns</summary>${more.map(c=>`<h4>${c.title}</h4>${tbl(c)}`).join('')}</details>`:''}</div>`;}).join('');
+}
+TABS.forEach(b=>b.addEventListener('click',()=>{ if(b.id==='t-box'&&LIVE.event&&Date.now()-boxAt>15000) pullBox(); }));
+
 $('gateGo').addEventListener('click',goLive);
 if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,30000); }
 

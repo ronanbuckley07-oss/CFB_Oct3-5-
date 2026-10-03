@@ -38,6 +38,10 @@ Run locally with `npm start` and open http://localhost:3000.
 
 - `?kind=scoreboard&scope=top|fbs[&date=YYYYMMDD]`: trimmed games for the board
 - `?kind=card&event=ID[&date=YYYYMMDD]`: one game in the same shape, for the start screen
+- `?kind=box&event=ID`: box score (line score, team stats, player stat lines)
+- `?kind=markets&event=ID[&kalshi=TICKER][&poly=SLUG]`: Kalshi (series KXNCAAFGAME) and Polymarket win prices for both teams.
+  Add `&debug` to see every market title the server checked, which is how to diagnose a game that didn't match.
+- `?kind=team&id=TEAMID` now also returns played games with results and ESPN's FPI win chance for each remaining game
 
 `/.netlify/functions/espn` still answers as an alias, so old bookmarks and cached pages keep working.
 

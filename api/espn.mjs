@@ -2,6 +2,8 @@
 // memoized briefly in memory, so a hundred people watching the board cost the same as one.
 //   ?kind=scoreboard[&scope=top|fbs][&date=YYYYMMDD] -> this week's games, trimmed for the home page (no sims)
 //   ?kind=card&event=ID[&date=YYYYMMDD]  -> one game in the same trimmed shape, for the game page's start screen
+//   ?kind=box&event=ID                   -> box score: team stats and player stat lines
+//   ?kind=markets&event=ID[&kalshi=TICKER][&poly=SLUG] -> Kalshi and Polymarket win prices for both teams
 //   ?event=ID&date=YYYYMMDD           -> that game's scoreboard entry (live state, odds)       [original behavior]
 //   ?kind=summary&event=ID            -> trimmed game summary: teams, line, every play, ESPN win probability
 //   ?kind=list&date=YYYYMMDD          -> finished FBS games on that date (for backtesting)
@@ -32,6 +34,14 @@ export default async (req) => {
       const ev = (d.events || []).find(e => String(e.id) === event);
       if (!ev) return json({ error: 'game not found' }, 404);
       return json({ ...trimEvent(ev), etDate: dt }, 200, 10);
+    }
+    if (kind === 'box') {
+      if (!event) return json({ error: 'missing event' }, 400);
+      return json(trimBox(await get(`${BASE}/summary?event=${event}`, 8000)), 200, 10);
+    }
+    if (kind === 'markets') {
+      if (!event) return json({ error: 'missing event' }, 400);
+      return json(await markets(event, u.searchParams.get('kalshi'), u.searchParams.get('poly'), u.searchParams.has('debug')), 200, 15);
     }
     if (kind === 'summary') {
       if (!event) return json({ error: 'missing event' }, 400);
@@ -151,7 +161,12 @@ function trimEvent(e) {
   const home = side(cs.find(x => x.homeAway === 'home')), away = side(cs.find(x => x.homeAway === 'away'));
   if (!home || !away) return null;
   const sit = c.situation; let s = null, wpHome = null;
-  if (sit && ty.state === 'in') {
+  const phase = ty.state !== 'in' ? null : (ty.name === 'STATUS_HALFTIME' || /half/i.test(ty.shortDetail || '')) ? 'half'
+    : ty.name === 'STATUS_END_PERIOD' || /^end of/i.test(ty.shortDetail || '') ? 'break' : 'play';
+  if (sit && ty.state === 'in' && phase === 'half') {
+    s = { poss: null, down: null, dist: null, pos: null, spot: null, text: null, redZone: false, lastPlay: cleanPlay(sit.lastPlay?.text) };
+    const p = sit.lastPlay?.probability?.homeWinPercentage; if (typeof p === 'number') wpHome = p;
+  } else if (sit && ty.state === 'in') {
     const pid = String(sit.possession ?? '');
     const poss = pid === home.id ? 'home' : pid === away.id ? 'away' : null;
     let pos = null; // yards from the offense's own goal line
@@ -163,14 +178,169 @@ function trimEvent(e) {
     const down = sit.down >= 1 && sit.down <= 4 ? sit.down : null;
     s = { poss, down, dist: down && sit.distance > 0 ? sit.distance : null, pos, spot: sit.possessionText || null,
       text: sit.shortDownDistanceText || sit.downDistanceText || null, redZone: !!sit.isRedZone,
-      lastPlay: sit.lastPlay?.text || null, homeTO: sit.homeTimeouts ?? null, awayTO: sit.awayTimeouts ?? null };
+      lastPlay: cleanPlay(sit.lastPlay?.text), homeTO: sit.homeTimeouts ?? null, awayTO: sit.awayTimeouts ?? null };
     const p = sit.lastPlay?.probability?.homeWinPercentage; if (typeof p === 'number') wpHome = p;
   }
+  // ESPN drops win probability between plays and at halftime, so fall back to the last number it sent
+  const id = String(e.id);
+  if (wpHome != null) lastWp.set(id, wpHome); else if (ty.state === 'in') wpHome = lastWp.get(id) ?? null;
+  if (ty.state === 'post') wpHome = home.winner ? 1 : away.winner ? 0 : null;
   const od = c.odds?.[0] || {};
-  return { id: String(e.id), date: e.date, state: ty.state || null, detail: ty.shortDetail || ty.detail || null,
+  return { id, phase, date: e.date, state: ty.state || null, detail: ty.shortDetail || ty.detail || null,
     period: st.period ?? null, clock: st.displayClock ?? null, neutral: !!c.neutralSite,
     tv: c.broadcasts?.[0]?.names?.[0] || c.broadcast || null, home, away, sit: s, wpHome,
     line: od.details || null, ou: od.overUnder ?? null };
+}
+
+const lastWp = new Map();
+// "(00:18) No Huddle-Shotgun #13 A.Simmons pass complete..." -> "A.Simmons pass complete..."
+function cleanPlay(t) {
+  if (!t) return null;
+  return String(t).replace(/^\(\d+:\d+\)\s*/, '').replace(/^(No Huddle-?|Shotgun|No Huddle)\s*/gi, '').replace(/^(Shotgun|No Huddle)\s*/gi, '')
+    .replace(/#\d+\s+/g, '').replace(/\s+/g, ' ').trim() || null;
+}
+
+// ---------- box score ----------
+function trimBox(d) {
+  const bx = d.boxscore || {};
+  const teams = (bx.teams || []).map(t => ({ id: String(t.team?.id), abbr: t.team?.abbreviation, name: t.team?.shortDisplayName || t.team?.displayName,
+    color: t.team?.color ? '#' + t.team.color : null, homeAway: t.homeAway || null,
+    stats: (t.statistics || []).map(x => ({ name: x.name, label: x.label || x.name, value: x.displayValue ?? String(x.value ?? '') })) }));
+  const players = (bx.players || []).map(p => ({ id: String(p.team?.id), abbr: p.team?.abbreviation,
+    cats: (p.statistics || []).map(c => ({ name: c.name, title: c.text || c.name, labels: c.labels || [],
+      rows: (c.athletes || []).map(a => [a.athlete?.shortName || a.athlete?.displayName || '?', ...(a.stats || [])]),
+      totals: c.totals || null })) }));
+  const comp = d.header?.competitions?.[0] || {};
+  const lines = (comp.competitors || []).map(c => ({ id: String(c.id ?? c.team?.id), homeAway: c.homeAway, abbr: c.team?.abbreviation,
+    q: (c.linescores || []).map(l => l.displayValue ?? l.value), score: c.score }));
+  return { state: comp.status?.type?.state || null, teams, players, lines };
+}
+
+// ---------- prediction markets: Kalshi and Polymarket ----------
+const KALSHI = ['https://external-api.kalshi.com/trade-api/v2', 'https://api.elections.kalshi.com/trade-api/v2'];
+const GAMMA = 'https://gamma-api.polymarket.com';
+const words = s => norm(String(s || '').replace(/\bst\.?\b/gi, 'state')).split(' ').filter(w => w && !['the', 'of', 'university', 'u'].includes(w));
+// How well a market's label names this team: 0 (no) to 1 (exact)
+function nameScore(label, t) {
+  const L = ' ' + words(label).join(' ') + ' ';
+  const cands = [t.name, t.location, t.short, `${t.location} ${t.mascot}`].filter(Boolean).map(x => words(x).join(' ')).filter(Boolean);
+  let best = 0;
+  for (const c of cands) { if (L.trim() === c) return 1; if (L.includes(' ' + c + ' ')) best = Math.max(best, 0.6 + Math.min(0.3, c.length / 60)); }
+  if (t.abbr && new RegExp(`(^|[^a-z])${t.abbr.toLowerCase()}([^a-z]|$)`).test(String(label).toLowerCase())) best = Math.max(best, 0.5);
+  return best;
+}
+const num01 = x => { if (x == null || x === '') return null; const v = +x; if (!isFinite(v)) return null; return v > 1 ? v / 100 : v; };
+function midPrice(bid, ask, last) {
+  const b = num01(bid), a = num01(ask), l = num01(last);
+  if (b != null && a != null && a > 0 && a >= b && a - b <= 0.12) return { p: (a + b) / 2, bid: b, ask: a, last: l };
+  if (l != null && l > 0) return { p: l, bid: b, ask: a, last: l };
+  if (b != null && a != null && a > 0) return { p: (a + b) / 2, bid: b, ask: a, last: l };
+  return null;
+}
+async function getAny(urls, ttl) { let err; for (const u of urls) { try { return await get(u, ttl); } catch (e) { err = e; } } throw err; }
+
+async function kalshiEvents() {
+  const out = []; let cursor = '';
+  for (let page = 0; page < 6; page++) {
+    const q = `/events?series_ticker=KXNCAAFGAME&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const d = await getAny(KALSHI.map(b => b + q), 20000);
+    out.push(...(d.events || [])); cursor = d.cursor; if (!cursor || !(d.events || []).length) break;
+  }
+  return out;
+}
+async function kalshiFor(A, B, pin) {
+  let events;
+  if (pin) {
+    const tk = pin.toUpperCase().replace(/-[A-Z0-9]+$/, m => m); // event or market ticker
+    const evT = tk.split('-').slice(0, 2).join('-');
+    const d = await getAny(KALSHI.map(b => `${b}/events/${evT}?with_nested_markets=true`), 20000);
+    events = [d.event ? { ...d.event, markets: d.markets || d.event.markets } : d];
+  } else events = await kalshiEvents();
+  let best = null;
+  for (const ev of events) {
+    const title = `${ev.title || ''} ${ev.sub_title || ''}`;
+    const sc = nameScore(title, A) + nameScore(title, B);
+    if (sc >= 1 && (!best || sc > best.sc)) best = { sc, ev };
+  }
+  if (!best) return { found: false, checked: events.length };
+  const res = { found: true, title: best.ev.title, ticker: best.ev.event_ticker, url: `https://kalshi.com/markets/kxncaafgame/${String(best.ev.event_ticker || '').toLowerCase()}` };
+  for (const m of best.ev.markets || []) {
+    const label = `${m.yes_sub_title || ''} ${m.subtitle || ''} ${String(m.ticker || '').split('-').pop()}`;
+    const pr = midPrice(m.yes_bid_dollars ?? m.yes_bid, m.yes_ask_dollars ?? m.yes_ask, m.last_price_dollars ?? m.last_price);
+    if (!pr) continue;
+    const sa = nameScore(label, A), sb = nameScore(label, B);
+    if (sa > sb && sa > 0) res.A = { ...pr, label: m.yes_sub_title || m.ticker, vol: m.volume ?? null };
+    else if (sb > sa && sb > 0) res.B = { ...pr, label: m.yes_sub_title || m.ticker, vol: m.volume ?? null };
+  }
+  if (res.A && !res.B) res.B = { p: 1 - res.A.p, implied: true }; if (res.B && !res.A) res.A = { p: 1 - res.B.p, implied: true };
+  return res;
+}
+
+async function polyEvents() {
+  const lists = [];
+  try {
+    const sports = await get(`${GAMMA}/sports`, 3600000);
+    const cfb = (Array.isArray(sports) ? sports : []).find(x => /^(cfb|ncaaf|college-?football)$/i.test(x.sport || ''));
+    if (cfb?.series) for (const sid of String(cfb.series).split(',').filter(Boolean))
+      lists.push(get(`${GAMMA}/events?series_id=${sid}&closed=false&limit=500`, 20000).catch(() => []));
+  } catch {}
+  for (const tag of ['cfb', 'college-football', 'ncaaf']) lists.push(get(`${GAMMA}/events?tag_slug=${tag}&closed=false&limit=500`, 20000).catch(() => []));
+  const seen = new Set(), out = [];
+  for (const l of await Promise.all(lists)) for (const e of (Array.isArray(l) ? l : l?.data || [])) if (!seen.has(e.id)) { seen.add(e.id); out.push(e); }
+  return out;
+}
+const parseArr = x => { if (Array.isArray(x)) return x; try { return JSON.parse(x || '[]'); } catch { return []; } };
+async function polyFor(A, B, pin, kickoff) {
+  let events;
+  if (pin) { const e = await get(`${GAMMA}/events/slug/${encodeURIComponent(pin)}`, 20000); events = [e]; }
+  else events = await polyEvents();
+  const day = kickoff ? new Date(kickoff).getTime() : null;
+  let best = null;
+  for (const ev of events) {
+    const sc = nameScore(ev.title, A) + nameScore(ev.title, B);
+    if (sc < 1) continue;
+    const t = new Date(ev.startTime || ev.gameStartTime || ev.endDate || ev.startDate || 0).getTime();
+    const near = !day || !t || Math.abs(t - day) < 4 * 86400000;
+    if (near && (!best || sc > best.sc)) best = { sc, ev };
+  }
+  if (!best) return { found: false, checked: events.length };
+  const ev = best.ev, res = { found: true, title: ev.title, slug: ev.slug, url: `https://polymarket.com/event/${ev.slug}` };
+  // The moneyline market is the one whose two outcomes are the two teams
+  for (const m of ev.markets || []) {
+    if (m.closed && !m.active) continue;
+    const outs = parseArr(m.outcomes), prices = parseArr(m.outcomePrices).map(Number);
+    if (outs.length !== 2 || /spread|o\/u|total|over|under|half|quarter/i.test(`${m.question || ''} ${m.sportsMarketType || ''}`) && m.sportsMarketType !== 'moneyline') continue;
+    const ia = outs.findIndex(o => nameScore(o, A) > nameScore(o, B)), ib = 1 - ia;
+    if (ia < 0 || nameScore(outs[ib], B) <= 0) continue;
+    // bestBid/bestAsk are quoted for the first outcome
+    const pr0 = midPrice(m.bestBid, m.bestAsk, m.lastTradePrice ?? prices[0]);
+    const p0 = pr0 ? pr0.p : prices[0]; if (!(p0 >= 0 && p0 <= 1)) continue;
+    const pA = ia === 0 ? p0 : 1 - p0;
+    res.A = { p: pA, label: outs[ia], vol: +m.volume || null }; res.B = { p: 1 - pA, label: outs[ib] };
+    if (pr0 && pr0.bid != null && pr0.ask != null) { res.A.bid = ia === 0 ? pr0.bid : 1 - pr0.ask; res.A.ask = ia === 0 ? pr0.ask : 1 - pr0.bid; }
+    break;
+  }
+  if (!res.A) res.found = false;
+  return res;
+}
+async function markets(event, kPin, pPin, debug) {
+  await allTeams();
+  const s = await get(`${BASE}/summary?event=${event}`, 8000);
+  const comp = s.header?.competitions?.[0] || {}, cs = comp.competitors || [];
+  const byId = id => teamCache.find(t => t.id === String(id));
+  const away = cs.find(c => c.homeAway === 'away'), home = cs.find(c => c.homeAway === 'home');
+  if (!away || !home) throw new Error('game not found');
+  const A = byId(away.id) || teamInfo(away.team), B = byId(home.id) || teamInfo(home.team); // A = away, B = home
+  const [k, p] = await Promise.all([kalshiFor(A, B, kPin).catch(e => ({ found: false, error: String(e.message || e) })),
+    polyFor(A, B, pPin, comp.date).catch(e => ({ found: false, error: String(e.message || e) }))]);
+  const pack = r => r && r.found && r.A ? { ...r, away: r.A, home: r.B, A: undefined, B: undefined } : r;
+  const out = { at: new Date().toISOString(), awayId: A.id, homeId: B.id, kalshi: pack(k), poly: pack(p) };
+  if (debug) {
+    out.debug = { teams: [A, B] };
+    try { out.debug.kalshiTitles = (await kalshiEvents()).map(e => `${e.event_ticker}: ${e.title}`).slice(0, 400); } catch (e) { out.debug.kalshiError = String(e.message || e); }
+    try { out.debug.polyTitles = (await polyEvents()).map(e => `${e.slug}: ${e.title}`).slice(0, 400); } catch (e) { out.debug.polyError = String(e.message || e); }
+  }
+  return out;
 }
 
 // ---------- player usage from this season's box scores ----------
@@ -215,11 +385,25 @@ async function teamUsage(id) {
     games, plays: att + car, ypp: att + car ? +(yds / (att + car)).toFixed(2) : 0, passrate: att + car ? +(att / (att + car)).toFixed(3) : 0.49,
     opps: done.map(opp), source: 'espn',
   };
-  const upcoming = evs.filter(e => e.competitions?.[0]?.status?.type?.state === 'pre').map(e => {
-    const cs = e.competitions?.[0]?.competitors || [], me = cs.find(c => String(c.id ?? c.team?.id) === id);
-    return { id: String(e.id), date: e.date, opp: opp(e), away: me?.homeAway === 'away', neutral: !!e.competitions?.[0]?.neutralSite };
+  const scoreOf = c => { const v = c?.score; return v == null ? null : typeof v === 'object' ? +(v.value ?? v.displayValue) : +v; };
+  const played = evs.filter(e => e.competitions?.[0]?.status?.type?.state === 'post').map(e => {
+    const c0 = e.competitions[0], cs = c0.competitors || [], me = cs.find(c => String(c.id ?? c.team?.id) === id), ot = cs.find(c => c !== me);
+    const ms = scoreOf(me), os = scoreOf(ot), won = me?.winner === true || (ms != null && os != null && ms > os);
+    return { id: String(e.id), date: e.date, opp: opp(e), away: me?.homeAway === 'away', neutral: !!c0.neutralSite, won, pf: ms, pa: os };
   });
-  return { id, usage: teams, upcoming };
+  const pre = evs.filter(e => e.competitions?.[0]?.status?.type?.state === 'pre');
+  // ESPN's matchup predictor (FPI) gives a win chance for future games that don't have a betting line yet
+  const preds = await Promise.all(pre.map(e => get(`${BASE}/summary?event=${e.id}`, 3600000).then(d => {
+    const pr = d.predictor || {}; const homeId = String((d.header?.competitions?.[0]?.competitors || []).find(c => c.homeAway === 'home')?.id ?? '');
+    const mine = homeId === id ? pr.homeTeam : pr.awayTeam, v = parseFloat(mine?.gameProjection);
+    const od = (d.pickcenter || [])[0];
+    return { fpi: isFinite(v) ? v / 100 : null, line: od?.details || null };
+  }).catch(() => ({}))));
+  const upcoming = pre.map((e, i) => {
+    const cs = e.competitions?.[0]?.competitors || [], me = cs.find(c => String(c.id ?? c.team?.id) === id);
+    return { id: String(e.id), date: e.date, opp: opp(e), away: me?.homeAway === 'away', neutral: !!e.competitions?.[0]?.neutralSite, ...preds[i] };
+  });
+  return { id, usage: teams, played, upcoming };
 }
 
 // Memoized ESPN fetch. Concurrent callers share one request; results live for ttl ms.
