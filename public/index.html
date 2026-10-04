@@ -91,6 +91,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .find .small{font-size:13px;color:var(--muted)}
 .skel{height:230px;border-radius:12px;background:var(--card);border:1px solid var(--line);opacity:.6}
 @media (prefers-reduced-motion:no-preference){.card.flash{animation:flash 1.2s ease-out}@keyframes flash{from{box-shadow:0 0 0 2px var(--gold)}to{box-shadow:0 0 0 2px transparent}}}
+.buildwarn{background:#7a2e2e;color:#fff;padding:10px 14px;border-radius:10px;margin:0 0 12px;font:600 14px Barlow,sans-serif}
 </style></head>
 <body><div class="wrap">
 <header class="mast">
@@ -260,5 +261,15 @@ $('find').addEventListener('submit',async e=>{
 });
 
 setScope(scope);
+
+// ===== Deploy check: page and server must come from the same upload =====
+const BUILD='2026-10-04.4';
+fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
+  const bad=!v||v.build!==BUILD;
+  if(!bad) return;
+  const d=document.createElement('div'); d.className='buildwarn';
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.4'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
+}).catch(()=>{});
 </script>
 </body></html>

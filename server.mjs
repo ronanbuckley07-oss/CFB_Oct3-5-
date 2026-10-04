@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createHandler, LEAGUES } from './api/espn.mjs';
 const API = { cfb: createHandler(LEAGUES.cfb), nfl: createHandler(LEAGUES.nfl) };
 import { createLive } from './api/live.mjs';
+import { BUILD } from './api/version.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const PORT = process.env.PORT || 3000;
@@ -66,6 +67,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/healthz') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ok'); return; }
     if (u.pathname === '/api/espn' || u.pathname === '/.netlify/functions/espn') return await serveApi(req, res, u, 'cfb');
     if (u.pathname === '/api/nfl') return await serveApi(req, res, u, 'nfl');
+    if (u.pathname === '/api/version') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ build: BUILD, live: LIVE.leagues })); return; }
     if (u.pathname === '/api/live') return LIVE.handle(req, res, u);
     if (u.pathname === '/api/live/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.status())); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
