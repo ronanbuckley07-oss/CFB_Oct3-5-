@@ -235,6 +235,7 @@ header.top{align-items:center}
 .mkpin{margin-top:6px;font-size:13px;color:var(--muted)}
 .mkpin summary{cursor:pointer}
 .mkpin input{width:100%;margin:4px 0}
+.betx{margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
 .cboxes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:stretch}
 @media (max-width:900px){.cboxes{grid-template-columns:1fr}}
 .cbox{border:1px solid var(--line);border-top:4px solid var(--c);border-radius:12px;padding:14px;background:var(--paper)}
@@ -351,13 +352,12 @@ header.top{align-items:center}
     <div class="small" id="gProj"></div>
     <div class="sec"><h3>Final margin (<span data-tm="ND">ND</span> minus <span data-tm="UNC">UNC</span>)</h3><div id="gMar"></div></div>
     <div class="sec"><h3>Next points scored</h3><div id="gNext"></div></div>
-    <div class="sec"><h3>Model vs. markets</h3><div id="gMkt"><p class="small" style="margin:0">Market prices load when you go live.</p></div></div>
     <div class="sec"><h3>Model vs. the betting line</h3><div id="gLine"></div></div>
-    <div class="sec"><h3>Starting point</h3><div id="gPre"><p class="small" style="margin:0">Loads when you go live.</p></div></div>
+
   </section>
 </div>
 
-<nav class="tabs" role="tablist" aria-label="More analysis"><button type="button" role="tab" id="t-box" aria-controls="tab-box" aria-selected="false" tabindex="-1">Box score</button><button type="button" role="tab" id="t-cmp" aria-controls="tab-cmp" aria-selected="false" tabindex="-1">Markets vs. model</button><button type="button" role="tab" id="t-flow" aria-controls="tab-flow" aria-selected="false" tabindex="-1">Game flow</button><button type="button" role="tab" id="t-dists" aria-controls="tab-dists" aria-selected="false" tabindex="-1">Score distributions</button><button type="button" role="tab" id="t-check" aria-controls="tab-check" aria-selected="false" tabindex="-1">Model check</button><button type="button" role="tab" id="t-whatif" aria-controls="tab-whatif" aria-selected="false" tabindex="-1">What if</button><button type="button" role="tab" id="t-season" aria-controls="tab-season" aria-selected="false" tabindex="-1">Season</button><button type="button" role="tab" id="t-backtest" aria-controls="tab-backtest" aria-selected="false" tabindex="-1">Backtest</button><button type="button" role="tab" id="t-inputs" aria-controls="tab-inputs" aria-selected="false" tabindex="-1">Under the hood</button><button type="button" role="tab" id="t-manual" aria-controls="tab-manual" aria-selected="false" tabindex="-1">Manual entry</button></nav>
+<nav class="tabs" role="tablist" aria-label="More analysis"><button type="button" role="tab" id="t-cmp" aria-controls="tab-cmp" aria-selected="false" tabindex="-1">Betting</button><button type="button" role="tab" id="t-box" aria-controls="tab-box" aria-selected="false" tabindex="-1">Box score</button><button type="button" role="tab" id="t-flow" aria-controls="tab-flow" aria-selected="false" tabindex="-1">Game flow</button><button type="button" role="tab" id="t-dists" aria-controls="tab-dists" aria-selected="false" tabindex="-1">Score distributions</button><button type="button" role="tab" id="t-check" aria-controls="tab-check" aria-selected="false" tabindex="-1">Model check</button><button type="button" role="tab" id="t-whatif" aria-controls="tab-whatif" aria-selected="false" tabindex="-1">What if</button><button type="button" role="tab" id="t-season" aria-controls="tab-season" aria-selected="false" tabindex="-1">Season</button><button type="button" role="tab" id="t-backtest" aria-controls="tab-backtest" aria-selected="false" tabindex="-1">Backtest</button><button type="button" role="tab" id="t-inputs" aria-controls="tab-inputs" aria-selected="false" tabindex="-1">Under the hood</button><button type="button" role="tab" id="t-manual" aria-controls="tab-manual" aria-selected="false" tabindex="-1">Manual entry</button></nav>
 <section class="panel flow tabpanel" id="tab-flow" role="tabpanel" aria-labelledby="t-flow" hidden>
   <div class="flowhead"><h2>Game flow</h2>
     <div class="zoom" role="group" aria-label="Chart zoom">
@@ -374,8 +374,12 @@ header.top{align-items:center}
   <ol class="plog" id="plog"></ol>
 </section>
 <section class="panel tabpanel" id="tab-cmp" role="tabpanel" aria-labelledby="t-cmp" hidden>
-  <div class="flowhead"><h2>Markets vs. model</h2><span class="small" id="cmpNote"></span></div>
+  <div class="flowhead"><h2>Betting: markets vs. model</h2><span class="small" id="cmpNote"></span></div>
   <div class="cboxes" id="cmpBoxes"><p class="small">Go live to load market prices.</p></div>
+  <div class="duo betx">
+    <div><h3 class="sh">Win probability right now</h3><div id="gMkt"><p class="small" style="margin:0">Market prices load when you go live.</p></div></div>
+    <div><h3 class="sh">Starting point</h3><div id="gPre"><p class="small" style="margin:0">Loads when you go live.</p></div></div>
+  </div>
 </section>
 <section class="panel tabpanel" id="tab-box" role="tabpanel" aria-labelledby="t-box" hidden>
   <div class="flowhead"><h2>Box score</h2><span class="small" id="boxNote"></span></div>
@@ -1431,6 +1435,7 @@ async function loadGame(g){
       const R=readOdds(od.raw||od,GAME.homeId===TM.ND.id?'ND':'UNC'); if(R.total) S.total=R.total; if(!edgeSetFromLine&&R.edge!=null){S.edge=R.edge; edgeSetFromLine=true;}
       $('lineInfo').textContent=edgeSetFromLine?`Line: ${TA(S.edge>=0?'ND':'UNC')} by ${Math.abs(S.edge)}, O/U ${S.total}`:'No betting line from ESPN yet. Set the edge and total by hand.'; } }catch(e){} }
   await applyPregame(true);
+  pullMarkets();
   try{localStorage.setItem('ndsim-game',JSON.stringify({TM,GAME,usage:{ND:DATA.teams.ND,UNC:DATA.teams.UNC},LIVE:{event:LIVE.event,date:LIVE.date,teams:LIVE.teams}}));}catch(e){}
   $('gameId').value=LIVE.event; applyTeams(); usageNoteText(); seasonRows(); renderSeason(); syncInputs(); drawChart(); renderLog(); renderCLT(); save(); if(!SKIP_LOAD_SIM) runSims();
   const when=g.kickoff?new Date(g.kickoff).toLocaleString([], {weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
@@ -1633,15 +1638,15 @@ renderBoard();
 // ===== Tabs for the deeper panels =====
 const TABS=[...document.querySelectorAll('.tabs [role="tab"]')];
 function selectTab(id,focus){
-  if(!TABS.some(b=>b.id==='t-'+id)) id='flow';
+  if(!TABS.some(b=>b.id==='t-'+id)) id='cmp';
   TABS.forEach(b=>{const on=b.id==='t-'+id; b.setAttribute('aria-selected',String(on)); b.tabIndex=on?0:-1; $(b.getAttribute('aria-controls')).hidden=!on; if(on&&focus) b.focus();});
-  try{localStorage.setItem('ndsim-tab',id);}catch(e){}
+  try{localStorage.setItem('ndsim-tab2',id);}catch(e){}
 }
 TABS.forEach((b,i)=>{
   b.addEventListener('click',()=>selectTab(b.id.slice(2)));
   b.addEventListener('keydown',e=>{const k={ArrowRight:1,ArrowLeft:-1}[e.key]; if(e.key==='Home'||e.key==='End'){e.preventDefault(); selectTab(TABS[e.key==='Home'?0:TABS.length-1].id.slice(2),true);} else if(k){e.preventDefault(); selectTab(TABS[(i+k+TABS.length)%TABS.length].id.slice(2),true);}});
 });
-{let t='flow'; try{t=localStorage.getItem('ndsim-tab')||'flow';}catch(e){} selectTab(t);}
+{let t='cmp'; try{t=localStorage.getItem('ndsim-tab2')||'cmp';}catch(e){} selectTab(t);}
 
 // ===== Start screen: show the game, start sims only when asked =====
 const QS=new URLSearchParams(location.search);
@@ -1848,7 +1853,7 @@ function renderCompare(){
     if(a&&a.vol) rows.push(`<div class="crow"><span>Volume</span><b>${Math.round(a.vol).toLocaleString()}</b></div>`);
     rows.push(`<div class="crow"><span>Lines listed</span><b>${(src.spreads||[]).length} spread, ${(src.totals||[]).length} total</b></div>`);
     return `<h4>Market</h4>${rows.join('')}`; };
-  el.innerHTML=!MK?'<p class="small">Go live to load market prices.</p>':
+  el.innerHTML=!MK?'<p class="small">Loading Kalshi and Polymarket prices…</p>':
     box('Polymarket',p,'#5B8DEF',p&&p.url,mkExtra(p))+box('Kalshi',k,'#2FA36B',k&&k.url,mkExtra(k))+box('This model','model','var(--gold)',null,modelExtra);
   $('cmpNote').textContent=MK?`Prices as of ${new Date(MK.at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'})}. A "–" means that market doesn't list that exact line.`:'';
 }
@@ -1877,7 +1882,7 @@ function renderPre(){
   const aHome=TM.ND.id===PRE.homeId, fmtE=hm=>{const e=(aHome?1:-1)*hm; return Math.abs(e)<0.05?'Even':`${TA(e>0?'ND':'UNC')} by ${Math.abs(e).toFixed(1)}`;};
   el.innerHTML=`<table class="pre"><tbody>${PRE.sources.map(x=>`<tr><td title="${(x.detail||'').replace(/"/g,'&quot;')}">${x.name}</td><td>${fmtE(x.homeMargin)}</td></tr>`).join('')}
     <tr class="avg"><td>Average (used)</td><td>${fmtE(PRE.homeMargin)}</td></tr></tbody></table>
-    <p class="small" style="margin:6px 0 0">FPI and market win chances are turned into spreads assuming final margins scatter about 13 points around the spread. ${PRE.sources.length>1?`The sources disagree by ±${PRE.sd.toFixed(1)} points, so each sim draws team strength with ±${Math.sqrt(ESD_BASE*ESD_BASE+PRE.sd*PRE.sd).toFixed(1)} uncertainty instead of ±${ESD_BASE}.`:''}${PRE.book!=null?` The cover numbers above still use the sportsbook line, ${fmtE(PRE.book)}.`:''}</p>`;
+    <p class="small" style="margin:6px 0 0">FPI and market win chances are turned into spreads assuming final margins scatter about 13 points around the spread. ${PRE.sources.length>1?`The sources disagree by ±${PRE.sd.toFixed(1)} points, so each sim draws team strength with ±${Math.sqrt(ESD_BASE*ESD_BASE+PRE.sd*PRE.sd).toFixed(1)} uncertainty instead of ±${ESD_BASE}.`:''}${PRE.book!=null?` The cover numbers in The game panel and the boxes above still use the sportsbook line, ${fmtE(PRE.book)}.`:''}</p>`;
 }
 
 
@@ -1972,12 +1977,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.4';
+const BUILD='2026-10-04.5';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.4'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.5'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>

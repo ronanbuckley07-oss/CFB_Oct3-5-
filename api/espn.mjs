@@ -211,14 +211,17 @@ function trimEvent(e) {
   const id = String(e.id);
   if (wpHome != null) lastWp.set(id, wpHome); else if (ty.state === 'in') wpHome = lastWp.get(id) ?? null;
   if (ty.state === 'post') { wpHome = home.winner ? 1 : away.winner ? 0 : null; if (!finalSeen.has(id)) finalSeen.set(id, Date.now()); }
-  const od = c.odds?.[0] || {};
+  // ESPN often removes odds from the scoreboard once a game kicks off; keep the last line it showed
+  const od0 = c.odds?.[0] || {};
+  if (od0.details || od0.overUnder != null) lineSeen.set(id, { details: od0.details || null, overUnder: od0.overUnder ?? null });
+  const od = (od0.details || od0.overUnder != null) ? od0 : (lineSeen.get(id) || {});
   return { id, phase, date: e.date, state: ty.state || null, detail: ty.shortDetail || ty.detail || null,
     period: st.period ?? null, clock: st.displayClock ?? null, neutral: !!c.neutralSite,
     tv: c.broadcasts?.[0]?.names?.[0] || c.broadcast || null, home, away, sit: s, wpHome,
     line: od.details || null, ou: od.overUnder ?? null };
 }
 
-const lastWp = new Map(), finalSeen = new Map();
+const lastWp = new Map(), finalSeen = new Map(), lineSeen = new Map();
 // "(00:18) No Huddle-Shotgun #13 A.Simmons pass complete..." -> "A.Simmons pass complete..."
 function cleanPlay(t) {
   if (!t) return null;
