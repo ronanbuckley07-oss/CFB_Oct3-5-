@@ -237,5 +237,5 @@ export function createPicks({ api, dir }) {
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event));
   const autoDone = (league, event) => Object.keys(TIERS).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { edges, consider, autoPick, autoDone, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, edges, consider, autoPick, autoDone, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

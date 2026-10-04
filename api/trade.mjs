@@ -15,10 +15,11 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { simulateFill, createPmusTrader, takerFee } from './pmus.mjs';
 import { gradeBet } from './picks.mjs';
+import { createAutopilot, clampConfig, describe } from './autopilot.mjs';
 
 const env = (k, d) => (process.env[k] == null || process.env[k] === '' ? d : process.env[k]);
 
-export function createTrading({ api, dir, leading }) {
+export function createTrading({ api, dir, leading, picks }) {
   const PASSWORD = env('TRADE_PASSWORD', '');
   const LIMITS = { maxOrder: +env('MAX_ORDER_USD', 10), maxDaily: +env('MAX_DAILY_USD', 50), maxOpen: +env('MAX_OPEN_BETS', 5),
     slip: +env('MAX_SLIPPAGE_CENTS', 2) / 100, minEdge: +env('MIN_FAIR_EDGE', 0.025) };
@@ -43,8 +44,9 @@ export function createTrading({ api, dir, leading }) {
 
   // ---------- money bookkeeping ----------
   const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-  const spentToday = () => db.trades.filter(t => t.day === today() && t.qty > 0).reduce((a, t) => a + t.cost, 0);
-  const openBets = () => db.trades.filter(t => t.qty > 0 && t.status === 'open').length;
+  // live money only; the autopilot's paper bets don't count against real limits
+  const spentToday = () => db.trades.filter(t => t.mode !== 'paper' && t.day === today() && t.qty > 0).reduce((a, t) => a + t.cost, 0);
+  const openBets = () => db.trades.filter(t => t.mode !== 'paper' && t.qty > 0 && t.status === 'open').length;
 
   async function opportunities() {
     const L = leading('all').bets.filter(b => b.venue === 'Polymarket US' && b.trade && (b.fairEdge ?? 0) >= LIMITS.minEdge);
@@ -71,6 +73,9 @@ export function createTrading({ api, dir, leading }) {
     }
   }
   setInterval(settle, 5 * 60000).unref();
+  const LIVE_AUTO = () => ENABLED && !!trader && env('AUTOPILOT_LIVE', 'false') === 'true';
+  const auto = createAutopilot({ db, save, trader, limits: LIMITS, enabledLive: LIVE_AUTO, leading, liveChecks: p => checks(p),
+    api: { book: (lg, slug) => api[lg].pmusBook(slug), picksAll: () => (picks ? picks.all() : []) } });
 
   const send = (res, code, obj, headers = {}) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers }); res.end(JSON.stringify(obj)); };
   const body = req => new Promise((ok, bad) => { let d = ''; req.on('data', c => { d += c; if (d.length > 1e5) req.destroy(); }); req.on('end', () => { try { ok(d ? JSON.parse(d) : {}); } catch (e) { bad(e); } }); });
@@ -96,10 +101,20 @@ export function createTrading({ api, dir, leading }) {
     if (route === '/state') {
       let account = null, accountError = null;
       if (trader) try { const b = await trader.balances(); account = (b.balances || [])[0] || null; } catch (e) { accountError = String(e.message || e); }
-      return send(res, 200, { enabled: ENABLED, killed: db.killed, connected: !!trader, account, accountError, limits: LIMITS,
-        spentToday: +spentToday().toFixed(2), openBets: openBets(), opportunities: await opportunities(), trades: db.trades.slice(-100).reverse() });
+      return send(res, 200, { autopilot: { ...auto.state(), liveAllowed: LIVE_AUTO() }, enabled: ENABLED, killed: db.killed, connected: !!trader, account, accountError, limits: LIMITS,
+        spentToday: +spentToday().toFixed(2), openBets: openBets(), opportunities: await opportunities(), trades: db.trades.filter(t => t.mode !== 'paper').slice(-100).reverse(), paperTrades: db.trades.filter(t => t.mode === 'paper').slice(-100).reverse() });
     }
-    if (route === '/kill' && req.method === 'POST') { const { on } = await body(req); db.killed = !!on; save(); return send(res, 200, { killed: db.killed }); }
+    if (route === '/autopilot/parse' && req.method === 'POST') {
+      const { prompt } = await body(req); const r = await auto.parse(prompt);
+      const cfg = clampConfig(r.config, LIMITS, false); return send(res, 200, { config: cfg, summary: describe(cfg), source: r.source });
+    }
+    if (route === '/autopilot/start' && req.method === 'POST') {
+      const { config } = await body(req); const cfg = clampConfig(config || {}, LIMITS, config && config.mode === 'live');
+      if (cfg.mode === 'live' && !LIVE_AUTO()) return send(res, 409, { error: 'Live autopilot is off. It needs TRADING_ENABLED=true, AUTOPILOT_LIVE=true and Polymarket US keys in Render. Paper mode works now.' });
+      try { return send(res, 200, { run: auto.start(cfg) }); } catch (e) { return send(res, 409, { error: e.message }); }
+    }
+    if (route === '/autopilot/stop' && req.method === 'POST') { auto.stop(); return send(res, 200, { ok: true }); }
+    if (route === '/kill' && req.method === 'POST') { const { on } = await body(req); db.killed = !!on; if (on) auto.stop(); save(); return send(res, 200, { killed: db.killed }); }
 
     if (route === '/preview' && req.method === 'POST') {
       const o = await body(req);
@@ -149,7 +164,7 @@ export function createTrading({ api, dir, leading }) {
       { ok: plan.maxCost <= LIMITS.maxOrder, msg: `Worst case $${plan.maxCost} fits the $${LIMITS.maxOrder} per-order limit` },
       { ok: spent + plan.maxCost <= LIMITS.maxDaily, msg: `Stays under the $${LIMITS.maxDaily} daily limit ($${spent.toFixed(2)} used today)` },
       { ok: openBets() < LIMITS.maxOpen, msg: `Fewer than ${LIMITS.maxOpen} bets open` },
-      { ok: !db.trades.some(t => t.qty > 0 && t.status === 'open' && t.slug === plan.slug), msg: 'Not already holding this market' },
+      { ok: !db.trades.some(t => t.mode !== 'paper' && t.qty > 0 && t.status === 'open' && t.slug === plan.slug), msg: 'Not already holding this market' },
     ];
   }
   return { handle };

@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const LIVE = createLive({ api: API, pages: { cfb: path.join(ROOT, 'game.html'), nfl: path.join(ROOT, 'nfl', 'game.html') }, dataDir: DATA_DIR });
 // Private one-tap trading on Polymarket US (off unless TRADE_PASSWORD is set; see api/trade.mjs)
-const TRADE = createTrading({ api: API, dir: DATA_DIR, leading: l => LIVE.leadingFor(l) });
+const TRADE = createTrading({ api: API, dir: DATA_DIR, leading: l => LIVE.leadingFor(l), picks: LIVE.picks });
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',

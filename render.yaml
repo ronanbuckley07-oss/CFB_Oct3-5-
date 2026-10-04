@@ -39,3 +39,9 @@ services:
         value: "5"
       - key: PAPER_STAKE
         value: "10"
+      # Autopilot. Paper mode always works; live autopilot also needs TRADING_ENABLED=true.
+      - key: AUTOPILOT_LIVE
+        value: "false"
+      # Optional: lets Claude read your autopilot instructions (otherwise a built-in reader does it)
+      - key: ANTHROPIC_API_KEY
+        sync: false

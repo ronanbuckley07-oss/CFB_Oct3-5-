@@ -100,6 +100,25 @@ sized so the worst-case cost fits the per-order limit. The server re-checks ever
 position in the same market, and has a kill switch (persisted on the disk). Trades are logged to `$DATA_DIR/trades.json`
 and graded at the final. Keys never leave the server and are never sent to the browser.
 
+## Autopilot
+
+On `/trade`, type instructions ("spend up to $100 on NFL games today, low risk, max $10 a bet, stop if I'm down $30").
+The server turns them into settings (Claude reads them if `ANTHROPIC_API_KEY` is set, otherwise a built-in reader),
+shows them as an editable form, and nothing starts until you press Start. Then every 30 seconds inside the window it:
+- learns how much to trust the model vs. the market per risk tier, by maximum likelihood on every settled bet the
+  site has logged, with a prior at 50% worth about 40 results, so it moves only when the record is clear;
+- prices each Polymarket US candidate at that learned blend, walks the real order book, and needs 2+ points of value
+  per contract after fees;
+- sizes with fractional Kelly ((p - c) / (1 - c)): 15% of Kelly on low risk (favorites only), 25% on medium
+  (favorites and coin flips), 40% on high (all tiers), capped by your max per bet and remaining budget;
+- places at most one bet per 30 seconds, two per game, never twice in one market.
+It stops at the end of the window, when the budget is spent, when settled losses reach your limit, on the kill switch,
+or after 3 order errors in a row. Paper mode records fills against the real order book without ordering. Live mode
+needs `TRADING_ENABLED=true` and `AUTOPILOT_LIVE=true`, and every live order still passes the manual-trading caps.
+
+The Portfolio chart records account value (cash plus open positions, from Polymarket US) every 5 minutes, and the
+autopilot's paper profit with open bets marked to the order book midpoint.
+
 ## NFL model
 
 `public/nfl/game.html` is generated, not edited by hand. After changing `public/game.html`, run

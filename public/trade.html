@@ -39,6 +39,13 @@ th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:12
 .rtabs{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 8px}
 .rtabs button{border-radius:999px;padding:5px 12px;font-size:14px;color:var(--muted);background:transparent}
 .rtabs button span{opacity:.8;margin-left:3px}.rtabs button[aria-selected="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
+textarea{width:100%;min-height:70px;font:500 15px Barlow,sans-serif;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px 16px;margin:10px 0}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:600}
+.form input,.form select{width:100%}
+select{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.log{list-style:none;padding:0;margin:8px 0 0;max-height:260px;overflow:auto;font-size:13.5px}.log li{padding:5px 0;border-bottom:1px solid var(--line)}
+.log time{color:var(--muted);margin-right:8px;font-variant-numeric:tabular-nums}
 #preview{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
 #preview .card{max-width:560px;width:100%;margin:0;max-height:90vh;overflow:auto}
 </style></head>
@@ -54,6 +61,15 @@ th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:12
 <div id="desk" hidden>
   <section class="card" id="status"></section>
   <section class="card">
+    <div class="row" style="justify-content:space-between"><h2>Portfolio</h2>
+      <div class="rtabs" id="pfTabs"><button data-s="real" aria-selected="true">Account value</button><button data-s="paper" aria-selected="false">Autopilot paper profit</button>
+      <span style="width:10px"></span><button data-r="1">1D</button><button data-r="7">1W</button><button data-r="30">1M</button><button data-r="0" aria-selected="true">All</button></div></div>
+    <div id="pfNums" class="stats"></div>
+    <svg id="pf" viewBox="0 0 900 260" style="width:100%;height:auto;display:block;margin-top:8px" role="img" aria-label="Portfolio value over time"></svg>
+    <p class="small" id="pfNote" style="margin:4px 0 0"></p>
+  </section>
+  <section class="card" id="ap"></section>
+  <section class="card">
     <h2>Bets available now</h2>
     <p class="small">The model's Polymarket US bets on live games. Each is judged on a fair price halfway between the model and the market, after fees. "What your stake buys" walks the real order book; expected profit uses the fair price.</p>
     <div class="rtabs" id="tierTabs"></div><p class="small" id="tierDesc" style="margin-top:0"></p>
@@ -62,6 +78,10 @@ th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:12
   <section class="card">
     <h2>Your trades</h2>
     <div class="tblwrap"><table><thead><tr><th>Bet</th><th>Contracts</th><th>Avg price</th><th>Fee</th><th>Cost</th><th>Result</th></tr></thead><tbody id="trades"></tbody></table></div>
+  </section>
+  <section class="card">
+    <h2>Autopilot paper bets</h2>
+    <div class="tblwrap"><table><thead><tr><th>Bet</th><th>Contracts</th><th>Avg price</th><th>Fee</th><th>Cost</th><th>Result</th></tr></thead><tbody id="ptrades"></tbody></table></div>
   </section>
 </div>
 </div>
@@ -113,6 +133,9 @@ function render(){
       <td><button data-i="${i}" ${o.fill?'':'disabled'}>Preview</button></td></tr>`).join('')
     :'<tr><td colspan="7" class="small">No Polymarket US bet in this tier clears the bar right now. Bets appear here during live games that have Polymarket US markets.</td></tr>';
   $('opps').querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>preview(O[+b.dataset.i]));
+  renderPortfolio(); renderAuto();
+  const PT=S.paperTrades||[];
+  $('ptrades').innerHTML=PT.length?PT.map(t=>`<tr><td><b>${esc(t.sel)}</b> <span class="small">${esc(t.matchup||'')}, ${esc(t.tier||'')}, ${new Date(t.at).toLocaleString([], {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}</span></td><td>${t.qty}</td><td>${c(t.avg)}</td><td>${usd(t.fee)}</td><td>${usd(t.cost)}</td><td class="${t.status==='won'?'good':t.status==='lost'?'bad':''}">${t.status==='open'?'open':`${t.status} ${t.pl!=null?usd(t.pl):''}`}</td></tr>`).join(''):'<tr><td colspan="6" class="small">No paper bets yet.</td></tr>';
   const T=S.trades||[];
   $('trades').innerHTML=T.length?T.map(t=>`<tr><td><b>${esc(t.sel)}</b> <span class="small">${esc(t.matchup||'')}, ${new Date(t.at).toLocaleString([], {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}</span>${t.error?`<br><span class="bad small">${esc(t.error)}</span>`:''}</td>
       <td>${t.qty}</td><td>${c(t.avg)}</td><td>${usd(t.fee)}</td><td>${usd(t.cost)}</td>
@@ -148,6 +171,88 @@ async function preview(o){
     const t=j.trade; $('pvMsg').innerHTML=t.qty>0?`<span class="good">Filled ${t.qty} at ${c(t.avg)}, fee ${usd(t.fee)}, total ${usd(t.cost)}.</span>`:`<span class="bad">Not filled${t.error?`: ${esc(t.error)}`:'. The price moved past your limit.'}</span>`;
   };
 }
+
+// ===== Portfolio chart =====
+let pfSeries='real', pfRange=0;
+document.querySelectorAll('#pfTabs [data-s]').forEach(b=>b.onclick=()=>{pfSeries=b.dataset.s; document.querySelectorAll('#pfTabs [data-s]').forEach(x=>x.setAttribute('aria-selected',String(x===b))); renderPortfolio();});
+document.querySelectorAll('#pfTabs [data-r]').forEach(b=>b.onclick=()=>{pfRange=+b.dataset.r; document.querySelectorAll('#pfTabs [data-r]').forEach(x=>x.setAttribute('aria-selected',String(x===b))); renderPortfolio();});
+function renderPortfolio(){
+  const P=(S.autopilot&&S.autopilot.portfolio)||{real:[],paper:[]};
+  let pts=(pfSeries==='real'?P.real.map(p=>({t:Date.parse(p.t),v:p.total,cash:p.cash,pos:p.positions})):P.paper.map(p=>({t:Date.parse(p.t),v:p.pl,open:p.open})));
+  if(pfRange) pts=pts.filter(p=>p.t>=Date.now()-pfRange*86400000);
+  const svg=$('pf'), W=900,H=260,L=60,R=14,T=14,B=30;
+  if(pts.length<2){ svg.innerHTML=`<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="var(--muted)" font-size="15">${pfSeries==='real'?(S.connected?'The first points appear within 5 minutes and build from there.':'Connect Polymarket US keys to track your account value.'):'Paper profit appears once the autopilot has placed bets.'}</text>`;
+    $('pfNums').innerHTML=''; $('pfNote').textContent=''; return; }
+  let lo=Math.min(...pts.map(p=>p.v)), hi=Math.max(...pts.map(p=>p.v)); if(pfSeries==='paper'){lo=Math.min(lo,0);hi=Math.max(hi,0);} if(hi-lo<1){hi+=0.5;lo-=0.5;}
+  const pad=(hi-lo)*0.08; lo-=pad; hi+=pad;
+  const t0=pts[0].t, t1=pts[pts.length-1].t, X=t=>L+(W-L-R)*(t-t0)/Math.max(1,t1-t0), Y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+  let g='';
+  for(let i=0;i<=4;i++){ const v=lo+(hi-lo)*i/4, y=Y(v); g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L-6}" y="${y+4}" font-size="12" fill="var(--muted)" text-anchor="end">${v<0?'−':''}$${Math.abs(v).toFixed(Math.abs(hi-lo)<20?2:0)}</text>`; }
+  if(pfSeries==='paper'&&lo<0&&hi>0) g+=`<line x1="${L}" x2="${W-R}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--muted)" stroke-dasharray="4 4"/>`;
+  for(let i=0;i<=4;i++){ const t=t0+(t1-t0)*i/4; g+=`<text x="${X(t)}" y="${H-8}" font-size="12" fill="var(--muted)" text-anchor="middle">${new Date(t).toLocaleString([], (t1-t0)>2*86400000?{month:'numeric',day:'numeric'}:{hour:'numeric',minute:'2-digit'})}</text>`; }
+  const d=pts.map((p,i)=>`${i?'L':'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join(''), last=pts[pts.length-1], first=pts[0], up=pfSeries==='paper'?last.v>=0:last.v>=first.v;
+  g+=`<path d="${d}L${X(last.t)},${Y(lo)}L${X(first.t)},${Y(lo)}Z" fill="${up?'var(--good)':'var(--bad)'}" opacity=".08"/><path d="${d}" fill="none" stroke="${up?'var(--good)':'var(--bad)'}" stroke-width="2.5"/>`;
+  g+=`<circle cx="${X(last.t)}" cy="${Y(last.v)}" r="4" fill="${up?'var(--good)':'var(--bad)'}"/>`;
+  svg.innerHTML=g;
+  const ch=last.v-first.v;
+  $('pfNums').innerHTML=pfSeries==='real'
+    ?`<div><b>${usd(last.v)}</b><span>account value</span></div><div><b>${usd(last.cash)}</b><span>cash</span></div><div><b>${usd(last.pos)}</b><span>in open positions</span></div><div><b class="${ch>=0?'good':'bad'}">${ch>=0?'+':''}${usd(ch)}</b><span>change over this range</span></div>`
+    :`<div><b class="${last.v>=0?'good':'bad'}">${last.v>=0?'+':''}${usd(last.v)}</b><span>paper profit, open bets marked to the book</span></div><div><b>${usd(last.open)}</b><span>open positions worth</span></div>`;
+  $('pfNote').textContent=pfSeries==='real'?'Cash plus the value of open positions, from Polymarket US every 5 minutes. Deposits and withdrawals move it too.':'Settled profit plus open paper bets valued at the current order book midpoint, every 5 minutes.';
+}
+
+// ===== Autopilot =====
+let apDraft=null;
+const toLocal=iso=>{ const d=new Date(iso); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,16); };
+function renderAuto(){
+  if(busy) return; const A=S.autopilot||{}, run=A.run, el=$('ap'), tr=A.trust||{};
+  const learned=`<details><summary class="small" style="cursor:pointer">What it has learned</summary><p class="small">How much it trusts the model over the market, per tier, fit to every settled bet (starts at 50%):
+    ${['low','medium','high'].map(k=>`${k==='low'?'low risk':k==='high'?'high risk':'medium'} <b>${Math.round((tr[k]?tr[k].w:0.5)*100)}%</b> from ${tr[k]?tr[k].n:0} results`).join(', ')}.
+    With few results it stays near 50%; it only moves far when the record clearly favors one side.</p></details>`;
+  if(run&&run.status==='running'){
+    const st=run.stats, c=run.config, left=Math.max(0,Date.parse(c.end)-Date.now());
+    el.innerHTML=`<div class="row" style="justify-content:space-between"><h2>Autopilot: running</h2><button class="danger" id="apStop">Stop autopilot</button></div>
+      <p class="small">${esc(run.summary)}</p>
+      <div class="stats"><div><b>${usd(st.spent)} / $${c.budget}</b><span>spent / budget</span></div><div><b class="${st.realized>=0?'good':'bad'}">${st.realized>=0?'+':''}${usd(st.realized)}</b><span>settled profit (stops at −$${c.stopLoss})</span></div>
+        <div><b>${st.bets}</b><span>bets (${st.won} won, ${st.lost} lost)</span></div><div><b>${Math.floor(left/3600000)}h ${Math.floor(left%3600000/60000)}m</b><span>left in window</span></div></div>
+      <ul class="log">${run.log.map(l=>`<li><time>${new Date(l.at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</time>${esc(l.msg)}</li>`).join('')}</ul>${learned}`;
+    $('apStop').onclick=async()=>{ await post('/autopilot/stop'); load(); };
+    return;
+  }
+  if($('apPrompt')&&($('apPrompt').value||apDraft||el.contains(document.activeElement))) return; // don't wipe what you're typing
+  const lastRun=run?`<p class="small">Last run ${esc(run.reason||'')}: ${run.stats.bets} bets, ${usd(run.stats.spent)} spent, settled ${run.stats.realized>=0?'+':''}${usd(run.stats.realized)}.</p>`:'';
+  el.innerHTML=`<h2>Autopilot</h2>
+    <p class="small">Tell it what to do in a sentence. It shows you the settings it understood before anything starts, then bets on its own during your window and stops at your budget, your loss limit, the end of the window, or the kill switch. Paper mode places no real orders.</p>
+    <textarea id="apPrompt" placeholder="Spend up to $100 on NFL games today, low risk, no more than $10 a bet, and stop if I'm down $30."></textarea>
+    <div class="row" style="margin-top:8px"><button class="primary" id="apParse">Read my instructions</button><span class="small" id="apMsg"></span></div>
+    <div id="apForm"></div>${lastRun}${learned}`;
+  $('apParse').onclick=async()=>{ $('apMsg').textContent='Reading…'; const r=await post('/autopilot/parse',{prompt:$('apPrompt').value}); const j=await r.json(); if(!r.ok){$('apMsg').textContent=j.error;return;}
+    apDraft=j.config; $('apMsg').textContent=j.source==='claude'?'Read by Claude. Check the settings below.':'Check the settings below.'; drawForm(j.summary); };
+  if(apDraft) drawForm();
+}
+function drawForm(summary){
+  const c=apDraft, A=S.autopilot||{}, live=A.liveAllowed;
+  $('apForm').innerHTML=`<div class="form">
+      <label>Total budget ($)<input type="number" id="f_budget" min="1" step="1" value="${c.budget}"></label>
+      <label>Max per bet ($)<input type="number" id="f_max" min="1" step="1" value="${c.maxPerBet}"></label>
+      <label>Stop after losing ($)<input type="number" id="f_stop" min="1" step="1" value="${c.stopLoss}"></label>
+      <label>Risk<select id="f_risk">${['low','medium','high'].map(r=>`<option value="${r}" ${c.risk===r?'selected':''}>${(A.risk&&A.risk[r]?A.risk[r].label:r)}</option>`).join('')}</select></label>
+      <label>Start<input type="datetime-local" id="f_start" value="${toLocal(c.start)}"></label>
+      <label>End<input type="datetime-local" id="f_end" value="${toLocal(c.end)}"></label>
+      <label>Leagues<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_cfb" ${c.leagues.includes('cfb')?'checked':''}> College</span><span><input type="checkbox" id="f_nfl" ${c.leagues.includes('nfl')?'checked':''}> NFL</span></span></label>
+      <label>Mode<select id="f_mode"><option value="paper">Paper (no real money)</option><option value="live" ${live?'':'disabled'}>Live money${live?'':' (off in Render)'}</option></select></label>
+    </div>
+    <p class="small" id="apSum">${esc(summary||'')}</p>
+    <div class="row"><button class="primary" id="apStart">Start autopilot</button><button id="apCancel">Cancel</button></div>`;
+  $('apCancel').onclick=()=>{ apDraft=null; $('apForm').innerHTML=''; };
+  $('apStart').onclick=async()=>{
+    const cfg={budget:+$('f_budget').value,maxPerBet:+$('f_max').value,stopLoss:+$('f_stop').value,risk:$('f_risk').value,start:new Date($('f_start').value).toISOString(),end:new Date($('f_end').value).toISOString(),
+      leagues:[$('f_cfb').checked&&'cfb',$('f_nfl').checked&&'nfl'].filter(Boolean),mode:$('f_mode').value};
+    if(cfg.mode==='live'&&!confirm(`Start LIVE autopilot with up to $${cfg.budget} of real money?`)) return;
+    const r=await post('/autopilot/start',{config:cfg}); const j=await r.json(); if(!r.ok){ $('apSum').innerHTML=`<span class="bad">${esc(j.error)}</span>`; return; }
+    apDraft=null; load(); };
+}
+
 function closePv(){ $('preview').hidden=true; busy=false; load(); }
 $('loginForm').onsubmit=async e=>{ e.preventDefault(); const r=await post('/login',{password:$('pw').value}); const j=await r.json(); if(r.ok){ $('pw').value=''; load(); } else $('loginMsg').textContent=j.error||'Failed'; };
 $('logout').onclick=async()=>{ await post('/logout'); load(); };
