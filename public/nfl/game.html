@@ -285,7 +285,7 @@ header.top{align-items:center}
   <p class="gate-status" id="gateStatus"></p>
   <div class="gate-side" id="gateSide" hidden><span class="small">Show win probability for</span><div class="seg" id="sideSeg"></div></div>
   <button class="go gate-go" id="gateGo" disabled>Go live</button>
-  <p class="small gate-note" id="gateNote">Going live connects you to the server, which checks ESPN every 3 seconds and runs 25,000 simulations once per play, shared by everyone watching this game.</p>
+  <p class="small gate-note" id="gateNote">Going live connects you to the server, which checks ESPN every second and reruns 25,000 simulations after every play, shared by everyone watching this game.</p>
 </section>
 
 <div id="app" hidden>
@@ -1279,7 +1279,13 @@ syncInputs(); drawChart(); renderLog(); renderCLT(); // sims start from the Go l
 
 // ===== Live ESPN feed =====
 const LIVE={event:'401858250',date:'20261003',teams:{'87':'ND','153':'UNC'},abbr:{ND:'ND',UNC:'UNC'},
-  endpoint:LG.api, every:3000}; // the game state is checked every 3 seconds
+  endpoint:LG.api, every:1000}; // the game state is checked every second
+// Same rule as the server: a play (down, spot, possession, score, play text) triggers new sims; the clock alone only
+// after 30 seconds, or 5 inside the last two minutes of a half
+const playKey=o=>[o.qtr,o.nd,o.unc,o.poss,o.down,o.dist,o.pos].join('|');
+function simDue(o,last){ if(!last||playKey(o)!==last.pk||(o.lastPlay&&o.lastPlay!==last.lp)) return true; if(o.secs==null||last.secs==null) return false;
+  const late=(o.qtr===2||o.qtr===4)&&o.secs<=120; return Math.abs(last.secs-o.secs)>=(late?5:30); }
+let lastSim=null;
 let liveOn=false, liveTimer=null, lastKey='', lastPlayText=null, edgeSetFromLine=false, pollN=0;
 const clockT=(per,clk)=>{const c=clockToSecs(clk); return per&&c!=null?(Math.min(4,per)-1)*900+(900-c):null;};
 // ESPN's own win probability for the same game, drawn as the dashed line on the chart
@@ -1371,9 +1377,11 @@ function applyPoll(ev){
     else setLive(`Live: ${o.detail}${o.downText?' · '+o.downText:''}. Updated ${new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'})}${liveDelay?`, held ${liveDelay}s to match your stream`:''}.`,'ok');
     const newPlay = o.lastPlay && o.lastPlay!==lastPlayText;
     if(key!==lastKey||newPlay){
-      const pre=Object.assign({},S); lastKey=key; applyLive(o);
+      const pre=Object.assign({},S), due=simDue(o,lastSim); lastKey=key; applyLive(o);
       if(newPlay){ if(lastPlayText!==null){ const ev=(pred&&pred.key===coreKey(pre))?evaluate(observeLive(pre,S,o.lastPlay)):null; addLog(o.lastPlay,ev,pre);} lastPlayText=o.lastPlay; }
-      syncInputs(); runSims();
+      syncInputs();
+      // re-run after every play; a clock-only change just moves the scoreboard
+      if(due){ lastSim={pk:playKey(o),secs:o.secs,lp:o.lastPlay}; runSims(); }
     }
     pullExtras(false); pollN++;
   }
@@ -1415,7 +1423,7 @@ async function loadGame(g){
     upcoming:schedFrom(ua,g.event).upcoming||null, played:schedFrom(ua,g.event).played||[]};
   LIVE.event=g.event; if(g.date) LIVE.date=g.date; LIVE.teams={[g.A.id]:'ND',[g.B.id]:'UNC'};
   const keep={esd:S.esd,seed:S.seed}; S=Object.assign({},DEF,keep,{edge:0,total:52});
-  hist=[]; wpHist=[]; plog=[]; espnWP=[]; mkHist=[]; MK=null; MKH={k:[],p:[]}; WALL=[]; SUMMARY=null; PRE=null; bfRun++; lastAgg=null; lastWP=null; pred=null; lastKey=''; lastPlayText=null; edgeSetFromLine=false;
+  hist=[]; wpHist=[]; plog=[]; espnWP=[]; mkHist=[]; MK=null; MKH={k:[],p:[]}; WALL=[]; SUMMARY=null; PRE=null; bfRun++; lastAgg=null; lastWP=null; pred=null; lastKey=''; lastSim=null; lastPlayText=null; edgeSetFromLine=false;
   try{ const r=await fetch(`${LIVE.endpoint}?event=${LIVE.event}&date=${LIVE.date}`,{cache:'no-store'}); if(r.ok){ const o=parseEspn(await r.json());
       if(o.edge!=null){S.edge=o.edge; edgeSetFromLine=true;} if(o.total) S.total=o.total; if(!(PRE&&PRE.homeMargin!=null)) $('lineInfo').textContent=o.line?`Line: ${o.line} (sets ${TA('ND')} edge)`:''; else $('lineInfo').textContent=`Starting edge: ${TA(S.edge>=0?'ND':'UNC')} by ${Math.abs(S.edge).toFixed(1)} (average of ${PRE.sources.length} pregame reads). Book line ${o.line||'n/a'}.`; } }catch(e){}
   if(!edgeSetFromLine||S.total===52||true){ try{ const r=await fetch(`${LIVE.endpoint}?kind=summary&event=${LIVE.event}`); if(r.ok){ const s=await r.json(), od=s.odds||{};
@@ -1880,6 +1888,7 @@ function mergeHist(pts){
 }
 function viewerNote(){ return SRV.viewers>1?`shared with ${SRV.viewers} people watching`:'shared with anyone else who opens this game'; }
 function applyServerResult(r){
+  SRV.appliedKey=r.key; SRV.appliedFinal=r.final;
   for(const k of ['edge','esd','total','half2Recv']) if(r.S&&r.S[k]!=null) S[k]=r.S[k];
   render(r.A,r.final);
   $('prog').textContent=r.final?`25,000 simulations on the server, ${viewerNote()}. ±${(100*Math.sqrt(Math.max(.0001,(r.A.win/r.A.n)*(1-r.A.win/r.A.n))/r.A.n)*1.96).toFixed(1)} pts on win probability.`
@@ -1887,7 +1896,7 @@ function applyServerResult(r){
 }
 function showServer(){
   readInputs(); renderBoard(); save();
-  const r=SRV.res[SRV.cur]; if(r) applyServerResult(r); else $('prog').textContent='The server is simulating this play…';
+  const r=SRV.res[SRV.cur]; if(r){ if(!(r.key===SRV.appliedKey&&r.final===SRV.appliedFinal)) applyServerResult(r); } else $('prog').textContent='The server is simulating this play…';
   if(S.down===4){ const f=SRV.fourth[SRV.cur]; if(f) renderFourth(f.res); else { fourthHeader(); $('f4sub').textContent=`The server is simulating ${N_OPT.toLocaleString()} games for each option…`; $('f4bars').innerHTML=''; $('f4rec').textContent=''; } }
   else $('rFourth').hidden=true;
 }
@@ -1902,7 +1911,7 @@ function startServerLive(){
     SRV.viewers=m.viewers; mergeHist(m.hist);
     if(m.last&&m.last.result) SRV.res[m.last.result.key]=m.last.result;
     if(m.last&&m.last.fourth) SRV.fourth[m.last.fourth.key]=m.last.fourth;
-    if(m.last&&m.last.ev){ lastKey=''; liveQ.push({at:Date.now(),ev:m.last.ev,skey:m.last.skey}); drainLive(); }
+    if(m.last&&m.last.ev){ lastKey=''; lastSim=null; liveQ.push({at:Date.now(),ev:m.last.ev,skey:m.last.skey}); drainLive(); }
     else setLive('Connected. Waiting for the first update from ESPN…','ok');
     drawChart(); pullExtras(true); });
   es.addEventListener('ev',e=>{ const m=J(e); liveQ.push({at:Date.now()+liveDelay*1000,ev:m.ev,skey:m.skey}); pullExtras(false); });

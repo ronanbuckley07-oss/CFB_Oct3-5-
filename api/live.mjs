@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { createPool } from './simpool.mjs';
 
-const POLL_MS = 3000, IDLE_STOP_MS = 60000, FORGET_MS = 20 * 60000;
+const POLL_MS = 1000, IDLE_STOP_MS = 60000, FORGET_MS = 20 * 60000;
 const N_QUICK = 3000, N_FULL = 25000, N_OPT = 8000, N_BACKFILL = 1500;
 const ESD_BASE = 5.5;
 const DEF = { poss: 'ND', pos: 25, down: 1, dist: 10, qtr: 1, secs: 900, nd: 0, unc: 0, half2Recv: 'UNC', toND: 3, toUNC: 3 };
@@ -117,10 +117,14 @@ export function createLive({ api, pages }) {
         for (const k of ['qtr', 'secs', 'nd', 'unc', 'poss', 'down', 'dist', 'pos', 'toND', 'toUNC']) if (o[k] != null) this.S[k] = o[k];
         if (this.S.pos != null) this.S.dist = Math.min(this.S.dist, 100 - this.S.pos);
         if (o.state === 'in' && !this.half2Known) this.refreshHalf2();
-        const key = JSON.stringify([o.qtr, o.secs, o.nd, o.unc, o.poss, o.down, o.dist, o.pos]);
+        // Re-simulate after every play (new down, spot, possession, score or play text), not every clock tick
+        if (simDue(o, this.lastSim)) {
+          this.lastSim = { pk: playKey(o), secs: o.secs, lp: o.lastPlay };
+          this.key = JSON.stringify([o.qtr, o.secs, o.nd, o.unc, o.poss, o.down, o.dist, o.pos]);
+          this.simulate(this.key, Object.assign({}, this.S));
+        }
         const slim = trimEv(ev), sj = JSON.stringify(slim);
-        if (sj !== this.lastEv) { this.lastEv = sj; this.last.ev = slim; this.last.skey = key; this.broadcast('ev', { ev: slim, skey: key }); }
-        if (key !== this.key) { this.key = key; this.simulate(key, Object.assign({}, this.S)); }
+        if (sj !== this.lastEv) { this.lastEv = sj; this.last.ev = slim; this.last.skey = this.key; this.broadcast('ev', { ev: slim, skey: this.key }); }
         if (o.state === 'post') { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), 30000); }
       } catch (e) {
         if (++this.fails % 5 === 0) this.broadcast('warn', { error: String(e.message || e) });
@@ -177,6 +181,15 @@ export function createLive({ api, pages }) {
   return { handle, status, leagues: Object.keys(datas) };
 }
 
+// A new play changes the down, spot, possession, score or ESPN's play text. The clock alone only counts once 30 seconds
+// have run off (5 seconds inside the last two minutes of a half, where the clock itself moves win probability).
+const playKey = o => [o.qtr, o.nd, o.unc, o.poss, o.down, o.dist, o.pos].join('|');
+function simDue(o, last) {
+  if (!last || playKey(o) !== last.pk || (o.lastPlay && o.lastPlay !== last.lp)) return true;
+  if (o.secs == null || last.secs == null) return false;
+  const late = (o.qtr === 2 || o.qtr === 4) && o.secs <= 120;
+  return Math.abs(last.secs - o.secs) >= (late ? 5 : 30);
+}
 // ---------- helpers ported from the page (kept identical so keys and states match the browser's) ----------
 function send(res, type, data) { try { res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} }
 const elapsed = s => (Math.min(4, s.qtr) - 1) * 900 + (900 - s.secs);
@@ -213,6 +226,7 @@ function parseEspn(ev, teams, abbr) {
     const p = String(sit.possessionText || '').match(/^(\w+)\s+(\d+)/);
     if (p && out.poss) { const sv = p[1].toUpperCase(), side = sv === String(abbr.ND).toUpperCase() ? 'ND' : sv === String(abbr.UNC).toUpperCase() ? 'UNC' : null; const yl = +p[2]; if (side) out.pos = side === out.poss ? yl : 100 - yl; }
     else if (/50/.test(String(sit.possessionText || '')) && out.poss) out.pos = 50;
+    if (sit.lastPlay && sit.lastPlay.text) out.lastPlay = sit.lastPlay.text;
     for (const s of ['home', 'away']) { const v = sit[s + 'Timeouts']; if (ha[s] && v != null && v >= 0 && v <= 3) out[ha[s] === 'ND' ? 'toND' : 'toUNC'] = +v; }
   }
   return out;

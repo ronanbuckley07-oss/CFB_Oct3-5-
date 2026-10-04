@@ -28,7 +28,13 @@ const handler = async (req) => {
     if (kind === 'scoreboard') {
       const scope = u.searchParams.get('scope') === 'fbs' ? 'fbs' : 'top';
       const d = await get(`${BASE}/scoreboard?${LG.sbq}&limit=400${date ? `&dates=${date}` : ''}`, 3000);
-      const all = (d.events || []).map(trimEvent).filter(Boolean);
+      const now = Date.now();
+      // A final leaves the board 6 hours after it ended (first time this server saw it final, capped at kickoff + 4.5 h)
+      const all = (d.events || []).map(trimEvent).filter(Boolean).filter(g => {
+        if (g.state !== 'post') return true;
+        const kick = Date.parse(g.date) || now, seen = finalSeen.get(g.id) ?? now;
+        return now - Math.min(seen, kick + 4.5 * 3600000) < 6 * 3600000;
+      });
       const top = all.filter(g => g.home.rank || g.away.rank);
       const games = scope === 'top' && top.length ? top : all;
       return json({ updated: new Date().toISOString(), scope, fallback: scope === 'top' && !top.length,
@@ -86,7 +92,7 @@ const handler = async (req) => {
       return json({ date, games }, 200, 300);
     }
     if (!event) return json({ error: 'missing event' }, 400);
-    const data = await get(`${BASE}/scoreboard?${LG.sbq}&limit=300${date ? `&dates=${date}` : ''}`, 2000);
+    const data = await get(`${BASE}/scoreboard?${LG.sbq}&limit=300${date ? `&dates=${date}` : ''}`, 800);
     const ev = (data.events || []).find(e => String(e.id) === event);
     if (!ev) return json({ error: 'game not found on that date' }, 404);
     return json(ev, 200, 3);
@@ -204,7 +210,7 @@ function trimEvent(e) {
   // ESPN drops win probability between plays and at halftime, so fall back to the last number it sent
   const id = String(e.id);
   if (wpHome != null) lastWp.set(id, wpHome); else if (ty.state === 'in') wpHome = lastWp.get(id) ?? null;
-  if (ty.state === 'post') wpHome = home.winner ? 1 : away.winner ? 0 : null;
+  if (ty.state === 'post') { wpHome = home.winner ? 1 : away.winner ? 0 : null; if (!finalSeen.has(id)) finalSeen.set(id, Date.now()); }
   const od = c.odds?.[0] || {};
   return { id, phase, date: e.date, state: ty.state || null, detail: ty.shortDetail || ty.detail || null,
     period: st.period ?? null, clock: st.displayClock ?? null, neutral: !!c.neutralSite,
@@ -212,7 +218,7 @@ function trimEvent(e) {
     line: od.details || null, ou: od.overUnder ?? null };
 }
 
-const lastWp = new Map();
+const lastWp = new Map(), finalSeen = new Map();
 // "(00:18) No Huddle-Shotgun #13 A.Simmons pass complete..." -> "A.Simmons pass complete..."
 function cleanPlay(t) {
   if (!t) return null;

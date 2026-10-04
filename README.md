@@ -24,8 +24,8 @@ render.yaml       Render blueprint
 
 When someone presses Go live, their page opens a Server-Sent Events connection to `/api/live`. The server keeps one
 tracker per game (per orientation: a viewer showing the other team's win probability gets a second stream). While at
-least one person is connected, that tracker checks ESPN every 3 seconds; when the down, distance, spot, clock or score
-changes, it runs the sims once (3,000 for a quick read, then 25,000, plus 8,000 per option on 4th down) and pushes the
+least one person is connected, that tracker checks ESPN every second; after every play (new down, distance, spot,
+possession, score or play text, or 30 seconds of clock, 5 inside the last two minutes of a half) it runs the sims once (3,000 for a quick read, then 25,000, plus 8,000 per option on 4th down) and pushes the
 same result to everyone watching. It also fills in the model line for plays nobody was around for, at low priority.
 
 Nobody connected: no polling and no sims. A tab left in the background for a minute disconnects itself, and a game with
@@ -92,7 +92,8 @@ Run locally with `npm start` and open http://localhost:3000.
 
 ## Notes
 
-- The game page checks the game state every 3 seconds (`LIVE.every`). ESPN's win-probability line and market prices
+- Live games are checked every second (`POLL_MS` in api/live.mjs; `LIVE.every` for the browser fallback).
+- Finished games leave the home board 6 hours after they end. ESPN's win-probability line and market prices
   refresh every 15 seconds and the box score every 30 (6 while its tab is open). The server caches each ESPN response
   for 2 to 3 seconds, so viewers share requests.
 - Sims run in 1,500-sim chunks across up to 8 threads. When a new play arrives mid-run, the old run stops handing out
