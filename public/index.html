@@ -95,6 +95,12 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .rec td,.rec th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right}.rec td:first-child,.rec th:first-child{text-align:left}
 .rec th{color:var(--muted);font-weight:600;font-size:12.5px}
 .rec .won{color:var(--good);font-weight:700}.rec .lost{color:var(--bad);font-weight:700}
+.rec.lead{border-left-color:#2E9E5B;margin-top:12px}
+.rec .go{font-weight:700;white-space:nowrap;text-decoration:none;color:var(--ink)}.rec .go:hover{color:var(--gold)}
+.rec .edge{color:var(--good);font-weight:700}
+.rec td a{color:inherit}
+.rec .sub{font-size:13px;color:var(--muted);margin:0 0 6px}
+.tagauto{font-size:11px;font-weight:700;color:#0C2340;background:var(--gold);border-radius:999px;padding:1px 7px;margin-left:4px}
 .rec details{margin-top:8px}.rec summary{cursor:pointer;color:var(--muted);font-weight:600;font-size:14px}
 .find{display:flex;gap:8px;flex-wrap:wrap;margin-top:30px;padding-top:16px;border-top:1px solid var(--line);align-items:center}
 .find input{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:min(320px,100%)}
@@ -122,6 +128,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 </header>
 
 <section class="rec" id="rec" hidden></section>
+<section class="rec lead" id="lead" hidden></section>
 <main id="board">
   <div class="grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
 </main>
@@ -274,37 +281,55 @@ $('find').addEventListener('submit',async e=>{
 
 setScope(scope);
 
-// ===== Model picks record =====
+// ===== Model bets: record, past bets, timing, leading bets =====
 async function loadPicks(){
+  const pc=v=>v==null?'–':(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢', money=v=>`${v>0?'+':v<0?'−':''}$${Math.abs(v).toFixed(2)}`;
+  const lg=NFL?'nfl':'cfb';
   try{
-    const r=await fetch(`/api/picks?league=${NFL?'nfl':'cfb'}`,{cache:'no-store'}); if(!r.ok) return; const d=await r.json();
-    const R=d.record, n=R.w+R.l, el=$('rec');
-    if(!n&&!d.open.length){ el.hidden=true; return; }
-    const pc=v=>v==null?'–':(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢';
-    const row=p=>`<tr><td><b>${esc(p.sel)}</b> <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}</span></td><td>${esc(p.venue)}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
-    const head='<thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead>';
-    el.innerHTML=`<h2>Model picks <small>Paper bets logged when the model beat the market price by 5+ points. Not betting advice.</small></h2>
-      <div class="recnums">
-        <div><b>${R.w}–${R.l}${R.push?`–${R.push}`:''}</b><span>record</span></div>
-        <div><b>${pc(R.pct)}</b><span>win rate${R.expected!=null?` (model expected ${pc(R.expected)})`:''}</span></div>
-        <div><b>${R.pl>0?'+':R.pl<0?'−':''}$${Math.abs(R.pl).toFixed(2)}</b><span>profit, $1 contract each</span></div>
-        <div><b>${R.roi==null?'–':(R.roi>0?'+':'')+(R.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
-      </div>
-      ${n&&n<50?`<p style="margin:0 0 8px;font-size:13px;color:var(--muted)">Only ${n} settled pick${n>1?'s':''} so far. Treat the record as noise until it reaches a few hundred.</p>`:''}
-      ${d.open.length?`<table>${head}<tbody>${d.open.slice(0,8).map(row).join('')}</tbody></table>`:''}
-      ${d.settled.length?`<details><summary>Settled picks (${d.settled.length})</summary><table>${head}<tbody>${d.settled.map(row).join('')}</tbody></table></details>`:''}`;
+    const r=await fetch(`/api/picks?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json();
+    const A=d.auto||{w:0,l:0,push:0}, R=d.record, el=$('rec');
+    const all=[...d.open,...d.settled];
+    if(!all.length&&!d.passes){ el.hidden=true; }
+    else {
+      const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.auto?'<span class="tagauto">game bet</span>':''} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.venue)}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
+      const head='<thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead>';
+      const n=A.w+A.l, phases=Object.entries(d.byPhase||{});
+      const order=['Q1 early','Q1 late','Q2 early','Q2 late','Q3 early','Q3 late','Q4 15:00-8:00','Q4 8:00-3:00','Q4 last 3:00'];
+      phases.sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0]));
+      el.innerHTML=`<h2>Model bets <small>One paper bet per game, the biggest gap against Kalshi or Polymarket, taken from ${esc(d.window||'Q3 7:30 to Q4 8:00')}. Not betting advice.</small></h2>
+        <div class="recnums">
+          <div><b>${A.w}–${A.l}${A.push?`–${A.push}`:''}</b><span>game bets</span></div>
+          <div><b>${pc(A.pct)}</b><span>win rate${A.expected!=null?` (model said ${pc(A.expected)})`:''}</span></div>
+          <div><b>${money(A.pl||0)}</b><span>profit, $1 contract each</span></div>
+          <div><b>${A.roi==null?'–':(A.roi>0?'+':'')+(A.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
+        </div>
+        <p class="sub">${d.autoOpen?`${d.autoOpen} game bet${d.autoOpen>1?'s':''} waiting on a final. `:''}${d.passes?`${d.passes} game${d.passes>1?'s':''} passed (no Kalshi or Polymarket market, or no gap big enough to bet). `:''}All logged bets, including ones taken while someone watched: ${R.w}–${R.l}, ${pc(R.pct)}, ${money(R.pl)}.${n&&n<50?` Only ${n} settled game bet${n>1?'s':''} so far, which is noise; it takes a few hundred to mean much.`:''}</p>
+        <details><summary>Past bets (${all.length})</summary><table>${head}<tbody>${all.map(row).join('')}</tbody></table></details>
+        ${phases.length?`<details><summary>When our bets hit</summary><table><thead><tr><th>When the bet was taken</th><th>Record</th><th>Win rate</th><th>Model said</th><th>Return</th></tr></thead><tbody>${phases.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.w}–${v.l}</td><td>${pc(v.pct)}</td><td>${pc(v.expected)}</td><td>${v.roi==null?'–':(v.roi>0?'+':'')+(v.roi*100).toFixed(1)+'%'}</td></tr>`).join('')}</tbody></table>
+          <p class="sub" style="margin-top:8px">The window comes from replaying 2023 to 2025 NFL games against Vegas win probability: between Q3 7:30 and Q4 8:00 the model's disagreements hit 57.5% of the time when it said 58.2%, a +9% return over 269 bets. Earlier, it was overconfident; later, prices were too extreme to matter. This table will show whether our own bets agree.</p></details>`:''}`;
+      el.hidden=false;
+    }
+  }catch(e){}
+  try{
+    const r=await fetch(`/api/picks/leading?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json(), el=$('lead');
+    const anyLive=data&&(data.games||[]).some(g=>g.state==='in');
+    if(!d.bets.length&&!anyLive){ el.hidden=true; return; }
+    el.innerHTML=`<h2>Leading bets right now <small>Live games where the model and the market disagree by 5+ points, biggest gap first. Updated every 30 seconds.</small></h2>
+      ${d.bets.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Gap</th><th></th></tr></thead><tbody>${d.bets.map(b=>`<tr><td><b>${esc(b.sel)}</b> <span style="color:var(--muted)">${esc(b.matchup||'')}, ${esc(b.type)}${b.clock?`, ${esc(b.clock)}`:''}${b.score?`, ${esc(b.score)}`:''}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td class="edge">+${(b.edge*100).toFixed(1)}</td><td><a class="go" href="${GAME}?event=${b.event}">Open game ›</a></td></tr>`).join('')}</tbody></table>
+        <p class="sub" style="margin-top:8px">Open a game and look under Betting for the reasoning behind each one. Gaps over 20 points are skipped as likely stale prices.</p>`
+      :'<p class="sub">No live game has a gap of 5 points or more right now.</p>'}`;
     el.hidden=false;
   }catch(e){}
 }
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },30000);
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.8';
+const BUILD='2026-10-04.9';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.8'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.9'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

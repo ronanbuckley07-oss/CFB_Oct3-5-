@@ -70,6 +70,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/espn' || u.pathname === '/.netlify/functions/espn') return await serveApi(req, res, u, 'cfb');
     if (u.pathname === '/api/nfl') return await serveApi(req, res, u, 'nfl');
     if (u.pathname === '/api/version') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ build: BUILD, live: LIVE.leagues })); return; }
+    if (u.pathname === '/api/picks/leading') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.leadingFor(u.searchParams.get('league') || 'all'))); return; }
     if (u.pathname === '/api/picks') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.report(u.searchParams.get('league') || 'all'))); return; }
     if (u.pathname === '/api/live') return LIVE.handle(req, res, u);
     if (u.pathname === '/api/live/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.status())); return; }
@@ -99,4 +100,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// One bad request or game shouldn't take the whole site down
+process.on('unhandledRejection', e => console.error('unhandled rejection:', e && e.stack || e));
+process.on('uncaughtException', e => console.error('uncaught exception:', e && e.stack || e));
 server.listen(PORT, () => console.log(`Listening on http://localhost:${PORT}`));

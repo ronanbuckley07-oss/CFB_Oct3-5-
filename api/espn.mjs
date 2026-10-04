@@ -59,7 +59,7 @@ const handler = async (req) => {
     }
     if (kind === 'markets') {
       if (!event) return json({ error: 'missing event' }, 400);
-      return json(await markets(event, u.searchParams.get('kalshi'), u.searchParams.get('poly'), u.searchParams.has('debug')), 200, 15);
+      return json(await markets(event, u.searchParams.get('kalshi'), u.searchParams.get('poly'), u.searchParams.has('debug'), u.searchParams.has('nohist')), 200, 15);
     }
     if (kind === 'summary') {
       if (!event) return json({ error: 'missing event' }, 400);
@@ -428,7 +428,7 @@ async function polyFor(A, B, pin, kickoff, t0, t1) {
   }
   return res;
 }
-async function markets(event, kPin, pPin, debug) {
+async function markets(event, kPin, pPin, debug, noHist) {
   await allTeams();
   const s = await get(`${BASE}/summary?event=${event}`, 8000);
   const comp = s.header?.competitions?.[0] || {}, cs = comp.competitors || [];
@@ -438,7 +438,7 @@ async function markets(event, kPin, pPin, debug) {
   const A = byId(away.id) || teamInfo(away.team), B = byId(home.id) || teamInfo(home.team); // A = away, B = home
   // Price history window: an hour before kickoff to now (or to a few hours after kickoff once it's over)
   const kick = comp.date ? Math.floor(new Date(comp.date).getTime() / 1000) : null;
-  const t0 = kick ? kick - 3600 : null, t1 = kick ? Math.min(Math.floor(Date.now() / 1000), kick + 6 * 3600) : null;
+  const t0 = kick && !noHist ? kick - 3600 : null, t1 = kick ? Math.min(Math.floor(Date.now() / 1000), kick + 6 * 3600) : null;
   const [k, p] = await Promise.all([kalshiFor(A, B, kPin, t0, t1, comp.date).catch(e => ({ found: false, error: String(e.message || e) })),
     polyFor(A, B, pPin, comp.date, t0, t1).catch(e => ({ found: false, error: String(e.message || e) }))]);
   const flip = x => x === 'A' ? 'away' : 'home';

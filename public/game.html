@@ -238,8 +238,12 @@ header.top{align-items:center}
 .betx{margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
 .pickbox{margin-bottom:16px;padding:14px;border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:12px;background:var(--paper)}
 .pickbox h3{margin-top:0}
+.picks tr.whyrow td{padding:0 8px 8px;border-bottom:1px solid var(--line)}
+.picks details summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:600}
+.picks .why{font-size:13.5px;line-height:1.5;max-width:80ch;text-align:left;padding:4px 0 2px}.picks .why p{margin:6px 0}
+.tagauto{font-size:11px;font-weight:700;color:#0C2340;background:var(--gold);border-radius:999px;padding:1px 7px;margin-left:4px}
 .picks{width:100%;font-size:14px}.picks td,.picks th{padding:6px 8px;text-align:right}.picks td:first-child,.picks th:first-child{text-align:left}
-.picks .edge{color:var(--good);font-weight:700}.picks .won{color:var(--good);font-weight:700}.picks .lost{color:var(--bad);font-weight:700}
+.picks .edge{color:var(--good);font-weight:700}.picks td a{color:inherit}.picks .won{color:var(--good);font-weight:700}.picks .lost{color:var(--bad);font-weight:700}
 .cboxes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:stretch}
 @media (max-width:900px){.cboxes{grid-template-columns:1fr}}
 .cbox{border:1px solid var(--line);border-top:4px solid var(--c);border-radius:12px;padding:14px;background:var(--paper)}
@@ -1946,17 +1950,58 @@ document.addEventListener('visibilitychange',()=>{
 
 
 // ===== Picks: bets where the model beats the market price, from the live server =====
+const WIN_LABEL='Q3 7:30 to Q4 8:00';
+const inWin=st=>(st.qtr===3&&st.secs<=450)||(st.qtr===4&&st.secs>=480), beforeWin=st=>st.qtr<3||(st.qtr===3&&st.secs>450);
+const ordn=n=>['','1st','2nd','3rd','4th'][n]||'';
+function spotText(st,abbr){ // st.pos is yards from the offense's own goal
+  if(!st.down) return `${st.poss} ball`;
+  const own=st.pos<=50, yl=own?st.pos:100-st.pos, other=st.poss===abbr.ND?abbr.UNC:abbr.ND;
+  return `${st.poss} ball, ${ordn(st.down)} & ${st.dist>=100-st.pos?'goal':st.dist} at ${yl===50?'midfield':`the ${own?st.poss:other} ${yl}`}`;
+}
+// Plain-language reasons for one bet. ctx: state, abbr {ND,UNC}, sims, avgMargin (ND minus UNC), avgTotal, median [ND,UNC], start, trend
+function explainBet(e,ctx){
+  const pc=v=>(v*100).toFixed(1)+'%', st=ctx.state, ab=ctx.abbr, ev=e.model-e.cost;
+  const clock=`Q${st.qtr} ${Math.floor(st.secs/60)}:${String(st.secs%60).padStart(2,'0')}`;
+  const what=e.type==='moneyline'?`${e.team} wins`:e.type==='spread'?(e.by>0?`${e.team} wins by more than ${e.by}`:`${e.team} wins, or loses by less than ${-e.by}`):`the teams combine for ${e.over?'more':'fewer'} than ${e.line} points`;
+  const m=ctx.avgMargin, out=[];
+  out.push(`<p><b>The gap.</b> The model gives this a ${pc(e.model)} chance. ${e.venue} charges about ${Math.round(e.cost*100)}¢ to buy it once the bid/ask is included, so the market is pricing it near ${pc(e.mid!=null?e.mid:e.cost)}. That leaves ${(e.edge*100).toFixed(1)} points: about ${Math.round(ev*100)}¢ of expected profit per $1 contract, or ${Math.round(ev/e.cost*100)}% of the price, if the model's number is right.</p>`);
+  out.push(`<p><b>Where the ${pc(e.model)} comes from.</b> It is the share of ${Number(ctx.sims).toLocaleString()} simulated finishes, each played out from this exact spot (${spotText(st,ab)}, ${clock}, ${ab.ND} ${st.nd}, ${ab.UNC} ${st.unc}), in which ${what}. Across those sims the average final margin is ${Math.abs(m)<0.05?'even':`${m>0?ab.ND:ab.UNC} by ${Math.abs(m).toFixed(1)}`}, the average total is ${ctx.avgTotal.toFixed(1)} points, and the median finish is ${ab.ND} ${ctx.median[0]}, ${ab.UNC} ${ctx.median[1]}. Each simulated play is drawn from real plays in matching situations, so the number reflects how games from this spot have actually gone, adjusted for how strong the teams looked before kickoff.</p>`);
+  if(ctx.start&&ctx.start.sources&&ctx.start.sources.length){
+    const S0=ctx.start, fav=x=>Math.abs(x)<0.05?'even':`${x>0?ab.ND:ab.UNC} by ${Math.abs(x).toFixed(1)}`;
+    const es=S0.sources.map(x=>x.edge), spread=es.length>1?Math.max(...es)-Math.min(...es):0;
+    out.push(`<p><b>Starting strength.</b> Before kickoff the model had ${fav(S0.edge)}, the average of ${S0.sources.map(x=>`${x.name} (${fav(x.edge)})`).join(', ')}. ${spread>=3?`Those sources were ${spread.toFixed(1)} points apart, so the model's read on the teams is shakier than usual. `:''}If the market's view of the teams has changed since kickoff for a reason the model can't see, like an injury or a quarterback change, that alone could explain this gap.</p>`);
+  }
+  if(ctx.trend) out.push(`<p><b>Market movement.</b> ${ctx.trend}</p>`);
+  out.push(`<p><b>Timing.</b> In our replay of 2023 to 2025 NFL games against Vegas win probability, the model's disagreements with the market were best calibrated and most profitable from ${WIN_LABEL}: 57.5% of those bets hit when the model said 58.2%, a +9% return over 269 bets. ${inWin(st)?'This bet is inside that window.':beforeWin(st)?'This bet is earlier than that window. Earlier in games, the model has tended to be overconfident when it disagrees with the market, so treat a gap here with more suspicion.':'This bet is later than that window, when prices sit near 0 or 100 and swing on single plays.'} That study is a lean, not proof: 269 bets is too few to rule out luck.</p>`);
+  out.push(`<p><b>Why it could be wrong.</b> The model plays out average football from this situation, tilted by pregame strength. It doesn't see injuries, weather, momentum in personnel, or who's actually on the field, and the people trading do. A gap this size is often the market knowing something, which is why every logged bet gets graded.</p>`);
+  return out.join('');
+}
+// Recent move in the market price for a moneyline side, from the price history on the chart
+function trendFor(e){
+  if(e.type!=='moneyline') return null;
+  const pts=e.venue==='Kalshi'?MKH.k:MKH.p; if(!pts||pts.length<4) return null;
+  const mine=e.team===TA('ND'), last=pts[pts.length-1], back=pts.filter(p=>p.t<=last.t-600).pop(); if(!back) return null;
+  const a=mine?back.v:1-back.v, b=mine?last.v:1-last.v; if(Math.abs(b-a)<0.04) return null;
+  return `${e.venue}'s price on ${e.team} has moved from ${Math.round(a*100)}% to ${Math.round(b*100)}% over the last ${Math.round((last.t-back.t)/60)} minutes of game time. Markets react fast to big plays and sometimes overshoot; the model instead weighs this spot by how often it has been won historically. If the move came from news rather than a play, trust the market.`;
+}
+function liveCtx(){
+  const A=lastAgg; if(!A) return null;
+  let t=0; A.totH.forEach((c,i)=>t+=c*i);
+  const med=h=>{let c=0;for(let i=0;i<h.length;i++){c+=h[i];if(c>=A.n/2)return i;}return 0;};
+  let start=null; if(PRE&&PRE.sources&&PRE.homeMargin!=null){ const sg=TM.ND.id===PRE.homeId?1:-1; start={edge:sg*PRE.homeMargin,sources:PRE.sources.map(x=>({name:x.name,edge:sg*x.homeMargin}))}; }
+  return {state:{qtr:S.qtr,secs:S.secs,nd:S.nd,unc:S.unc,poss:TA(S.poss),down:S.down,dist:S.dist,pos:S.pos},abbr:{ND:TA('ND'),UNC:TA('UNC')},sims:A.n,avgMargin:A.marSum/A.n,avgTotal:t/A.n,median:[med(A.ndH),med(A.ucH)],start};
+}
 function renderPicks(m){
   const el=$('pickBox'); if(!el||!m) return;
-  const pc=v=>(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢';
-  const now=(m.edges||[]).map(e=>`<tr><td><b>${e.sel}</b> <span class="small">${e.type}</span></td><td>${e.url?`<a href="${e.url}" target="_blank" rel="noopener">${e.venue}</a>`:e.venue}</td><td>${c(e.cost)}</td><td>${pc(e.model)}</td><td class="edge">+${(e.edge*100).toFixed(1)}</td></tr>`).join('');
-  const lg=(m.logged||[]).map(p=>`<tr><td><b>${p.sel}</b> <span class="small">${p.type}, ${p.clock}, ${p.score}</span></td><td>${p.venue}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status==='won'?'won':p.status==='lost'?'lost':''}">${p.status==='open'?'open':p.status}</td></tr>`).join('');
+  const pc=v=>(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢', ctx=liveCtx();
+  const why=(html)=>`<tr class="whyrow"><td colspan="5"><details><summary>Why the model likes this</summary><div class="why">${html}</div></details></td></tr>`;
+  const now=(m.edges||[]).map(e=>`<tr><td><b>${e.sel}</b> <span class="small">${e.type}</span></td><td>${e.url?`<a href="${e.url}" target="_blank" rel="noopener">${e.venue}</a>`:e.venue}</td><td>${c(e.cost)}</td><td>${pc(e.model)}</td><td class="edge">+${(e.edge*100).toFixed(1)}</td></tr>`+(ctx?why(explainBet(e,Object.assign({},ctx,{trend:trendFor(e)}))):'')).join('');
+  const lg=(m.logged||[]).map(p=>`<tr><td><b>${p.sel}</b>${p.auto?' <span class="tagauto">game bet</span>':''} <span class="small">${p.type}, ${p.clock}, ${p.score}</span></td><td>${p.venue}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status==='won'?'won':p.status==='lost'?'lost':''}">${p.status==='open'?'open':p.status}</td></tr>`+(p.why?why(explainBet({...p,cost:p.price,mid:p.why.mid},{...p.why,trend:null})):'')).join('');
   el.innerHTML=`<h3 class="sh">Bets the model likes right now</h3>
     ${now?`<div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Edge</th></tr></thead><tbody>${now}</tbody></table></div>`:'<p class="small" style="margin:0">No bet clears the bar on this play. The model has to beat the price by 5 points on a moneyline, 6 on a spread or total. Gaps over 20 points are skipped as likely stale prices.</p>'}
     ${lg?`<h3 class="sh" style="margin-top:14px">Logged for this game</h3><div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead><tbody>${lg}</tbody></table></div>`:''}
-    <p class="small" style="margin:8px 0 0">Each bet is logged once, at the price when it first qualified, and graded at the final. These are paper picks for tracking the model, not betting advice.</p>`;
+    <p class="small" style="margin:8px 0 0">Every game gets one logged bet, its "game bet": the best gap once the game reaches ${WIN_LABEL}, if one clears the bar. Other bets are logged while someone watches. All are paper picks graded at the final, not betting advice.</p>`;
 }
-
 // ===== Box score =====
 let BOX=null, boxAt=0;
 async function pullBox(){
@@ -1997,12 +2042,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.8';
+const BUILD='2026-10-04.9';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.8'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.9'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>

@@ -6,10 +6,10 @@
 // costs at most two sim streams no matter how many people are watching.
 import { readFileSync } from 'node:fs';
 import { createPool } from './simpool.mjs';
-import { createPicks } from './picks.mjs';
+import { createPicks, inWindow, WINDOW } from './picks.mjs';
 
 const POLL_MS = 1000, IDLE_STOP_MS = 60000, FORGET_MS = 20 * 60000;
-const N_QUICK = 3000, N_FULL = 25000, N_OPT = 8000, N_BACKFILL = 1500;
+const N_QUICK = 3000, N_FULL = 25000, N_OPT = 8000, N_BACKFILL = 1500, N_SCAN = 3000;
 const ESD_BASE = 5.5;
 const DEF = { poss: 'ND', pos: 25, down: 1, dist: 10, qtr: 1, secs: 900, nd: 0, unc: 0, half2Recv: 'UNC', toND: 3, toUNC: 3 };
 
@@ -48,6 +48,70 @@ export function createLive({ api, pages, dataDir }) {
     const ping = setInterval(() => res.write(': ping\n\n'), 20000);
     req.on('close', () => { clearInterval(ping); g.removeViewer(res); });
   }
+  // ---------- Scanner: every live game with Kalshi or Polymarket prices, watched or not ----------
+  // A light 3,000-sim read at most every 2 minutes per game feeds the "leading bets" list, and once a game reaches the
+  // betting window it gets a full 25,000-sim run and the one automatic bet. Lowest priority in the pool.
+  const scans = new Map(), scanning = {}, leading = { cfb: [], nfl: [] };
+  const watched = (league, event) => [...games.values()].find(g => g.league === league && g.event === String(event) && g.viewers.size && g.last.edges);
+  class ScanGame {
+    constructor(league, card) { Object.assign(this, { league, event: String(card.id), card, pk: null, lastScan: 0, mkAt: 0, noMk: false, edges: [] }); }
+    call(q) { return api[this.league](new Request(`http://local/api?${q}`)).then(r => r.json()); }
+    async init() {
+      const c = this.card; // away team takes slot A
+      this.teams = { [c.away.id]: 'ND', [c.home.id]: 'UNC' }; this.slotId = { ND: String(c.away.id), UNC: String(c.home.id) };
+      this.abbr = { ND: c.away.abbr, UNC: c.home.abbr }; this.homeSlot = 'UNC'; this.title = `${c.away.short} at ${c.home.short}`;
+      this.date = new Date(c.date).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }).replace(/-/g, '');
+      this.rosters = { ND: fillUsage({}), UNC: fillUsage({}) }; this.tk = `scan:${this.league}:${this.event}`;
+      const base = { edge: 0, total: 52, esd: ESD_BASE };
+      try { const pre = await this.call(`kind=pregame&event=${this.event}`);
+        if (pre && pre.homeMargin != null) { base.edge = +(-pre.homeMargin).toFixed(1); base.esd = +Math.sqrt(ESD_BASE * ESD_BASE + pre.sd * pre.sd).toFixed(1); if (pre.total != null) base.total = pre.total; this.pregame = startInfo(pre, 'UNC', base, this.abbr); } } catch {}
+      this.S = Object.assign({}, DEF, base);
+      try { const sm = await this.call(`kind=summary&event=${this.event}`); const first = (sm.plays || []).find(p => this.teams[String(p.team)] && p.down >= 1);
+        if (first) this.S.half2Recv = this.teams[String(first.team)] === 'ND' ? 'UNC' : 'ND'; } catch {}
+    }
+    async tick() {
+      if (!this.ready) this.ready = this.init(); await this.ready;
+      if (watched(this.league, this.event)) { this.edges = []; return; } // the watched tracker has better numbers
+      if (Date.now() - this.mkAt > (this.noMk ? 900000 : 180000)) {
+        this.mkAt = Date.now();
+        try { const m = await this.call(`kind=markets&event=${this.event}&nohist=1`); this.mk = m; this.noMk = !((m.kalshi && m.kalshi.found) || (m.poly && m.poly.found)); } catch { this.noMk = true; }
+      }
+      if (this.noMk) { this.edges = []; return; }
+      const ev = await this.call(`event=${this.event}&date=${this.date}`); if (!ev || !ev.competitions) return;
+      const o = parseEspn(ev, this.teams, this.abbr);
+      for (const k of ['qtr', 'secs', 'nd', 'unc', 'poss', 'down', 'dist', 'pos', 'toND', 'toUNC']) if (o[k] != null) this.S[k] = o[k];
+      if (this.S.pos != null) this.S.dist = Math.min(this.S.dist, 100 - this.S.pos);
+      const S = Object.assign({}, this.S), pk = playKey(o), now = Date.now();
+      const autoDue = inWindow(S) && !picks.autoDone(this.league, this.event);
+      if (!autoDue && !((pk !== this.pk && now - this.lastScan > 120000) || now - this.lastScan > 300000)) return;
+      this.pk = pk; this.lastScan = now;
+      const A = await pool.run(this.league, this.rosters, this.tk, prepS0(S, S.edge, S.total, LGS[this.league].cal), autoDue ? N_FULL : N_SCAN, { prio: autoDue ? 2 : 0 });
+      if (!A) return;
+      this.edges = picks.edges(this, A, this.mk).slice(0, 3).map(e => ({ ...e, at: now, clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}`, sims: A.n }));
+      picks.autoPick(this, A, this.mk, S);
+    }
+    finish() { if (!picks.autoDone(this.league, this.event)) picks.autoPick(this, null, null, { qtr: 5, secs: 0 }); }
+  }
+  async function scanLeague(league) {
+    if (scanning[league] || !LGS[league]) return; scanning[league] = true;
+    try {
+      const sb = await api[league](new Request('http://local/api?kind=scoreboard&scope=fbs')).then(r => r.json());
+      const live = (sb.games || []).filter(g => g.state === 'in'), ids = new Set(live.map(g => `${league}:${g.id}`));
+      for (const g of live) { const id = `${league}:${g.id}`; if (!scans.has(id)) scans.set(id, new ScanGame(league, g)); else scans.get(id).card = g; }
+      for (const [id, c] of scans) if (id.startsWith(league + ':') && !ids.has(id)) { c.finish(); scans.delete(id); }
+      for (const id of ids) { try { await scans.get(id).tick(); } catch {} }
+      // leading bets: watched games' latest numbers plus the scanner's
+      const out = [];
+      for (const g of games.values()) if (g.league === league && g.viewers.size && g.last.edges && Date.now() - (g.last.edges.at || 0) < 600000)
+        for (const e of g.last.edges.edges.slice(0, 3)) out.push({ ...e, event: g.event, matchup: g.title, clock: g.last.edges.clock, score: g.last.edges.score, at: g.last.edges.at, sims: 25000 });
+      for (const [id, c] of scans) if (id.startsWith(league + ':')) for (const e of c.edges) out.push({ ...e, event: c.event, matchup: c.title });
+      leading[league] = out.sort((a, b) => b.edge - a.edge).slice(0, 12).map(e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url,
+        price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims }));
+    } catch {} finally { scanning[league] = false; }
+  }
+  if (pool) { setInterval(() => { scanLeague('cfb'); scanLeague('nfl'); }, 30000).unref(); setTimeout(() => { scanLeague('cfb'); scanLeague('nfl'); }, 20000).unref(); }
+  const leadingFor = league => ({ updated: new Date().toISOString(), window: WINDOW.label, bets: league === 'all' ? [...leading.cfb, ...leading.nfl].sort((a, b) => b.edge - a.edge) : leading[league] || [] });
+
   function status() {
     return { leagues: Object.keys(datas), pool: pool ? pool.stats() : null, games: [...games.values()].map(g => ({ league: g.league, event: g.event, side: g.side, viewers: g.viewers.size,
       polling: !!g.timer, state: g.state, key: g.key, histPoints: g.hist.length, error: g.error || null })) };
@@ -78,6 +142,7 @@ export function createLive({ api, pages, dataDir }) {
           base.edge = +((this.homeSlot === 'ND' ? 1 : -1) * pre.homeMargin).toFixed(1);
           base.esd = +Math.sqrt(ESD_BASE * ESD_BASE + pre.sd * pre.sd).toFixed(1);
           if (pre.total != null) base.total = pre.total; base.edgeSet = true;
+          this.pregame = startInfo(pre, this.homeSlot, base, this.abbr);
         }
       } catch {}
       this.base = base;
@@ -150,7 +215,8 @@ export function createLive({ api, pages, dataDir }) {
         const at = this.hist.findIndex(h => h.k === pt.k); if (at >= 0) this.hist[at] = pt; else this.hist.push(pt);
         this.broadcast('hist', { pts: [pt] });
         if (this.mk && this.state !== 'post') {
-          this.last.edges = { key, edges: picks.consider(this, A, this.mk, S), logged: picks.forEvent(this.league, this.event) };
+          const ed = picks.consider(this, A, this.mk, S); picks.autoPick(this, A, this.mk, S);
+          this.last.edges = { key, edges: ed, logged: picks.forEvent(this.league, this.event), at: Date.now(), clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}` };
           this.broadcast('edges', this.last.edges);
         }
         if (S.down === 4) { // the 4th-down decision bot: each option simulated separately
@@ -186,7 +252,7 @@ export function createLive({ api, pages, dataDir }) {
       } catch {} finally { this.backfilling = false; }
     }
   }
-  return { handle, status, leagues: Object.keys(datas), picks };
+  return { handle, status, leagues: Object.keys(datas), picks, leadingFor, scanStats: () => ({ scanning: scans.size }) };
 }
 
 // A new play changes the down, spot, possession, score or ESPN's play text. The clock alone only counts once 30 seconds
@@ -200,6 +266,13 @@ function simDue(o, last) {
 }
 // ---------- helpers ported from the page (kept identical so keys and states match the browser's) ----------
 function send(res, type, data) { try { res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} }
+const clockOf = S => `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`;
+// The pregame read in this game's orientation, kept so each pick can explain where the model started
+function startInfo(pre, homeSlot, base, abbr) {
+  const sgn = homeSlot === 'ND' ? 1 : -1;
+  return { edge: base.edge, esd: base.esd, total: base.total, fav: base.edge >= 0 ? abbr.ND : abbr.UNC,
+    sources: (pre.sources || []).map(x => ({ name: x.name, edge: +(sgn * x.homeMargin).toFixed(1) })) };
+}
 const elapsed = s => (Math.min(4, s.qtr) - 1) * 900 + (900 - s.secs);
 function prepS0(st, spread, total, CAL) {
   const tilt = Math.max(-0.3, Math.min(0.5, (CAL.a + CAL.b * Math.abs(spread) - total) / CAL.d)), k = CAL.k * (1 + 0.6 * Math.abs(tilt));

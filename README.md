@@ -41,6 +41,21 @@ the page falls back to simulating in the browser on its own.
 The server reads the engine, the model tables and each league's settings straight out of `public/game.html` and
 `public/nfl/game.html`, so the browser and server can't drift apart.
 
+## Model bets
+
+`api/picks.mjs` logs paper bets to `$DATA_DIR/picks.json` and grades them at the final.
+- Game bets: one per game, every game with a Kalshi or Polymarket market, watched or not. A background scanner reads
+  every live game (3,000 sims at most every 2 minutes, lowest priority) and, once a game is between Q3 7:30 and Q4 8:00,
+  runs 25,000 sims and logs the biggest gap that clears the bar (5 points on a moneyline, 6 on a spread or total, gaps
+  over 20 skipped as stale). No qualifying gap, or no market, counts as a pass.
+- The window comes from `tools/timing_nfl.mjs`: replaying 2023-25 NFL snaps against Vegas win probability, the model's
+  disagreements were best calibrated and most profitable there (269 bets, 57.5% hit vs 58.2% predicted, +9%). Not
+  conclusive; the "When our bets hit" table on the home page tracks whether live results agree.
+- Bets taken while someone watches a game are logged too, up to 4 per game, and count in the overall record.
+- `/api/picks?league=` returns the record and every bet; `/api/picks/leading?league=` the live gaps behind the
+  "Leading bets right now" panel. Each logged bet stores the state and numbers behind it, which the game page turns into
+  the "Why the model likes this" explanation.
+
 ## NFL model
 
 `public/nfl/game.html` is generated, not edited by hand. After changing `public/game.html`, run
