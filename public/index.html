@@ -293,17 +293,18 @@ async function loadPicks(){
     else {
       const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.auto?'<span class="tagauto">game bet</span>':''} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.venue)}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
       const head='<thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead>';
-      const n=A.w+A.l, phases=Object.entries(d.byPhase||{});
+      const n=R.w+R.l, phases=Object.entries(d.byPhase||{});
       const order=['Q1 early','Q1 late','Q2 early','Q2 late','Q3 early','Q3 late','Q4 15:00-8:00','Q4 8:00-3:00','Q4 last 3:00'];
       phases.sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0]));
-      el.innerHTML=`<h2>Model bets <small>One paper bet per game, the biggest gap against Kalshi or Polymarket, taken from ${esc(d.window||'Q3 7:30 to Q4 8:00')}. Not betting advice.</small></h2>
+      const open=d.open.length;
+      el.innerHTML=`<h2>Model bets <small>Paper bets logged when the model beat the Kalshi or Polymarket price. Not betting advice.</small></h2>
         <div class="recnums">
-          <div><b>${A.w}–${A.l}${A.push?`–${A.push}`:''}</b><span>game bets</span></div>
-          <div><b>${pc(A.pct)}</b><span>win rate${A.expected!=null?` (model said ${pc(A.expected)})`:''}</span></div>
-          <div><b>${money(A.pl||0)}</b><span>profit, $1 contract each</span></div>
-          <div><b>${A.roi==null?'–':(A.roi>0?'+':'')+(A.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
+          <div><b>${R.w}–${R.l}${R.push?`–${R.push}`:''}</b><span>record, all bets</span></div>
+          <div><b>${pc(R.pct)}</b><span>win rate${R.expected!=null?` (model said ${pc(R.expected)})`:''}</span></div>
+          <div><b>${money(R.pl||0)}</b><span>profit, $1 contract each</span></div>
+          <div><b>${R.roi==null?'–':(R.roi>0?'+':'')+(R.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
         </div>
-        <p class="sub">${d.autoOpen?`${d.autoOpen} game bet${d.autoOpen>1?'s':''} waiting on a final. `:''}${d.passes?`${d.passes} game${d.passes>1?'s':''} passed (no Kalshi or Polymarket market, or no gap big enough to bet). `:''}All logged bets, including ones taken while someone watched: ${R.w}–${R.l}, ${pc(R.pct)}, ${money(R.pl)}.${n&&n<50?` Only ${n} settled game bet${n>1?'s':''} so far, which is noise; it takes a few hundred to mean much.`:''}</p>
+        <p class="sub">${open?`${open} bet${open>1?'s':''} waiting on a final. `:''}Game bets (one per game, taken from ${esc(d.window||'Q3 7:30 to Q4 8:00')}): ${A.w}–${A.l}, ${pc(A.pct)}, ${money(A.pl||0)}.${d.passes?` ${d.passes} game${d.passes>1?'s':''} passed with no market or no big enough gap.`:''}${n&&n<50?` ${n} settled bet${n>1?'s':''} so far, which is still noise; it takes a few hundred to mean much.`:''}</p>
         <details><summary>Past bets (${all.length})</summary><table>${head}<tbody>${all.map(row).join('')}</tbody></table></details>
         ${phases.length?`<details><summary>When our bets hit</summary><table><thead><tr><th>When the bet was taken</th><th>Record</th><th>Win rate</th><th>Model said</th><th>Return</th></tr></thead><tbody>${phases.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.w}–${v.l}</td><td>${pc(v.pct)}</td><td>${pc(v.expected)}</td><td>${v.roi==null?'–':(v.roi>0?'+':'')+(v.roi*100).toFixed(1)+'%'}</td></tr>`).join('')}</tbody></table>
           <p class="sub" style="margin-top:8px">The window comes from replaying 2023 to 2025 NFL games against Vegas win probability: between Q3 7:30 and Q4 8:00 the model's disagreements hit 57.5% of the time when it said 58.2%, a +9% return over 269 bets. Earlier, it was overconfident; later, prices were too extreme to matter. This table will show whether our own bets agree.</p></details>`:''}`;
@@ -324,12 +325,12 @@ async function loadPicks(){
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },30000);
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.10';
+const BUILD='2026-10-04.11';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.10'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.11'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>
