@@ -236,6 +236,10 @@ header.top{align-items:center}
 .mkpin summary{cursor:pointer}
 .mkpin input{width:100%;margin:4px 0}
 .betx{margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.pickbox{margin-bottom:16px;padding:14px;border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:12px;background:var(--paper)}
+.pickbox h3{margin-top:0}
+.picks{width:100%;font-size:14px}.picks td,.picks th{padding:6px 8px;text-align:right}.picks td:first-child,.picks th:first-child{text-align:left}
+.picks .edge{color:var(--good);font-weight:700}.picks .won{color:var(--good);font-weight:700}.picks .lost{color:var(--bad);font-weight:700}
 .cboxes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:stretch}
 @media (max-width:900px){.cboxes{grid-template-columns:1fr}}
 .cbox{border:1px solid var(--line);border-top:4px solid var(--c);border-radius:12px;padding:14px;background:var(--paper)}
@@ -375,6 +379,7 @@ header.top{align-items:center}
 </section>
 <section class="panel tabpanel" id="tab-cmp" role="tabpanel" aria-labelledby="t-cmp" hidden>
   <div class="flowhead"><h2>Betting: markets vs. model</h2><span class="small" id="cmpNote"></span></div>
+  <div id="pickBox" class="pickbox"><h3 class="sh">Bets the model likes</h3><p class="small" style="margin:0">Go live to see where the model and the markets disagree.</p></div>
   <div class="cboxes" id="cmpBoxes"><p class="small">Go live to load market prices.</p></div>
   <div class="duo betx">
     <div><h3 class="sh">Win probability right now</h3><div id="gMkt"><p class="small" style="margin:0">Market prices load when you go live.</p></div></div>
@@ -1919,6 +1924,7 @@ function startServerLive(){
     SRV.viewers=m.viewers; mergeHist(m.hist);
     if(m.last&&m.last.result) SRV.res[m.last.result.key]=m.last.result;
     if(m.last&&m.last.fourth) SRV.fourth[m.last.fourth.key]=m.last.fourth;
+    if(m.last&&m.last.edges) renderPicks(m.last.edges);
     if(m.last&&m.last.ev){ lastKey=''; lastSim=null; liveQ.push({at:Date.now(),ev:m.last.ev,skey:m.last.skey}); drainLive(); }
     else setLive('Connected. Waiting for the first update from ESPN…','ok');
     drawChart(); pullExtras(true); });
@@ -1926,6 +1932,7 @@ function startServerLive(){
   es.addEventListener('result',e=>{ const m=J(e); SRV.res[m.key]=m; trimMap(SRV.res); if(m.key===SRV.cur&&liveOn) applyServerResult(m); });
   es.addEventListener('fourth',e=>{ const m=J(e); SRV.fourth[m.key]=m; trimMap(SRV.fourth); if(m.key===SRV.cur&&liveOn&&S.down===4) renderFourth(m.res); });
   es.addEventListener('hist',e=>{ mergeHist(J(e).pts); drawChart(); save(); });
+  es.addEventListener('edges',e=>renderPicks(J(e)));
   es.addEventListener('viewers',e=>{ SRV.viewers=J(e).viewers; });
   es.addEventListener('warn',e=>setLive(`Live server: ${J(e).error}`,'warn'));
   es.addEventListener('fail',e=>{ setLive(`The live server couldn't load this game (${J(e).error}).`,'bad'); fallback('Simulating in your browser instead.'); });
@@ -1936,6 +1943,19 @@ document.addEventListener('visibilitychange',()=>{
   if(document.hidden&&SRV.on){ clearTimeout(SRV.hideTimer); SRV.hideTimer=setTimeout(()=>{ if(document.hidden&&SRV.on){ stopLive(); SRV.resumeOnShow=true; } },60000); }
   else if(!document.hidden){ clearTimeout(SRV.hideTimer); if(SRV.resumeOnShow){ SRV.resumeOnShow=false; startLive(); } }
 });
+
+
+// ===== Picks: bets where the model beats the market price, from the live server =====
+function renderPicks(m){
+  const el=$('pickBox'); if(!el||!m) return;
+  const pc=v=>(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢';
+  const now=(m.edges||[]).map(e=>`<tr><td><b>${e.sel}</b> <span class="small">${e.type}</span></td><td>${e.url?`<a href="${e.url}" target="_blank" rel="noopener">${e.venue}</a>`:e.venue}</td><td>${c(e.cost)}</td><td>${pc(e.model)}</td><td class="edge">+${(e.edge*100).toFixed(1)}</td></tr>`).join('');
+  const lg=(m.logged||[]).map(p=>`<tr><td><b>${p.sel}</b> <span class="small">${p.type}, ${p.clock}, ${p.score}</span></td><td>${p.venue}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status==='won'?'won':p.status==='lost'?'lost':''}">${p.status==='open'?'open':p.status}</td></tr>`).join('');
+  el.innerHTML=`<h3 class="sh">Bets the model likes right now</h3>
+    ${now?`<div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Edge</th></tr></thead><tbody>${now}</tbody></table></div>`:'<p class="small" style="margin:0">No bet clears the bar on this play. The model has to beat the price by 5 points on a moneyline, 6 on a spread or total. Gaps over 20 points are skipped as likely stale prices.</p>'}
+    ${lg?`<h3 class="sh" style="margin-top:14px">Logged for this game</h3><div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead><tbody>${lg}</tbody></table></div>`:''}
+    <p class="small" style="margin:8px 0 0">Each bet is logged once, at the price when it first qualified, and graded at the final. These are paper picks for tracking the model, not betting advice.</p>`;
+}
 
 // ===== Box score =====
 let BOX=null, boxAt=0;
@@ -1977,12 +1997,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.5';
+const BUILD='2026-10-04.7';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.5'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.7'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>

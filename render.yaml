@@ -7,8 +7,15 @@ services:
     startCommand: node server.mjs
     healthCheckPath: /healthz
     autoDeploy: true
+    # Model picks are saved here so the record survives deploys and restarts
+    disk:
+      name: picks
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       # Simulation threads for live games. Starter has half a CPU, so one thread leaves room for serving pages.
       # On Standard (1 CPU) or Pro (2 CPU), raise this to 1-2 or 2-3.
       - key: SIM_THREADS
         value: "1"
+      - key: DATA_DIR
+        value: /var/data

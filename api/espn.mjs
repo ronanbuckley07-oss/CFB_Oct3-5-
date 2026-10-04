@@ -269,10 +269,10 @@ function midPrice(bid, ask, last) {
 }
 async function getAny(urls, ttl) { let err; for (const u of urls) { try { return await get(u, ttl); } catch (e) { err = e; } } throw err; }
 
-async function kalshiEvents() {
+async function kalshiEvents(kind = 'GAME') {
   const out = []; let cursor = '';
   for (let page = 0; page < 6; page++) {
-    const q = `/events?series_ticker=${LG.kx}GAME&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const q = `/events?series_ticker=${LG.kx}${kind}&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const d = await getAny(KALSHI.map(b => b + q), 20000);
     out.push(...(d.events || [])); cursor = d.cursor; if (!cursor || !(d.events || []).length) break;
   }
@@ -310,8 +310,21 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   if (res.A && !res.B) res.B = { p: 1 - res.A.p, implied: true }; if (res.B && !res.A) res.A = { p: 1 - res.B.p, implied: true };
   // Spread and total ladders live in sibling series with the same game code: "X wins by over 14.5 points", "Over 46.5 points scored"
   const code = tk.replace(new RegExp(`^${LG.kx}GAME-`), '');
-  const [sp, to] = await Promise.all([`${LG.kx}SPREAD`, `${LG.kx}TOTAL`].map(ser =>
-    getAny(KALSHI.map(b => `${b}/events/${ser}-${code}?with_nested_markets=true`), 20000).then(d => d.markets || d.event?.markets || []).catch(() => [])));
+  // Same game code first; if Kalshi named the spread/total event differently, match its title and date like the game
+  const sibling = async kind => {
+    let ms = await getAny(KALSHI.map(b => `${b}/events/${LG.kx}${kind}-${code}?with_nested_markets=true`), 20000).then(d => d.markets || d.event?.markets || []).catch(() => []);
+    if (ms.length) return ms;
+    const evs = await kalshiEvents(kind).catch(() => []);
+    let pick = null;
+    for (const ev of evs) {
+      const dm = String(ev.event_ticker || '').match(/-(\d{2})([A-Z]{3})(\d{2})/);
+      if (kick && dm && MON[dm[2]] != null && Math.abs(Date.UTC(2000 + +dm[1], MON[dm[2]], +dm[3]) - kick) > 2 * 86400000) continue;
+      const sc = nameScore(`${ev.title || ''} ${ev.sub_title || ''}`, A) + nameScore(`${ev.title || ''} ${ev.sub_title || ''}`, B);
+      if (sc >= 1 && (!pick || sc > pick.sc)) pick = { sc, ev };
+    }
+    return pick ? pick.ev.markets || [] : [];
+  };
+  const [sp, to] = await Promise.all([sibling('SPREAD'), sibling('TOTAL')]);
   for (const m of sp) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const by = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
@@ -351,6 +364,7 @@ async function polyEvents() {
   for (const l of await Promise.all(lists)) for (const e of (Array.isArray(l) ? l : l?.data || [])) if (!seen.has(e.id)) { seen.add(e.id); out.push(e); }
   return out;
 }
+const PERIOD = /\b(1h|2h|1st half|2nd half|first half|second half|halftime|half|quarter|q[1-4]|[1-4]q|1st quarter|2nd quarter|3rd quarter|4th quarter)\b/i;
 const parseArr = x => { if (Array.isArray(x)) return x; try { return JSON.parse(x || '[]'); } catch { return []; } };
 async function polyFor(A, B, pin, kickoff, t0, t1) {
   let events;
@@ -379,14 +393,20 @@ async function polyFor(A, B, pin, kickoff, t0, t1) {
     const pr0 = midPrice(m.bestBid, m.bestAsk, m.lastTradePrice ?? prices[0]); // quoted for the first outcome
     const p0 = pr0 ? pr0.p : prices[0]; if (!(p0 >= 0 && p0 <= 1)) continue;
     const q = `${m.question || ''} ${m.groupItemTitle || ''}`, type = m.sportsMarketType || '';
+    // Only full-game markets: no halves, quarters, team totals or player props, and only ones people are actually trading
+    if (type && !['moneyline', 'spreads', 'totals'].includes(type)) continue;
+    if (PERIOD.test(q) || /team total|player|passing|rushing|receiving|yards|touchdowns?\b|first to|safety|overtime|margin/i.test(q)) continue;
+    const priced = (+m.bestBid > 0 && +m.bestAsk > 0 && +m.bestAsk < 1) || (+m.lastTradePrice > 0 && +m.lastTradePrice < 1);
     if (/total|o\/u|over/i.test(type + ' ' + q) && /over/i.test(outs[0] + outs[1])) {
-      const line = isFinite(+m.line) ? +m.line : +((q.match(/([\d]+\.?\d*)\s*$/) || q.match(/o\/u\s*([\d.]+)/i) || [])[1]);
+      if (!priced) continue;
+      const line = isFinite(+m.line) && +m.line > 0 ? +m.line : +((q.match(/o\/u\s*([\d.]+)/i) || q.match(/([\d]+\.5)\s*$/) || [])[1]);
       const pOver = /over/i.test(outs[0]) ? p0 : 1 - p0;
-      if (isFinite(line)) res.totals.push({ line, p: pOver });
+      if (isFinite(line) && line >= 20 && line <= 120) res.totals.push({ line, p: pOver, q: m.question });
     } else if (/spread/i.test(type + ' ' + q)) {
+      if (!priced) continue;
       // "Spread: Ohio State (-14.5)" with outcomes [Ohio State, Iowa]: first outcome covers the number in parentheses
-      const h = isFinite(+m.line) ? +m.line : +((q.match(/\(([-+]?[\d.]+)\)/) || [])[1]);
-      const sd = side(outs[0]); if (sd && isFinite(h)) res.spreads.push({ side: sd, by: -h, p: p0 });
+      const h = isFinite(+m.line) && +m.line !== 0 ? +m.line : +((q.match(/\(([-+]?[\d.]+)\)/) || [])[1]);
+      const sd = side(outs[0]); if (sd && isFinite(h) && h !== 0 && Math.abs(h) <= 60) res.spreads.push({ side: sd, by: -h, p: p0, q: m.question });
     } else if (!res.A && (type === 'moneyline' || !/half|quarter|1h|2h/i.test(q))) {
       const s0 = side(outs[0]), s1 = side(outs[1]); if (!s0 || !s1 || s0 === s1) continue;
       const pA = s0 === 'A' ? p0 : 1 - p0;

@@ -85,6 +85,17 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .open{font-weight:600;color:var(--ink)}
 .card:hover .open{color:var(--gold)}
 .empty{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:18px;color:var(--muted)}
+.rec{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:12px;padding:14px 16px;margin-bottom:6px}
+.rec h2{font-size:24px;font-weight:800;margin:0 0 6px;display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.rec h2 small{font:500 13px Barlow,sans-serif;color:var(--muted)}
+.recnums{display:flex;gap:26px;flex-wrap:wrap;margin:4px 0 10px}
+.recnums div{display:flex;flex-direction:column}.recnums b{font:800 30px/1.05 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums}
+.recnums span{font-size:12.5px;color:var(--muted)}
+.rec table{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
+.rec td,.rec th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right}.rec td:first-child,.rec th:first-child{text-align:left}
+.rec th{color:var(--muted);font-weight:600;font-size:12.5px}
+.rec .won{color:var(--good);font-weight:700}.rec .lost{color:var(--bad);font-weight:700}
+.rec details{margin-top:8px}.rec summary{cursor:pointer;color:var(--muted);font-weight:600;font-size:14px}
 .find{display:flex;gap:8px;flex-wrap:wrap;margin-top:30px;padding-top:16px;border-top:1px solid var(--line);align-items:center}
 .find input{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:min(320px,100%)}
 .find button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:8px 12px;font:600 15px Barlow,sans-serif;cursor:pointer}
@@ -110,6 +121,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
   </div>
 </header>
 
+<section class="rec" id="rec" hidden></section>
 <main id="board">
   <div class="grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
 </main>
@@ -262,13 +274,37 @@ $('find').addEventListener('submit',async e=>{
 
 setScope(scope);
 
+// ===== Model picks record =====
+async function loadPicks(){
+  try{
+    const r=await fetch(`/api/picks?league=${NFL?'nfl':'cfb'}`,{cache:'no-store'}); if(!r.ok) return; const d=await r.json();
+    const R=d.record, n=R.w+R.l, el=$('rec');
+    if(!n&&!d.open.length){ el.hidden=true; return; }
+    const pc=v=>v==null?'–':(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢';
+    const row=p=>`<tr><td><b>${esc(p.sel)}</b> <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}</span></td><td>${esc(p.venue)}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
+    const head='<thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead>';
+    el.innerHTML=`<h2>Model picks <small>Paper bets logged when the model beat the market price by 5+ points. Not betting advice.</small></h2>
+      <div class="recnums">
+        <div><b>${R.w}–${R.l}${R.push?`–${R.push}`:''}</b><span>record</span></div>
+        <div><b>${pc(R.pct)}</b><span>win rate${R.expected!=null?` (model expected ${pc(R.expected)})`:''}</span></div>
+        <div><b>${R.pl>0?'+':R.pl<0?'−':''}$${Math.abs(R.pl).toFixed(2)}</b><span>profit, $1 contract each</span></div>
+        <div><b>${R.roi==null?'–':(R.roi>0?'+':'')+(R.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
+      </div>
+      ${n&&n<50?`<p style="margin:0 0 8px;font-size:13px;color:var(--muted)">Only ${n} settled pick${n>1?'s':''} so far. Treat the record as noise until it reaches a few hundred.</p>`:''}
+      ${d.open.length?`<table>${head}<tbody>${d.open.slice(0,8).map(row).join('')}</tbody></table>`:''}
+      ${d.settled.length?`<details><summary>Settled picks (${d.settled.length})</summary><table>${head}<tbody>${d.settled.map(row).join('')}</tbody></table></details>`:''}`;
+    el.hidden=false;
+  }catch(e){}
+}
+loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },30000);
+
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.5';
+const BUILD='2026-10-04.7';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.5'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.7'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

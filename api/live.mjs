@@ -6,6 +6,7 @@
 // costs at most two sim streams no matter how many people are watching.
 import { readFileSync } from 'node:fs';
 import { createPool } from './simpool.mjs';
+import { createPicks } from './picks.mjs';
 
 const POLL_MS = 1000, IDLE_STOP_MS = 60000, FORGET_MS = 20 * 60000;
 const N_QUICK = 3000, N_FULL = 25000, N_OPT = 8000, N_BACKFILL = 1500;
@@ -22,7 +23,8 @@ function readPage(file) {
   return { engineSrc, data, LG };
 }
 
-export function createLive({ api, pages }) {
+export function createLive({ api, pages, dataDir }) {
+  const picks = createPicks({ api, dir: dataDir });
   // A missing or broken page disables live mode for that league instead of taking the whole site down
   const load = f => { try { return readPage(f); } catch (e) { console.error(`live: couldn't read ${f}: ${e.message}`); return null; } };
   const cfb = load(pages.cfb), nfl = load(pages.nfl);
@@ -63,7 +65,8 @@ export function createLive({ api, pages }) {
       const g = await this.call(`kind=find&event=${this.event}`);
       if (!g || g.error) throw new Error(g && g.error || 'game not found');
       if (this.side && String(g.B.id) === this.side) { const t = g.A; g.A = g.B; g.B = t; } // chosen team takes slot A ("ND")
-      this.date = g.date; this.teams = { [g.A.id]: 'ND', [g.B.id]: 'UNC' }; this.abbr = { ND: g.A.abbr || g.A.short, UNC: g.B.abbr || g.B.short };
+      this.date = g.date; this.teams = { [g.A.id]: 'ND', [g.B.id]: 'UNC' }; this.slotId = { ND: String(g.A.id), UNC: String(g.B.id) };
+      { const aHome = String(g.homeId) === String(g.A.id); this.title = aHome ? `${g.B.short} at ${g.A.short}` : `${g.A.short} at ${g.B.short}`; } this.abbr = { ND: g.A.abbr || g.A.short, UNC: g.B.abbr || g.B.short };
       this.homeSlot = String(g.homeId) === String(g.A.id) ? 'ND' : 'UNC';
       const [ua, ub] = await Promise.all([g.A, g.B].map(t => this.call(`kind=team&id=${t.id}`).catch(() => null)));
       this.rosters = { ND: fillUsage(ua && ua.usage || {}), UNC: fillUsage(ub && ub.usage || {}) };
@@ -108,6 +111,7 @@ export function createLive({ api, pages }) {
     async poll() {
       if (this.polling) return; this.polling = true;
       try {
+        if (Date.now() - (this.mkAt || 0) > 20000) { this.mkAt = Date.now(); this.call(`kind=markets&event=${this.event}`).then(m => { if (m && !m.error) this.mk = m; }).catch(() => {}); }
         const ev = await this.call(`event=${this.event}&date=${this.date}`);
         if (!ev || !ev.competitions) throw new Error(ev && ev.error || 'not in feed');
         this.fails = 0;
@@ -145,6 +149,10 @@ export function createLive({ api, pages }) {
         const pt = { k: JSON.stringify([S.poss, S.pos, S.down, S.dist, S.qtr, S.secs, S.nd, S.unc, S.edge]), wp: A.win / A.n, t: elapsed(S) };
         const at = this.hist.findIndex(h => h.k === pt.k); if (at >= 0) this.hist[at] = pt; else this.hist.push(pt);
         this.broadcast('hist', { pts: [pt] });
+        if (this.mk && this.state !== 'post') {
+          this.last.edges = { key, edges: picks.consider(this, A, this.mk, S), logged: picks.forEvent(this.league, this.event) };
+          this.broadcast('edges', this.last.edges);
+        }
         if (S.down === 4) { // the 4th-down decision bot: each option simulated separately
           const ytg = 100 - S.pos, fgd = ytg + 17, fgMax = (this.league === 'nfl' ? nfl : cfb).data.rules?.fgMax ?? 60;
           const opts = [['go', 'Go for it']]; if (ytg > 30) opts.push(['punt', 'Punt']); if (fgd <= fgMax) opts.push(['fg', `Field goal (${fgd} yds)`]);
@@ -178,7 +186,7 @@ export function createLive({ api, pages }) {
       } catch {} finally { this.backfilling = false; }
     }
   }
-  return { handle, status, leagues: Object.keys(datas) };
+  return { handle, status, leagues: Object.keys(datas), picks };
 }
 
 // A new play changes the down, spot, possession, score or ESPN's play text. The clock alone only counts once 30 seconds

@@ -13,7 +13,9 @@ import { BUILD } from './api/version.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const PORT = process.env.PORT || 3000;
 // Live sims run here, once per game, only while someone is watching (see api/live.mjs)
-const LIVE = createLive({ api: API, pages: { cfb: path.join(ROOT, 'game.html'), nfl: path.join(ROOT, 'nfl', 'game.html') } });
+// Picks are saved to DATA_DIR. On Render, point it at a persistent disk (render.yaml does), or they reset on each deploy.
+const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+const LIVE = createLive({ api: API, pages: { cfb: path.join(ROOT, 'game.html'), nfl: path.join(ROOT, 'nfl', 'game.html') }, dataDir: DATA_DIR });
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
@@ -68,6 +70,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/espn' || u.pathname === '/.netlify/functions/espn') return await serveApi(req, res, u, 'cfb');
     if (u.pathname === '/api/nfl') return await serveApi(req, res, u, 'nfl');
     if (u.pathname === '/api/version') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ build: BUILD, live: LIVE.leagues })); return; }
+    if (u.pathname === '/api/picks') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.report(u.searchParams.get('league') || 'all'))); return; }
     if (u.pathname === '/api/live') return LIVE.handle(req, res, u);
     if (u.pathname === '/api/live/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.status())); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
