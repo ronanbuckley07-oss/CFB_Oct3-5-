@@ -2,8 +2,13 @@ services:
   - type: web
     name: cfb-live-sim
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm install
     startCommand: node server.mjs
     healthCheckPath: /healthz
     autoDeploy: true
+    envVars:
+      # Simulation threads for live games. Starter has half a CPU, so one thread leaves room for serving pages.
+      # On Standard (1 CPU) or Pro (2 CPU), raise this to 1-2 or 2-3.
+      - key: SIM_THREADS
+        value: "1"

@@ -12,6 +12,7 @@ box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:en
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0A1626;--card:#10213A;--ink:#E8EDF4;--muted:#93A3B8;--line:#22385A;--goldsoft:#3A3220;--turf:#24553A;--turf2:#2A5F41;--live:#F0605A;}}
 :root[data-theme="dark"]{--paper:#0A1626;--card:#10213A;--ink:#E8EDF4;--muted:#93A3B8;--line:#22385A;--goldsoft:#3A3220;--turf:#24553A;--turf2:#2A5F41;--live:#F0605A;}
 *,*::before,*::after{box-sizing:inherit}
+[hidden]{display:none!important}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.45 Barlow,system-ui,-apple-system,sans-serif}
 .wrap{max-width:1240px;margin:0 auto;padding:20px 16px 40px}
@@ -31,6 +32,9 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .seg button+button{border-left:1px solid var(--line)}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--card)}
 .seg button span{opacity:.65;font-weight:500;margin-left:4px}
+.seg.league a{padding:8px 14px;font:700 15px Barlow,sans-serif;text-decoration:none;color:var(--ink)}
+.seg.league a+a{border-left:1px solid var(--line)}
+.seg.league a[aria-current="page"]{background:var(--gold);color:#0C2340}
 .status{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
 .pulse{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 .pulse[data-s="ok"]{background:#2E9E5B}.pulse[data-s="bad"]{background:var(--bad)}
@@ -90,12 +94,13 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 <body><div class="wrap">
 <header class="mast">
   <div>
-    <a class="brand" href="/" aria-label="CFB Live Sim home"><img src="/logo.svg" alt="" width="34" height="34"><span>CFB Live Sim</span></a>
-    <h1>College football, live</h1>
-    <p>Scores, down and distance, and ESPN's win probability for every game on the board, refreshed every 30 seconds. Open a game to run the simulator on it.</p>
+    <a class="brand" href="/" id="brand" aria-label="Home"><img src="/logo.svg" alt="" width="34" height="34"><span id="brandName">CFB Live Sim</span></a>
+    <h1 id="h1">College football, live</h1>
+    <p>Scores, down and distance, and ESPN's win probability for every game on the board, refreshed every few seconds. Open a game to run the simulator on it.</p>
   </div>
   <div class="ctl">
-    <div class="seg" role="group" aria-label="Which games">
+    <nav class="seg league" aria-label="League"><a href="/" id="lgCfb">College</a><a href="/nfl" id="lgNfl">NFL</a></nav>
+    <div class="seg" role="group" aria-label="Which games" id="scopeSeg">
       <button type="button" data-scope="top" aria-pressed="true">Top 25<span id="nTop"></span></button>
       <button type="button" data-scope="fbs" aria-pressed="false">All FBS<span id="nFbs"></span></button>
     </div>
@@ -116,10 +121,13 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 </div>
 
 <script>
-const API='/api/espn', EVERY=30000;
 const $=id=>document.getElementById(id);
-let scope='top', data=null, nextAt=0, inflight=false, prevSnap={};
-try{const s=localStorage.getItem('board-scope'); if(s==='fbs'||s==='top') scope=s;}catch(e){}
+const NFL=location.pathname.startsWith('/nfl');
+const API=NFL?'/api/nfl':'/api/espn', GAME=NFL?'/nfl/game':'/game', EVERY=3000;
+if(NFL){ document.title='NFL Live Sim: every game, live'; $('brandName').textContent='NFL Live Sim'; $('brand').href='/nfl'; $('h1').textContent='NFL, live'; $('scopeSeg').hidden=true; }
+(NFL?$('lgNfl'):$('lgCfb')).setAttribute('aria-current','page');
+let scope=NFL?'fbs':'top', data=null, nextAt=0, inflight=false, prevSnap={};
+if(!NFL) try{const s=localStorage.getItem('board-scope'); if(s==='fbs'||s==='top') scope=s;}catch(e){}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ord=n=>['','1st','2nd','3rd','4th'][n]||'';
 const dark=()=>matchMedia('(prefers-color-scheme: dark)').matches;
@@ -165,7 +173,7 @@ function sortGames(gs){
 function render(){
   const {live,pre,post}=sortGames(data.games||[]);
   let h='';
-  if(data.fallback) h+=`<div class="empty" style="margin-bottom:12px">No ranked teams are on the board this week, so this shows every FBS game.</div>`;
+  if(data.fallback&&!NFL) h+=`<div class="empty" style="margin-bottom:12px">No ranked teams are on the board this week, so this shows every FBS game.</div>`;
   h+=section('Live now',live,live.length?`${live.length} game${live.length>1?'s':''}`:'',
     pre.length?`No games in progress. Next kickoff: ${kick(pre[0])}.`:'No games in progress.');
   if(pre.length) h+=section('Coming up',pre,`${pre.length}`);
@@ -233,7 +241,7 @@ function card(g){
   if(g.tv) tags.push(`<span class="tag">${esc(g.tv)}</span>`);
   const line=[g.line?`Line ${esc(g.line)}`:'', g.ou?`O/U ${esc(g.ou)}`:''].filter(Boolean).join(', ');
   const cta= st==='post'?'Replay in simulator':st==='pre'?'Open simulator':'Run live sims';
-  return `<a class="card ${st}" data-id="${g.id}" href="/game?event=${g.id}" style="--ac:${esc(g.away.color||'#888')};--hc:${esc(g.home.color||'#888')}">
+  return `<a class="card ${st}" data-id="${g.id}" href="${GAME}?event=${g.id}" style="--ac:${esc(g.away.color||'#888')};--hc:${esc(g.home.color||'#888')}">
     <div class="top"><span class="when">${when}</span><span class="tags">${tags.join('')}</span></div>
     ${teamRow(g.away,g,'away')}${teamRow(g.home,g,'home')}
     ${st==='in'?sitLine(g)+strip(g)+wpRow(g)+`<p class="last">${s?.lastPlay?esc(s.lastPlay):'Waiting for the next play.'}</p>`:''}
@@ -246,7 +254,7 @@ $('find').addEventListener('submit',async e=>{
   e.preventDefault(); const q=$('q').value.trim(); if(!q) return;
   $('findMsg').textContent='Looking…';
   try{const r=await fetch(`${API}?kind=find&q=${encodeURIComponent(q)}`); const g=await r.json(); if(!r.ok||g.error) throw new Error(g.error||'HTTP '+r.status);
-    location.href=`/game?event=${g.event}`;}
+    location.href=`${GAME}?event=${g.event}`;}
   catch(err){$('findMsg').textContent=`No match (${err.message}). Try the full school name.`;}
 });
 

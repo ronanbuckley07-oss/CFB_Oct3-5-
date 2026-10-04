@@ -5,17 +5,21 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import espn from './api/espn.mjs';
+import { createHandler, LEAGUES } from './api/espn.mjs';
+const API = { cfb: createHandler(LEAGUES.cfb), nfl: createHandler(LEAGUES.nfl) };
+import { createLive } from './api/live.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const PORT = process.env.PORT || 3000;
+// Live sims run here, once per game, only while someone is watching (see api/live.mjs)
+const LIVE = createLive({ api: API, pages: { cfb: path.join(ROOT, 'game.html'), nfl: path.join(ROOT, 'nfl', 'game.html') } });
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
 };
-// Clean URLs: /game/401858250 and /game?event=401858250 both open the simulator
-const PAGES = { '/': 'index.html', '/game': 'game.html' };
+// Clean URLs: /game/401858250 and /game?event=401858250 both open the simulator; /nfl... is the same for the NFL
+const PAGES = { '/': 'index.html', '/game': 'game.html', '/nfl': 'index.html', '/nfl/game': 'nfl/game.html' };
 
 // Static files are read and compressed once, then served from memory. The sim page is ~1 MB raw, ~150 KB gzipped.
 const fileCache = new Map();
@@ -44,8 +48,8 @@ function pickEncoding(req, entry) {
   return [null, entry.raw];
 }
 
-async function serveApi(req, res, u) {
-  const r = await espn(new Request(u.href));
+async function serveApi(req, res, u, league) {
+  const r = await API[league](new Request(u.href));
   const body = Buffer.from(await r.arrayBuffer());
   const headers = Object.fromEntries(r.headers);
   const ae = String(req.headers['accept-encoding'] || '');
@@ -60,11 +64,15 @@ const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (u.pathname === '/healthz') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ok'); return; }
-    if (u.pathname === '/api/espn' || u.pathname === '/.netlify/functions/espn') return await serveApi(req, res, u);
+    if (u.pathname === '/api/espn' || u.pathname === '/.netlify/functions/espn') return await serveApi(req, res, u, 'cfb');
+    if (u.pathname === '/api/nfl') return await serveApi(req, res, u, 'nfl');
+    if (u.pathname === '/api/live') return LIVE.handle(req, res, u);
+    if (u.pathname === '/api/live/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.status())); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
 
     let rel = PAGES[u.pathname.replace(/\/+$/, '') || '/'];
     if (!rel && /^\/game\/\d+\/?$/.test(u.pathname)) rel = 'game.html';
+    if (!rel && /^\/nfl\/game\/\d+\/?$/.test(u.pathname)) rel = 'nfl/game.html';
     if (!rel) rel = decodeURIComponent(u.pathname).replace(/^\/+/, '');
     const entry = await loadStatic(path.normalize(rel));
     if (!entry) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('Not found'); return; }

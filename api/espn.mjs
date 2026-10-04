@@ -10,9 +10,16 @@
 //   ?kind=list&date=YYYYMMDD          -> finished FBS games on that date (for backtesting)
 //   ?kind=find&q=Michigan at Ohio State  (or &event=ID) -> the ESPN game, its date, and both teams' names and colors
 //   ?kind=team&id=TEAMID              -> player usage from this season's box scores, plus the team's schedule
-const BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/college-football';
-
-export default async (req) => {
+// One handler per league. Everything below is shared; LG carries what differs (ESPN path, market series, spread SD).
+export const LEAGUES = {
+  cfb: { id: 'cfb', base: 'https://site.api.espn.com/apis/site/v2/sports/football/college-football', sbq: 'groups=80', kx: 'KXNCAAF',
+    poly: /^(cfb|ncaaf|college-?football)$/i, polyTags: ['cfb', 'college-football', 'ncaaf'], sig: 15.5 },
+  nfl: { id: 'nfl', base: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl', sbq: 'lang=en', kx: 'KXNFL',
+    poly: /^nfl$/i, polyTags: ['nfl'], sig: 13.0 },
+};
+export function createHandler(LG) {
+const BASE = LG.base;
+const handler = async (req) => {
   const u = new URL(req.url);
   const kind = u.searchParams.get('kind') || 'game';
   const event = (u.searchParams.get('event') || '').replace(/\D/g, '');
@@ -20,18 +27,18 @@ export default async (req) => {
   try {
     if (kind === 'scoreboard') {
       const scope = u.searchParams.get('scope') === 'fbs' ? 'fbs' : 'top';
-      const d = await get(`${BASE}/scoreboard?groups=80&limit=400${date ? `&dates=${date}` : ''}`, 10000);
+      const d = await get(`${BASE}/scoreboard?${LG.sbq}&limit=400${date ? `&dates=${date}` : ''}`, 3000);
       const all = (d.events || []).map(trimEvent).filter(Boolean);
       const top = all.filter(g => g.home.rank || g.away.rank);
       const games = scope === 'top' && top.length ? top : all;
       return json({ updated: new Date().toISOString(), scope, fallback: scope === 'top' && !top.length,
-        week: d.week?.number ?? null, counts: { top: top.length, fbs: all.length }, games }, 200, 10);
+        week: d.week?.number ?? null, counts: { top: top.length, fbs: all.length }, games }, 200, 2);
     }
     if (kind === 'card') {
       if (!event) return json({ error: 'missing event' }, 400);
       let dt = date;
       if (!dt) { const s = await get(`${BASE}/summary?event=${event}`, 8000); dt = etDate(s.header?.competitions?.[0]?.date); }
-      const d = await get(`${BASE}/scoreboard?groups=80&limit=400${dt ? `&dates=${dt}` : ''}`, 10000);
+      const d = await get(`${BASE}/scoreboard?${LG.sbq}&limit=400${dt ? `&dates=${dt}` : ''}`, 10000);
       const ev = (d.events || []).find(e => String(e.id) === event);
       if (!ev) return json({ error: 'game not found' }, 404);
       return json({ ...trimEvent(ev), etDate: dt }, 200, 10);
@@ -62,7 +69,7 @@ export default async (req) => {
     }
     if (kind === 'list') {
       if (!date) return json({ error: 'missing date' }, 400);
-      const d = await get(`${BASE}/scoreboard?groups=80&limit=300&dates=${date}`, 300000);
+      const d = await get(`${BASE}/scoreboard?${LG.sbq}&limit=300&dates=${date}`, 300000);
       const games = (d.events || []).filter(e => e.status?.type?.state === 'post').map(e => {
         const c = e.competitions?.[0] || {};
         const t = (c.competitors || []).map(x => ({ id: x.id, homeAway: x.homeAway, abbr: x.team?.abbreviation, score: +x.score || 0 }));
@@ -79,7 +86,7 @@ export default async (req) => {
       return json({ date, games }, 200, 300);
     }
     if (!event) return json({ error: 'missing event' }, 400);
-    const data = await get(`${BASE}/scoreboard?groups=80&limit=300${date ? `&dates=${date}` : ''}`, 4000);
+    const data = await get(`${BASE}/scoreboard?${LG.sbq}&limit=300${date ? `&dates=${date}` : ''}`, 2000);
     const ev = (data.events || []).find(e => String(e.id) === event);
     if (!ev) return json({ error: 'game not found on that date' }, 404);
     return json(ev, 200, 3);
@@ -239,6 +246,7 @@ function nameScore(label, t) {
   const cands = [t.name, t.location, t.short, `${t.location} ${t.mascot}`].filter(Boolean).map(x => words(x).join(' ')).filter(Boolean);
   let best = 0;
   for (const c of cands) { if (L.trim() === c) return 1; if (L.includes(' ' + c + ' ')) best = Math.max(best, 0.6 + Math.min(0.3, c.length / 60)); }
+  if (t.mascot && L.includes(' ' + words(t.mascot).join(' ') + ' ')) best = Math.max(best, 0.85);
   if (t.abbr && new RegExp(`(^|[^a-z])${t.abbr.toLowerCase()}([^a-z]|$)`).test(String(label).toLowerCase())) best = Math.max(best, 0.5);
   return best;
 }
@@ -255,28 +263,32 @@ async function getAny(urls, ttl) { let err; for (const u of urls) { try { return
 async function kalshiEvents() {
   const out = []; let cursor = '';
   for (let page = 0; page < 6; page++) {
-    const q = `/events?series_ticker=KXNCAAFGAME&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const q = `/events?series_ticker=${LG.kx}GAME&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const d = await getAny(KALSHI.map(b => b + q), 20000);
     out.push(...(d.events || [])); cursor = d.cursor; if (!cursor || !(d.events || []).length) break;
   }
   return out;
 }
-async function kalshiFor(A, B, pin, t0, t1) {
+async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   let events;
   if (pin) {
-    const evT = pin.toUpperCase().split('-').slice(0, 2).join('-').replace(/^KXNCAAF(SPREAD|TOTAL)/, 'KXNCAAFGAME');
+    const evT = pin.toUpperCase().split('-').slice(0, 2).join('-').replace(new RegExp(`^${LG.kx}(SPREAD|TOTAL)`), `${LG.kx}GAME`);
     const d = await getAny(KALSHI.map(b => `${b}/events/${evT}?with_nested_markets=true`), 20000);
     events = [d.event ? { ...d.event, markets: d.markets || d.event.markets } : d];
   } else events = await kalshiEvents();
   let best = null;
+  const MON = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+  const kick = kickoff ? new Date(kickoff).getTime() : null;
   for (const ev of events) {
+    const dm = String(ev.event_ticker || '').match(/-(\d{2})([A-Z]{3})(\d{2})/);
+    if (kick && dm && MON[dm[2]] != null && Math.abs(Date.UTC(2000 + +dm[1], MON[dm[2]], +dm[3]) - kick) > 2 * 86400000) continue;
     const title = `${ev.title || ''} ${ev.sub_title || ''}`;
     const sc = nameScore(title, A) + nameScore(title, B);
     if (sc >= 1 && (!best || sc > best.sc)) best = { sc, ev };
   }
   if (!best) return { found: false, checked: events.length };
   const tk = best.ev.event_ticker || '';
-  const res = { found: true, title: best.ev.title, ticker: tk, url: `https://kalshi.com/markets/kxncaafgame/${tk.toLowerCase()}`, spreads: [], totals: [] };
+  const res = { found: true, title: best.ev.title, ticker: tk, url: `https://kalshi.com/markets/${LG.kx.toLowerCase()}game/${tk.toLowerCase()}`, spreads: [], totals: [] };
   const side = label => { const sa = nameScore(label, A), sb = nameScore(label, B); return sa > sb && sa > 0 ? 'A' : sb > sa && sb > 0 ? 'B' : null; };
   const px = m => midPrice(m.yes_bid_dollars ?? m.yes_bid, m.yes_ask_dollars ?? m.yes_ask, m.last_price_dollars ?? m.last_price);
   const tickers = {};
@@ -288,8 +300,8 @@ async function kalshiFor(A, B, pin, t0, t1) {
   }
   if (res.A && !res.B) res.B = { p: 1 - res.A.p, implied: true }; if (res.B && !res.A) res.A = { p: 1 - res.B.p, implied: true };
   // Spread and total ladders live in sibling series with the same game code: "X wins by over 14.5 points", "Over 46.5 points scored"
-  const code = tk.replace(/^KXNCAAFGAME-/, '');
-  const [sp, to] = await Promise.all(['KXNCAAFSPREAD', 'KXNCAAFTOTAL'].map(ser =>
+  const code = tk.replace(new RegExp(`^${LG.kx}GAME-`), '');
+  const [sp, to] = await Promise.all([`${LG.kx}SPREAD`, `${LG.kx}TOTAL`].map(ser =>
     getAny(KALSHI.map(b => `${b}/events/${ser}-${code}?with_nested_markets=true`), 20000).then(d => d.markets || d.event?.markets || []).catch(() => [])));
   for (const m of sp) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
@@ -305,7 +317,7 @@ async function kalshiFor(A, B, pin, t0, t1) {
   const hk = tickers.A || tickers.B;
   if (hk && t0) {
     try {
-      const q = `/series/KXNCAAFGAME/markets/${hk}/candlesticks?start_ts=${t0}&end_ts=${t1}&period_interval=1`;
+      const q = `/series/${LG.kx}GAME/markets/${hk}/candlesticks?start_ts=${t0}&end_ts=${t1}&period_interval=1`;
       const d = await getAny(KALSHI.map(b => b + q), 60000);
       const flip = !tickers.A;
       res.hist = (d.candlesticks || []).map(c => {
@@ -321,11 +333,11 @@ async function polyEvents() {
   const lists = [];
   try {
     const sports = await get(`${GAMMA}/sports`, 3600000);
-    const cfb = (Array.isArray(sports) ? sports : []).find(x => /^(cfb|ncaaf|college-?football)$/i.test(x.sport || ''));
+    const cfb = (Array.isArray(sports) ? sports : []).find(x => LG.poly.test(x.sport || ''));
     if (cfb?.series) for (const sid of String(cfb.series).split(',').filter(Boolean))
       lists.push(get(`${GAMMA}/events?series_id=${sid}&closed=false&limit=500`, 20000).catch(() => []));
   } catch {}
-  for (const tag of ['cfb', 'college-football', 'ncaaf']) lists.push(get(`${GAMMA}/events?tag_slug=${tag}&closed=false&limit=500`, 20000).catch(() => []));
+  for (const tag of LG.polyTags) lists.push(get(`${GAMMA}/events?tag_slug=${tag}&closed=false&limit=500`, 20000).catch(() => []));
   const seen = new Set(), out = [];
   for (const l of await Promise.all(lists)) for (const e of (Array.isArray(l) ? l : l?.data || [])) if (!seen.has(e.id)) { seen.add(e.id); out.push(e); }
   return out;
@@ -394,7 +406,7 @@ async function markets(event, kPin, pPin, debug) {
   // Price history window: an hour before kickoff to now (or to a few hours after kickoff once it's over)
   const kick = comp.date ? Math.floor(new Date(comp.date).getTime() / 1000) : null;
   const t0 = kick ? kick - 3600 : null, t1 = kick ? Math.min(Math.floor(Date.now() / 1000), kick + 6 * 3600) : null;
-  const [k, p] = await Promise.all([kalshiFor(A, B, kPin, t0, t1).catch(e => ({ found: false, error: String(e.message || e) })),
+  const [k, p] = await Promise.all([kalshiFor(A, B, kPin, t0, t1, comp.date).catch(e => ({ found: false, error: String(e.message || e) })),
     polyFor(A, B, pPin, comp.date, t0, t1).catch(e => ({ found: false, error: String(e.message || e) }))]);
   const flip = x => x === 'A' ? 'away' : 'home';
   const mirror = (x, y) => { if (x && y && x.bid != null && x.ask != null && y.bid == null) { y.bid = 1 - x.ask; y.ask = 1 - x.bid; } };
@@ -411,7 +423,7 @@ async function markets(event, kPin, pPin, debug) {
 }
 
 // ---------- pregame read: three independent numbers, each turned into a home-team point spread ----------
-const SIG = 15.5; // SD of final margins around the spread in college football
+const SIG = LG.sig; // SD of final margins around the spread (15.5 college, 13 NFL)
 function invPhi(p) { // inverse normal CDF (Acklam)
   const a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.357751867269, -30.66479806614716, 2.506628277459239],
     b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572],
@@ -579,3 +591,8 @@ function json(body, status = 200, maxAge = 0) {
     headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${maxAge}` },
   });
 }
+
+return handler;
+}
+
+export default createHandler(LEAGUES.cfb);
