@@ -1,40 +1,53 @@
-// ESPN proxy for the NFL, served at /api/espn by server.mjs. The browser never calls ESPN directly, and every ESPN response
-// is memoized briefly in memory, so a hundred people watching the board cost the same as one.
-//   ?kind=scoreboard[&date=YYYYMMDD]     -> this week's games, trimmed for the home page (plus the server model's number when it has one)
+// ESPN proxy, served at /api/espn by server.mjs. The browser never calls ESPN directly, and every ESPN response is
+// memoized briefly in memory, so a hundred people watching the board cost the same as one.
+//   ?kind=scoreboard[&scope=top|fbs][&date=YYYYMMDD] -> this week's games, trimmed for the home page (no sims)
 //   ?kind=card&event=ID[&date=YYYYMMDD]  -> one game in the same trimmed shape, for the game page's start screen
 //   ?kind=pregame&event=ID               -> three pregame reads (sportsbooks, ESPN FPI, prediction markets) as point spreads, averaged
 //   ?kind=box&event=ID                   -> box score: team stats and player stat lines
 //   ?kind=markets&event=ID[&kalshi=TICKER][&poly=SLUG] -> Kalshi and Polymarket win prices for both teams
-//   ?event=ID&date=YYYYMMDD           -> that game's scoreboard entry (live state, odds)
+//   ?event=ID&date=YYYYMMDD           -> that game's scoreboard entry (live state, odds)       [original behavior]
 //   ?kind=summary&event=ID            -> trimmed game summary: teams, line, every play, ESPN win probability
-//   ?kind=list&date=YYYYMMDD          -> finished games on that date (for backtesting)
-//   ?kind=find&q=Chiefs at Bills  (or &event=ID) -> the ESPN game, its date, and both teams' names and colors
+//   ?kind=list&date=YYYYMMDD          -> finished FBS games on that date (for backtesting)
+//   ?kind=find&q=Michigan at Ohio State  (or &event=ID) -> the ESPN game, its date, and both teams' names and colors
 //   ?kind=team&id=TEAMID              -> player usage from this season's box scores, plus the team's schedule
-export const BASE = process.env.ESPN_BASE || 'https://site.api.espn.com/apis/site/v2/sports/football/nfl';
-let modelHook = null; // set by the live simulator so the board can show the server's own number
-export function setModelHook(fn) { modelHook = fn; }
-
-export default async (req) => {
+// One handler per league. Everything below is shared; LG carries what differs (ESPN path, market series, spread SD).
+export const LEAGUES = {
+  cfb: { id: 'cfb', base: 'https://site.api.espn.com/apis/site/v2/sports/football/college-football', sbq: 'groups=80', kx: 'KXNCAAF',
+    poly: /^(cfb|ncaaf|college-?football)$/i, polyTags: ['cfb', 'college-football', 'ncaaf'], sig: 15.5 },
+  nfl: { id: 'nfl', base: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl', sbq: 'lang=en', kx: 'KXNFL',
+    poly: /^nfl$/i, polyTags: ['nfl'], sig: 13.0 },
+};
+export function createHandler(LG) {
+const BASE = LG.base;
+const handler = async (req) => {
   const u = new URL(req.url);
   const kind = u.searchParams.get('kind') || 'game';
   const event = (u.searchParams.get('event') || '').replace(/\D/g, '');
   const date = (u.searchParams.get('date') || '').replace(/\D/g, '');
   try {
     if (kind === 'scoreboard') {
-      const d = await scoreboard(date, 10000);
-      const games = (d.events || []).map(trimEvent).filter(Boolean);
-      if (modelHook) for (const g of games) { const m = modelHook(g.id); if (m) g.model = m; }
-      return json({ updated: new Date().toISOString(), week: d.week?.number ?? null, seasonType: d.season?.type ?? null,
-        weekLabel: weekLabel(d), counts: { all: games.length }, games }, 200, 5);
+      const scope = u.searchParams.get('scope') === 'fbs' ? 'fbs' : 'top';
+      const d = await get(`${BASE}/scoreboard?${LG.sbq}&limit=400${date ? `&dates=${date}` : ''}`, 3000);
+      const now = Date.now();
+      // A final leaves the board 6 hours after it ended (first time this server saw it final, capped at kickoff + 4.5 h)
+      const all = (d.events || []).map(trimEvent).filter(Boolean).filter(g => {
+        if (g.state !== 'post') return true;
+        const kick = Date.parse(g.date) || now, seen = finalSeen.get(g.id) ?? now;
+        return now - Math.min(seen, kick + 4.5 * 3600000) < 6 * 3600000;
+      });
+      const top = all.filter(g => g.home.rank || g.away.rank);
+      const games = scope === 'top' && top.length ? top : all;
+      return json({ updated: new Date().toISOString(), scope, fallback: scope === 'top' && !top.length,
+        week: d.week?.number ?? null, counts: { top: top.length, fbs: all.length }, games }, 200, 2);
     }
     if (kind === 'card') {
       if (!event) return json({ error: 'missing event' }, 400);
       let dt = date;
       if (!dt) { const s = await get(`${BASE}/summary?event=${event}`, 8000); dt = etDate(s.header?.competitions?.[0]?.date); }
-      const d = await scoreboard(dt, 10000);
+      const d = await get(`${BASE}/scoreboard?${LG.sbq}&limit=400${dt ? `&dates=${dt}` : ''}`, 10000);
       const ev = (d.events || []).find(e => String(e.id) === event);
       if (!ev) return json({ error: 'game not found' }, 404);
-      return json({ ...trimEvent(ev), etDate: dt }, 200, 5);
+      return json({ ...trimEvent(ev), etDate: dt }, 200, 10);
     }
     if (kind === 'pregame') {
       if (!event) return json({ error: 'missing event' }, 400);
@@ -62,7 +75,7 @@ export default async (req) => {
     }
     if (kind === 'list') {
       if (!date) return json({ error: 'missing date' }, 400);
-      const d = await get(`${BASE}/scoreboard?dates=${date}`, 300000);
+      const d = await get(`${BASE}/scoreboard?${LG.sbq}&limit=300&dates=${date}`, 300000);
       const games = (d.events || []).filter(e => e.status?.type?.state === 'post').map(e => {
         const c = e.competitions?.[0] || {};
         const t = (c.competitors || []).map(x => ({ id: x.id, homeAway: x.homeAway, abbr: x.team?.abbreviation, score: +x.score || 0 }));
@@ -79,7 +92,7 @@ export default async (req) => {
       return json({ date, games }, 200, 300);
     }
     if (!event) return json({ error: 'missing event' }, 400);
-    const data = await scoreboard(date, 4000);
+    const data = await get(`${BASE}/scoreboard?${LG.sbq}&limit=300${date ? `&dates=${date}` : ''}`, 800);
     const ev = (data.events || []).find(e => String(e.id) === event);
     if (!ev) return json({ error: 'game not found on that date' }, 404);
     return json(ev, 200, 3);
@@ -90,9 +103,9 @@ export default async (req) => {
 
 // ---------- game finder ----------
 let teamCache = null;
-export async function allTeams() {
+async function allTeams() {
   if (teamCache) return teamCache;
-  const d = await get(`${BASE}/teams?limit=100`, 86400000);
+  const d = await get(`${BASE}/teams?limit=1000`, 86400000);
   const list = d.sports?.[0]?.leagues?.[0]?.teams || [];
   teamCache = list.map(x => x.team).filter(Boolean).map(teamInfo);
   return teamCache;
@@ -133,8 +146,8 @@ async function findGame(q, event) {
   if (!ca.length) throw new Error(`no team matches "${parts[0]}"`);
   let A = ca[0][1], B = null;
   if (parts[1]) { const cb = bestTeams(parts[1]); if (!cb.length) throw new Error(`no team matches "${parts[1]}"`); B = cb[0][1]; }
-  const evs0 = await schedule(A.id);
-  const evs = evs0.filter(e => {
+  const sched = await get(`${BASE}/teams/${A.id}/schedule`, 600000);
+  const evs = (sched.events || []).filter(e => {
     const cs = e.competitions?.[0]?.competitors || [];
     return !B || cs.some(c => String(c.id ?? c.team?.id) === B.id);
   });
@@ -157,7 +170,7 @@ function pack(id, date, state, A, B, homeId) {
 }
 
 // ---------- scoreboard entry -> what the home page and start screen draw ----------
-export function trimEvent(e) {
+function trimEvent(e) {
   const c = e.competitions?.[0]; if (!c) return null;
   const st = c.status || e.status || {}, ty = st.type || {};
   const side = x => {
@@ -167,7 +180,7 @@ export function trimEvent(e) {
     return { id: String(x.id ?? t.id), abbr: t.abbreviation || t.shortDisplayName, short: t.shortDisplayName || t.location || t.name,
       name: t.displayName || t.name, logo: t.logo || logos[0]?.href || null, logoDark: dark || null,
       color: t.color ? '#' + t.color : null, alt: t.alternateColor ? '#' + t.alternateColor : null,
-      rank: null, record: x.records?.find(r => r.type === 'total')?.summary || x.records?.[0]?.summary || null,
+      rank: rk && rk <= 25 ? rk : null, record: x.records?.find(r => r.type === 'total')?.summary || x.records?.[0]?.summary || null,
       score: x.score != null && x.score !== '' ? +x.score : null, winner: !!x.winner };
   };
   const cs = c.competitors || [];
@@ -197,15 +210,15 @@ export function trimEvent(e) {
   // ESPN drops win probability between plays and at halftime, so fall back to the last number it sent
   const id = String(e.id);
   if (wpHome != null) lastWp.set(id, wpHome); else if (ty.state === 'in') wpHome = lastWp.get(id) ?? null;
-  if (ty.state === 'post') wpHome = home.winner ? 1 : away.winner ? 0 : null;
+  if (ty.state === 'post') { wpHome = home.winner ? 1 : away.winner ? 0 : null; if (!finalSeen.has(id)) finalSeen.set(id, Date.now()); }
   const od = c.odds?.[0] || {};
-  return { id, phase, seasonType: e.season?.type ?? null, week: e.week?.number ?? null, date: e.date, state: ty.state || null, detail: ty.shortDetail || ty.detail || null,
+  return { id, phase, date: e.date, state: ty.state || null, detail: ty.shortDetail || ty.detail || null,
     period: st.period ?? null, clock: st.displayClock ?? null, neutral: !!c.neutralSite,
     tv: c.broadcasts?.[0]?.names?.[0] || c.broadcast || null, home, away, sit: s, wpHome,
     line: od.details || null, ou: od.overUnder ?? null };
 }
 
-const lastWp = new Map();
+const lastWp = new Map(), finalSeen = new Map();
 // "(00:18) No Huddle-Shotgun #13 A.Simmons pass complete..." -> "A.Simmons pass complete..."
 function cleanPlay(t) {
   if (!t) return null;
@@ -214,7 +227,7 @@ function cleanPlay(t) {
 }
 
 // ---------- box score ----------
-export function trimBox(d) {
+function trimBox(d) {
   const bx = d.boxscore || {};
   const teams = (bx.teams || []).map(t => ({ id: String(t.team?.id), abbr: t.team?.abbreviation, name: t.team?.shortDisplayName || t.team?.displayName,
     color: t.team?.color ? '#' + t.team.color : null, homeAway: t.homeAway || null,
@@ -230,8 +243,8 @@ export function trimBox(d) {
 }
 
 // ---------- prediction markets: Kalshi and Polymarket ----------
-const KALSHI = process.env.KALSHI_API ? [process.env.KALSHI_API] : ['https://external-api.kalshi.com/trade-api/v2', 'https://api.elections.kalshi.com/trade-api/v2'];
-const GAMMA = process.env.POLY_API || 'https://gamma-api.polymarket.com';
+const KALSHI = ['https://external-api.kalshi.com/trade-api/v2', 'https://api.elections.kalshi.com/trade-api/v2'];
+const GAMMA = 'https://gamma-api.polymarket.com';
 const words = s => norm(String(s || '').replace(/\bst\.?\b/gi, 'state')).split(' ').filter(w => w && !['the', 'of', 'university', 'u'].includes(w));
 // How well a market's label names this team: 0 (no) to 1 (exact)
 function nameScore(label, t) {
@@ -239,6 +252,7 @@ function nameScore(label, t) {
   const cands = [t.name, t.location, t.short, `${t.location} ${t.mascot}`].filter(Boolean).map(x => words(x).join(' ')).filter(Boolean);
   let best = 0;
   for (const c of cands) { if (L.trim() === c) return 1; if (L.includes(' ' + c + ' ')) best = Math.max(best, 0.6 + Math.min(0.3, c.length / 60)); }
+  if (t.mascot && L.includes(' ' + words(t.mascot).join(' ') + ' ')) best = Math.max(best, 0.85);
   if (t.abbr && new RegExp(`(^|[^a-z])${t.abbr.toLowerCase()}([^a-z]|$)`).test(String(label).toLowerCase())) best = Math.max(best, 0.5);
   return best;
 }
@@ -255,28 +269,32 @@ async function getAny(urls, ttl) { let err; for (const u of urls) { try { return
 async function kalshiEvents() {
   const out = []; let cursor = '';
   for (let page = 0; page < 6; page++) {
-    const q = `/events?series_ticker=KXNFLGAME&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const q = `/events?series_ticker=${LG.kx}GAME&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const d = await getAny(KALSHI.map(b => b + q), 20000);
     out.push(...(d.events || [])); cursor = d.cursor; if (!cursor || !(d.events || []).length) break;
   }
   return out;
 }
-async function kalshiFor(A, B, pin, t0, t1) {
+async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   let events;
   if (pin) {
-    const evT = pin.toUpperCase().split('-').slice(0, 2).join('-').replace(/^KXNFL(SPREAD|TOTAL)/, 'KXNFLGAME');
+    const evT = pin.toUpperCase().split('-').slice(0, 2).join('-').replace(new RegExp(`^${LG.kx}(SPREAD|TOTAL)`), `${LG.kx}GAME`);
     const d = await getAny(KALSHI.map(b => `${b}/events/${evT}?with_nested_markets=true`), 20000);
     events = [d.event ? { ...d.event, markets: d.markets || d.event.markets } : d];
   } else events = await kalshiEvents();
   let best = null;
+  const MON = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+  const kick = kickoff ? new Date(kickoff).getTime() : null;
   for (const ev of events) {
+    const dm = String(ev.event_ticker || '').match(/-(\d{2})([A-Z]{3})(\d{2})/);
+    if (kick && dm && MON[dm[2]] != null && Math.abs(Date.UTC(2000 + +dm[1], MON[dm[2]], +dm[3]) - kick) > 2 * 86400000) continue;
     const title = `${ev.title || ''} ${ev.sub_title || ''}`;
     const sc = nameScore(title, A) + nameScore(title, B);
     if (sc >= 1 && (!best || sc > best.sc)) best = { sc, ev };
   }
   if (!best) return { found: false, checked: events.length };
   const tk = best.ev.event_ticker || '';
-  const res = { found: true, title: best.ev.title, ticker: tk, url: `https://kalshi.com/markets/kxnflgame/${tk.toLowerCase()}`, spreads: [], totals: [] };
+  const res = { found: true, title: best.ev.title, ticker: tk, url: `https://kalshi.com/markets/${LG.kx.toLowerCase()}game/${tk.toLowerCase()}`, spreads: [], totals: [] };
   const side = label => { const sa = nameScore(label, A), sb = nameScore(label, B); return sa > sb && sa > 0 ? 'A' : sb > sa && sb > 0 ? 'B' : null; };
   const px = m => midPrice(m.yes_bid_dollars ?? m.yes_bid, m.yes_ask_dollars ?? m.yes_ask, m.last_price_dollars ?? m.last_price);
   const tickers = {};
@@ -288,8 +306,8 @@ async function kalshiFor(A, B, pin, t0, t1) {
   }
   if (res.A && !res.B) res.B = { p: 1 - res.A.p, implied: true }; if (res.B && !res.A) res.A = { p: 1 - res.B.p, implied: true };
   // Spread and total ladders live in sibling series with the same game code: "X wins by over 14.5 points", "Over 46.5 points scored"
-  const code = tk.replace(/^KXNFLGAME-/, '');
-  const [sp, to] = await Promise.all(['KXNFLSPREAD', 'KXNFLTOTAL'].map(ser =>
+  const code = tk.replace(new RegExp(`^${LG.kx}GAME-`), '');
+  const [sp, to] = await Promise.all([`${LG.kx}SPREAD`, `${LG.kx}TOTAL`].map(ser =>
     getAny(KALSHI.map(b => `${b}/events/${ser}-${code}?with_nested_markets=true`), 20000).then(d => d.markets || d.event?.markets || []).catch(() => [])));
   for (const m of sp) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
@@ -305,7 +323,7 @@ async function kalshiFor(A, B, pin, t0, t1) {
   const hk = tickers.A || tickers.B;
   if (hk && t0) {
     try {
-      const q = `/series/KXNFLGAME/markets/${hk}/candlesticks?start_ts=${t0}&end_ts=${t1}&period_interval=1`;
+      const q = `/series/${LG.kx}GAME/markets/${hk}/candlesticks?start_ts=${t0}&end_ts=${t1}&period_interval=1`;
       const d = await getAny(KALSHI.map(b => b + q), 60000);
       const flip = !tickers.A;
       res.hist = (d.candlesticks || []).map(c => {
@@ -321,11 +339,11 @@ async function polyEvents() {
   const lists = [];
   try {
     const sports = await get(`${GAMMA}/sports`, 3600000);
-    const nfl = (Array.isArray(sports) ? sports : []).find(x => /^nfl$/i.test(x.sport || ''));
-    if (nfl?.series) for (const sid of String(nfl.series).split(',').filter(Boolean))
+    const cfb = (Array.isArray(sports) ? sports : []).find(x => LG.poly.test(x.sport || ''));
+    if (cfb?.series) for (const sid of String(cfb.series).split(',').filter(Boolean))
       lists.push(get(`${GAMMA}/events?series_id=${sid}&closed=false&limit=500`, 20000).catch(() => []));
   } catch {}
-  for (const tag of ['nfl']) lists.push(get(`${GAMMA}/events?tag_slug=${tag}&closed=false&limit=500`, 20000).catch(() => []));
+  for (const tag of LG.polyTags) lists.push(get(`${GAMMA}/events?tag_slug=${tag}&closed=false&limit=500`, 20000).catch(() => []));
   const seen = new Set(), out = [];
   for (const l of await Promise.all(lists)) for (const e of (Array.isArray(l) ? l : l?.data || [])) if (!seen.has(e.id)) { seen.add(e.id); out.push(e); }
   return out;
@@ -383,7 +401,7 @@ async function polyFor(A, B, pin, kickoff, t0, t1) {
   }
   return res;
 }
-export async function markets(event, kPin, pPin, debug) {
+async function markets(event, kPin, pPin, debug) {
   await allTeams();
   const s = await get(`${BASE}/summary?event=${event}`, 8000);
   const comp = s.header?.competitions?.[0] || {}, cs = comp.competitors || [];
@@ -394,7 +412,7 @@ export async function markets(event, kPin, pPin, debug) {
   // Price history window: an hour before kickoff to now (or to a few hours after kickoff once it's over)
   const kick = comp.date ? Math.floor(new Date(comp.date).getTime() / 1000) : null;
   const t0 = kick ? kick - 3600 : null, t1 = kick ? Math.min(Math.floor(Date.now() / 1000), kick + 6 * 3600) : null;
-  const [k, p] = await Promise.all([kalshiFor(A, B, kPin, t0, t1).catch(e => ({ found: false, error: String(e.message || e) })),
+  const [k, p] = await Promise.all([kalshiFor(A, B, kPin, t0, t1, comp.date).catch(e => ({ found: false, error: String(e.message || e) })),
     polyFor(A, B, pPin, comp.date, t0, t1).catch(e => ({ found: false, error: String(e.message || e) }))]);
   const flip = x => x === 'A' ? 'away' : 'home';
   const mirror = (x, y) => { if (x && y && x.bid != null && x.ask != null && y.bid == null) { y.bid = 1 - x.ask; y.ask = 1 - x.bid; } };
@@ -411,7 +429,7 @@ export async function markets(event, kPin, pPin, debug) {
 }
 
 // ---------- pregame read: three independent numbers, each turned into a home-team point spread ----------
-export const SIG = 13; // SD of final NFL margins around the closing spread (13.0 in nflverse games since 2010)
+const SIG = LG.sig; // SD of final margins around the spread (15.5 college, 13 NFL)
 function invPhi(p) { // inverse normal CDF (Acklam)
   const a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.357751867269, -30.66479806614716, 2.506628277459239],
     b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572],
@@ -423,7 +441,7 @@ function invPhi(p) { // inverse normal CDF (Acklam)
   return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
 }
 const marginFromP = p => SIG * invPhi(Math.min(0.995, Math.max(0.005, p)));
-export async function pregame(event) {
+async function pregame(event) {
   const d = await get(`${BASE}/summary?event=${event}`, 8000);
   const comp = d.header?.competitions?.[0] || {}, cs = comp.competitors || [];
   const home = cs.find(c => c.homeAway === 'home'), away = cs.find(c => c.homeAway === 'away');
@@ -469,14 +487,15 @@ export async function pregame(event) {
 }
 
 // ---------- player usage from this season's box scores ----------
-export async function teamUsage(id) {
-  const evs = await schedule(id);
+async function teamUsage(id) {
+  const sched = await get(`${BASE}/teams/${id}/schedule`, 600000);
+  const evs = sched.events || [];
   const done = evs.filter(e => e.competitions?.[0]?.status?.type?.state === 'post').slice(-12);
   const opp = e => { const o = (e.competitions?.[0]?.competitors || []).find(c => String(c.id ?? c.team?.id) !== id);
     return o?.team?.shortDisplayName || o?.team?.displayName || o?.team?.location || '?'; };
   const sums = await Promise.all(done.map(e => get(`${BASE}/summary?event=${e.id}`, 3600000).catch(() => null)));
   const P = {}, R = {}, C = {};
-  let games = 0, hasTgt = false;
+  let games = 0;
   for (const d of sums) {
     const side = (d?.boxscore?.players || []).find(p => String(p.team?.id) === id);
     if (!side) continue; games++;
@@ -492,8 +511,7 @@ export async function teamUsage(id) {
         } else if (cat.name === 'rushing') {
           const r = R[nm] ||= { car: 0, yds: 0, td: 0 }; r.car += num(ix('CAR', 'RUSHINGATTEMPTS')); r.yds += num(ix('YDS', 'RUSHINGYARDS')); r.td += num(ix('TD', 'RUSHINGTOUCHDOWNS'));
         } else if (cat.name === 'receiving') {
-          const c = C[nm] ||= { rec: 0, yds: 0, tgt: 0 }; c.rec += num(ix('REC', 'RECEPTIONS')); c.yds += num(ix('YDS', 'RECEIVINGYARDS'));
-          const ti = ix('TGTS', 'RECEIVINGTARGETS'); if (ti >= 0) { c.tgt += num(ti); hasTgt = true; }
+          const c = C[nm] ||= { rec: 0, yds: 0 }; c.rec += num(ix('REC', 'RECEPTIONS')); c.yds += num(ix('YDS', 'RECEIVINGYARDS'));
         }
       }
     }
@@ -506,10 +524,9 @@ export async function teamUsage(id) {
   const teams = {
     qbs: top(Object.fromEntries(Object.entries(P).map(([k, v]) => [k, v.att])), 3).filter(x => x[1] > 0),
     rush: Object.entries(R).filter(([, r]) => r.car > 0).sort((a, b) => b[1].car - a[1].car).slice(0, 7).map(([k, r]) => [k, r.car, r.yds, r.td]),
-    recv: Object.entries(C).filter(([, c]) => c.rec > 0 || c.tgt > 0).sort((a, b) => (b[1].tgt || b[1].rec) - (a[1].tgt || a[1].rec)).slice(0, 10)
-      .map(([k, c]) => [k, hasTgt ? Math.max(c.rec, c.tgt) : Math.max(c.rec, Math.round(c.rec / cr)), c.rec, c.yds]),
+    recv: Object.entries(C).filter(([, c]) => c.rec > 0).sort((a, b) => b[1].rec - a[1].rec).slice(0, 10).map(([k, c]) => [k, Math.max(c.rec, Math.round(c.rec / cr)), c.rec, c.yds]),
     games, plays: att + car, ypp: att + car ? +(yds / (att + car)).toFixed(2) : 0, passrate: att + car ? +(att / (att + car)).toFixed(3) : 0.49,
-    opps: done.map(opp), source: 'espn', targets: hasTgt,
+    opps: done.map(opp), source: 'espn',
   };
   const scoreOf = c => { const v = c?.score; return v == null ? null : typeof v === 'object' ? +(v.value ?? v.displayValue) : +v; };
   const played = evs.filter(e => e.competitions?.[0]?.status?.type?.state === 'post').map(e => {
@@ -532,21 +549,13 @@ export async function teamUsage(id) {
   return { id, usage: teams, played, upcoming };
 }
 
-// The NFL scoreboard defaults to the current week; a date pins one day
-export function scoreboard(date, ttl) { return get(`${BASE}/scoreboard${date ? `?dates=${date}` : ''}`, ttl); }
-function weekLabel(d) { const t = d.season?.type, w = d.week?.number; if (t === 1) return `Preseason week ${w}`; if (t === 3) return ({ 1: 'Wild Card round', 2: 'Divisional round', 3: 'Conference championships', 4: 'Pro Bowl', 5: 'Super Bowl' })[w] || 'Playoffs'; return w ? `Week ${w}` : ''; }
-// Regular season plus playoffs, so a January game finds its team's whole year
-async function schedule(id) {
-  const [reg, post] = await Promise.all([2, 3].map(t => get(`${BASE}/teams/${id}/schedule?seasontype=${t}`, 600000).then(d => d.events || []).catch(() => [])));
-  const seen = new Set(); return [...reg, ...post].filter(e => !seen.has(e.id) && seen.add(e.id));
-}
 // Memoized ESPN fetch. Concurrent callers share one request; results live for ttl ms.
 const memo = new Map();
-export function get(url, ttl = 4000) {
+function get(url, ttl = 4000) {
   const now = Date.now(), hit = memo.get(url);
   if (hit && hit.exp > now) return hit.p;
   const p = (async () => {
-    const r = await fetch(url, { headers: { 'User-Agent': 'nfl-sim/1.0' }, signal: AbortSignal.timeout(9000) });
+    const r = await fetch(url, { headers: { 'User-Agent': 'cfb-sim/2.0' }, signal: AbortSignal.timeout(9000) });
     if (!r.ok) throw new Error(`ESPN returned ${r.status}`);
     return r.json();
   })();
@@ -557,7 +566,7 @@ export function get(url, ttl = 4000) {
 }
 
 // Keep only what the simulator needs. ESPN's summary payload is large and its shape can change, so every field is optional.
-export function trimSummary(d) {
+function trimSummary(d) {
   const comp = d.header?.competitions?.[0] || {};
   const comps = (comp.competitors || []).map(c => ({
     id: String(c.id ?? c.team?.id), homeAway: c.homeAway, abbr: c.team?.abbreviation, name: c.team?.displayName,
@@ -571,7 +580,7 @@ export function trimSummary(d) {
   for (const dr of drives) for (const p of dr.plays || []) plays.push(slim(p, dr.team?.id));
   if (!plays.length) for (const p of d.plays || []) plays.push(slim(p, null));
   const wp = (d.winprobability || []).map(w => ({ id: String(w.playId), home: w.homeWinPercentage }));
-  return { state: comp.status?.type?.state || null, seasonType: d.header?.season?.type ?? null, neutral: !!comp.neutralSite, comps, odds, plays, wp };
+  return { state: comp.status?.type?.state || null, comps, odds, plays, wp };
 }
 function slim(p, driveTeam) {
   const s = p.start || {};
@@ -588,3 +597,8 @@ function json(body, status = 200, maxAge = 0) {
     headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${maxAge}` },
   });
 }
+
+return handler;
+}
+
+export default createHandler(LEAGUES.cfb);
