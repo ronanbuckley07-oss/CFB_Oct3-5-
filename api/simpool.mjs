@@ -16,7 +16,7 @@ export function createPool({ engineSrc, datas }) {
   let nextId = 1, simsRun = 0;
 
   function spawn() {
-    const w = new Worker(new URL('./simworker.mjs', import.meta.url), { workerData: { engineSrc, datas } });
+    const w = new Worker(new URL('./simworker.mjs', import.meta.url), { workerData: { engineSrc, datas }, resourceLimits: { maxOldGenerationSizeMb: 96 } });
     w.busy = null;
     w.on('message', (msg) => {
       const job = w.busy; w.busy = null;

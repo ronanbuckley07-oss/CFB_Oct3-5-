@@ -71,7 +71,11 @@ const handler = async (req) => {
     if (kind === 'team') {
       const id = (u.searchParams.get('id') || '').replace(/\D/g, '');
       if (!id) return json({ error: 'missing id' }, 400);
-      return json(await teamUsage(id), 200, 1800);
+      const hit = teamMemo.get(id);
+      if (hit && hit.exp > Date.now()) return json(await hit.p, 200, 1800);
+      const p = teamUsage(id); teamMemo.set(id, { exp: Date.now() + 1800000, p }); p.catch(() => teamMemo.delete(id));
+      if (teamMemo.size > 300) teamMemo.delete(teamMemo.keys().next().value);
+      return json(await p, 200, 1800);
     }
     if (kind === 'list') {
       if (!date) return json({ error: 'missing date' }, 400);
@@ -221,7 +225,7 @@ function trimEvent(e) {
     line: od.details || null, ou: od.overUnder ?? null };
 }
 
-const lastWp = new Map(), finalSeen = new Map(), lineSeen = new Map();
+const lastWp = new Map(), finalSeen = new Map(), lineSeen = new Map(), teamMemo = new Map();
 // "(00:18) No Huddle-Shotgun #13 A.Simmons pass complete..." -> "A.Simmons pass complete..."
 function cleanPlay(t) {
   if (!t) return null;
@@ -573,7 +577,7 @@ async function teamUsage(id) {
 }
 
 // Memoized ESPN fetch. Concurrent callers share one request; results live for ttl ms.
-const memo = new Map();
+const memo = new Map(), MEMO_MAX = 80;
 function get(url, ttl = 4000) {
   const now = Date.now(), hit = memo.get(url);
   if (hit && hit.exp > now) return hit.p;
@@ -582,9 +586,12 @@ function get(url, ttl = 4000) {
     if (!r.ok) throw new Error(`ESPN returned ${r.status}`);
     return r.json();
   })();
-  memo.set(url, { exp: now + ttl, p });
+  memo.delete(url); memo.set(url, { exp: now + ttl, p });
   p.catch(() => memo.delete(url));
-  if (memo.size > 600) for (const [k, v] of memo) if (v.exp <= now) memo.delete(k);
+  // ESPN game summaries run to several MB each once parsed, so the cache is capped by count, oldest first,
+  // instead of holding every summary for its full TTL. That cap is what keeps the server under its memory limit.
+  if (memo.size > MEMO_MAX) { for (const [k, v] of memo) if (v.exp <= now) memo.delete(k);
+    for (const k of memo.keys()) { if (memo.size <= MEMO_MAX) break; memo.delete(k); } }
   return p;
 }
 

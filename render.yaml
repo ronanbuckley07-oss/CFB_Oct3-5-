@@ -19,3 +19,6 @@ services:
         value: "1"
       - key: DATA_DIR
         value: /var/data
+      # Keep Node's heap well under Starter's 512 MB so it cleans up before the instance hits the limit
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=280
