@@ -56,6 +56,29 @@ The server reads the engine, the model tables and each league's settings straigh
   "Leading bets right now" panel. Each logged bet stores the state and numbers behind it, which the game page turns into
   the "Why the model likes this" explanation.
 
+## Trading (Polymarket US)
+
+Two layers, both built on Polymarket US, the CFTC-regulated exchange US residents can legally trade
+(docs.polymarket.us). The international Polymarket blocks US trading, so the site only reads its prices.
+
+Realistic paper record. Polymarket US is now a third venue next to Kalshi and Polymarket. Its edges use the real ask
+plus the taker fee (0.0695 x p x (1 - p) per contract, schedule effective Oct 1, 2026), and game bets prefer a
+Polymarket US bet when one qualifies. When a Polymarket US bet is logged, the server walks that market's order book
+and records what `PAPER_STAKE` dollars (default 10) would really have bought: contracts, average price, fee. Graded at
+the final, that is the "Realistic" line on the home page.
+
+One-tap trading, private, at `/trade`.
+1. Make a Polymarket US account in their app and finish identity verification.
+2. At polymarket.us/developer, create an API key. The secret is shown once.
+3. In Render > Environment set `TRADE_PASSWORD` (long and unique), `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY`.
+   Leave `TRADING_ENABLED=false` at first: the desk previews orders with Polymarket US but cannot place them.
+4. When you're ready, set `TRADING_ENABLED=true`. Limits: `MAX_ORDER_USD`, `MAX_DAILY_USD`, `MAX_OPEN_BETS`,
+   `MAX_SLIPPAGE_CENTS`, `MIN_EDGE`.
+Every order is previewed first and needs a confirm within 30 seconds. Orders are limit orders, immediate-or-cancel,
+sized so the worst-case cost fits the per-order limit. The server re-checks every limit at placement, refuses a second
+position in the same market, and has a kill switch (persisted on the disk). Trades are logged to `$DATA_DIR/trades.json`
+and graded at the final. Keys never leave the server and are never sent to the browser.
+
 ## NFL model
 
 `public/nfl/game.html` is generated, not edited by hand. After changing `public/game.html`, run

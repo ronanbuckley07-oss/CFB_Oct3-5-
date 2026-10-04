@@ -22,3 +22,20 @@ services:
       # Keep Node's heap well under Starter's 512 MB so it cleans up before the instance hits the limit
       - key: NODE_OPTIONS
         value: --max-old-space-size=280
+      # ---- Polymarket US trading (see README "Trading"). Secrets: set these in the dashboard, never in this file.
+      - key: TRADE_PASSWORD
+        sync: false
+      - key: POLYMARKET_US_KEY_ID
+        sync: false
+      - key: POLYMARKET_US_SECRET_KEY
+        sync: false
+      - key: TRADING_ENABLED
+        value: "false"
+      - key: MAX_ORDER_USD
+        value: "10"
+      - key: MAX_DAILY_USD
+        value: "50"
+      - key: MAX_OPEN_BETS
+        value: "5"
+      - key: PAPER_STAKE
+        value: "10"

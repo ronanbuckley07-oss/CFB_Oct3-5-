@@ -1,3 +1,4 @@
+import { createPmusData } from './pmus.mjs';
 // ESPN proxy, served at /api/espn by server.mjs. The browser never calls ESPN directly, and every ESPN response is
 // memoized briefly in memory, so a hundred people watching the board cost the same as one.
 //   ?kind=scoreboard[&scope=top|fbs][&date=YYYYMMDD] -> this week's games, trimmed for the home page (no sims)
@@ -18,7 +19,9 @@ export const LEAGUES = {
     poly: /^nfl$/i, polyTags: ['nfl'], sig: 13.0 },
 };
 export function createHandler(LG) {
+const handlerApi = {};
 const BASE = LG.base;
+let PMUS = null; // created after get() below
 const handler = async (req) => {
   const u = new URL(req.url);
   const kind = u.searchParams.get('kind') || 'game';
@@ -439,14 +442,16 @@ async function markets(event, kPin, pPin, debug, noHist) {
   // Price history window: an hour before kickoff to now (or to a few hours after kickoff once it's over)
   const kick = comp.date ? Math.floor(new Date(comp.date).getTime() / 1000) : null;
   const t0 = kick && !noHist ? kick - 3600 : null, t1 = kick ? Math.min(Math.floor(Date.now() / 1000), kick + 6 * 3600) : null;
-  const [k, p] = await Promise.all([kalshiFor(A, B, kPin, t0, t1, comp.date).catch(e => ({ found: false, error: String(e.message || e) })),
-    polyFor(A, B, pPin, comp.date, t0, t1).catch(e => ({ found: false, error: String(e.message || e) }))]);
+  PMUS = PMUS || createPmusData(get);
+  const [k, p, us] = await Promise.all([kalshiFor(A, B, kPin, t0, t1, comp.date).catch(e => ({ found: false, error: String(e.message || e) })),
+    polyFor(A, B, pPin, comp.date, t0, t1).catch(e => ({ found: false, error: String(e.message || e) })),
+    PMUS.forGame(LG.id, A, B, comp.date, nameScore).catch(e => ({ found: false, error: String(e.message || e) }))]);
   const flip = x => x === 'A' ? 'away' : 'home';
   const mirror = (x, y) => { if (x && y && x.bid != null && x.ask != null && y.bid == null) { y.bid = 1 - x.ask; y.ask = 1 - x.bid; } };
-  const pack = r => !(r && r.found && r.A) ? r : (mirror(r.A, r.B), mirror(r.B, r.A), { ...r, away: r.A, home: r.B, A: undefined, B: undefined,
+  const pack = r => !(r && r.found && (r.A || (r.spreads || []).length || (r.totals || []).length)) ? r : (mirror(r.A, r.B), mirror(r.B, r.A), { ...r, away: r.A, home: r.B, A: undefined, B: undefined,
     spreads: (r.spreads || []).map(x => ({ ...x, side: flip(x.side) })).sort((a, b) => a.by - b.by),
     totals: (r.totals || []).sort((a, b) => a.line - b.line), hist: r.hist ? { away: r.hist } : null });
-  const out = { at: new Date().toISOString(), awayId: A.id, homeId: B.id, kickoff: comp.date || null, kalshi: pack(k), poly: pack(p) };
+  const out = { at: new Date().toISOString(), awayId: A.id, homeId: B.id, kickoff: comp.date || null, kalshi: pack(k), poly: pack(p), pmus: pack(us) };
   if (debug) {
     out.debug = { teams: [A, B] };
     try { out.debug.kalshiTitles = (await kalshiEvents()).map(e => `${e.event_ticker}: ${e.title}`).slice(0, 400); } catch (e) { out.debug.kalshiError = String(e.message || e); }
@@ -628,6 +633,7 @@ function json(body, status = 200, maxAge = 0) {
   });
 }
 
+handler.pmusBook = slug => (PMUS = PMUS || createPmusData(get)).book(slug);
 return handler;
 }
 

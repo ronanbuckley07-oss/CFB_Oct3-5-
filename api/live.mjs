@@ -105,8 +105,11 @@ export function createLive({ api, pages, dataDir }) {
       for (const g of games.values()) if (g.league === league && g.viewers.size && g.last.edges && Date.now() - (g.last.edges.at || 0) < 600000)
         for (const e of g.last.edges.edges.slice(0, 3)) out.push({ ...e, event: g.event, matchup: g.title, clock: g.last.edges.clock, score: g.last.edges.score, at: g.last.edges.at, sims: 25000 });
       for (const [id, c] of scans) if (id.startsWith(league + ':')) for (const e of c.edges) out.push({ ...e, event: c.event, matchup: c.title });
-      leading[league] = out.sort((a, b) => b.edge - a.edge).slice(0, 12).map(e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url,
-        price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims }));
+      // one row per bet: a watched game and the scanner can both report the same market
+      const seen = new Set(), uniq = out.sort((a, b) => b.edge - a.edge).filter(e => { const k = `${e.event}|${e.venue}|${e.sel}`; if (seen.has(k)) return false; seen.add(k); return true; });
+      leading[league] = uniq.slice(0, 20).map(e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url,
+        price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims,
+        trade: e.trade || null, teamId: e.teamId || null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null, team: e.team || null, mid: e.mid ?? null, ask: e.ask ?? null }));
     } catch {} finally { scanning[league] = false; }
   }
   if (pool) { setInterval(() => { scanLeague('cfb'); scanLeague('nfl'); }, 30000).unref(); setTimeout(() => { scanLeague('cfb'); scanLeague('nfl'); }, 20000).unref(); }

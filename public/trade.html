@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Trading desk</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#F3F5F8;--card:#FFFFFF;--ink:#0C2340;--muted:#5A6A80;--line:#D8DEE7;--gold:#B8902A;--good:#2E7D4F;--bad:#B23A3A;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0A1626;--card:#10213A;--ink:#E8EDF4;--muted:#93A3B8;--line:#22385A;--good:#4CB97A;--bad:#F0605A}}
+*,*::before,*::after{box-sizing:inherit}[hidden]{display:none!important}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.45 Barlow,system-ui,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 50px}
+h1,h2{font-family:"Barlow Condensed",Barlow,sans-serif;font-weight:800;margin:0}
+h1{font-size:40px}h2{font-size:24px;margin-bottom:8px}
+a{color:inherit}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:14px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.small{font-size:13px;color:var(--muted)}
+button{font:700 15px Barlow,sans-serif;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:8px 14px;cursor:pointer}
+button.primary{background:var(--gold);border-color:var(--gold);color:#0C2340}
+button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+input{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;vertical-align:top}
+th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:12.5px;font-weight:600}
+.tblwrap{overflow-x:auto}
+.stats{display:flex;gap:24px;flex-wrap:wrap}.stats div{display:flex;flex-direction:column}
+.stats b{font:800 28px/1.05 "Barlow Condensed",sans-serif}.stats span{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-weight:700;font-size:13px}
+.on{background:rgba(46,125,79,.15);color:var(--good)}.off{background:rgba(178,58,58,.15);color:var(--bad)}
+.good{color:var(--good);font-weight:700}.bad{color:var(--bad);font-weight:700}
+.checks{list-style:none;padding:0;margin:8px 0}.checks li{padding:2px 0}
+.warn{border-left:4px solid var(--bad)}
+#preview{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+#preview .card{max-width:560px;width:100%;margin:0;max-height:90vh;overflow:auto}
+</style></head>
+<body><div class="wrap">
+<div class="row" style="justify-content:space-between"><h1>Trading desk</h1><span class="row"><a href="/" class="small">Back to the site</a><button id="logout" hidden>Log out</button></span></div>
+<p class="small" style="max-width:80ch">Polymarket US only. Nothing trades on its own: you preview each bet and confirm it, every order is a limit order that fills right away or cancels, and the limits below are enforced on the server. This is a tool for your own account, not betting advice.</p>
+
+<section class="card" id="login" hidden>
+  <h2>Log in</h2>
+  <form class="row" id="loginForm"><input type="password" id="pw" placeholder="Trading password" autocomplete="current-password"><button class="primary" type="submit">Unlock</button><span class="small" id="loginMsg"></span></form>
+</section>
+
+<div id="desk" hidden>
+  <section class="card" id="status"></section>
+  <section class="card">
+    <h2>Bets available now</h2>
+    <p class="small">The model's Polymarket US bets on live games with a gap of at least <span id="minEdge"></span> points after fees. "What your stake buys" walks the real order book.</p>
+    <div class="tblwrap"><table><thead><tr><th>Bet</th><th>Model</th><th>Ask</th><th>What $<span class="lim"></span> buys</th><th>Expected profit</th><th></th></tr></thead><tbody id="opps"></tbody></table></div>
+  </section>
+  <section class="card">
+    <h2>Your trades</h2>
+    <div class="tblwrap"><table><thead><tr><th>Bet</th><th>Contracts</th><th>Avg price</th><th>Fee</th><th>Cost</th><th>Result</th></tr></thead><tbody id="trades"></tbody></table></div>
+  </section>
+</div>
+</div>
+
+<div id="preview" hidden><div class="card" id="pv"></div></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const c=v=>v==null?'–':Math.round(v*100)+'¢', pc=v=>v==null?'–':(v*100).toFixed(1)+'%', usd=v=>v==null?'–':`${v<0?'−':''}$${Math.abs(v).toFixed(2)}`;
+const post=(p,b)=>fetch('/api/trade'+p,{method:'POST',headers:{'content-type':'application/json','x-trade':'1'},body:JSON.stringify(b||{}),credentials:'same-origin'});
+let S=null, busy=false;
+
+async function load(){
+  if(busy) return;
+  const r=await fetch('/api/trade/state',{credentials:'same-origin',cache:'no-store'});
+  if(r.status===401){ $('login').hidden=false; $('desk').hidden=true; $('logout').hidden=true; return; }
+  if(r.status===404){ $('login').hidden=false; $('loginForm').hidden=true; $('loginMsg').textContent=''; $('login').innerHTML='<h2>Not set up</h2><p>Trading is off until you add <code>TRADE_PASSWORD</code> in Render. See the README.</p>'; return; }
+  S=await r.json(); $('login').hidden=true; $('desk').hidden=false; $('logout').hidden=false; render();
+}
+function render(){
+  const L=S.limits, a=S.account;
+  $('minEdge').textContent=(L.minEdge*100).toFixed(0); document.querySelectorAll('.lim').forEach(e=>e.textContent=L.maxOrder);
+  $('status').className='card'+(S.killed||!S.enabled||!S.connected?' warn':'');
+  $('status').innerHTML=`<div class="row" style="justify-content:space-between"><h2>Status</h2>
+      <button class="${S.killed?'primary':'danger'}" id="kill">${S.killed?'Turn trading back on':'Kill switch: stop all trading'}</button></div>
+    <div class="stats">
+      <div><b>${S.connected?(a?usd(a.buyingPower):'?'):'–'}</b><span>buying power${S.accountError?' (could not load)':''}</span></div>
+      <div><b>${usd(S.spentToday)} / $${L.maxDaily}</b><span>spent today / daily limit</span></div>
+      <div><b>$${L.maxOrder}</b><span>max per order</span></div>
+      <div><b>${S.openBets} / ${L.maxOpen}</b><span>open bets / limit</span></div>
+    </div>
+    <p class="small" style="margin:10px 0 0">
+      Polymarket US account: <span class="pill ${S.connected?'on':'off'}">${S.connected?'connected':'no API keys'}</span>
+      Trading: <span class="pill ${S.enabled&&!S.killed?'on':'off'}">${S.killed?'stopped by kill switch':S.enabled?'enabled':'preview only'}</span>
+      ${S.accountError?`<br>${esc(S.accountError)}`:''}</p>`;
+  $('kill').onclick=async()=>{ await post('/kill',{on:!S.killed}); load(); };
+  const O=S.opportunities||[];
+  $('opps').innerHTML=O.length?O.map((o,i)=>`<tr><td><b>${esc(o.sel)}</b> <span class="small">${esc(o.type)}</span><br><span class="small"><a href="${o.league==='nfl'?'/nfl/game':'/game'}?event=${o.event}">${esc(o.matchup)}</a>${o.clock?`, ${esc(o.clock)}`:''}${o.score?`, ${esc(o.score)}`:''}</span></td>
+      <td>${pc(o.model)}</td><td>${c(o.ask)}</td>
+      <td>${o.fill?`${o.fill.qty} @ ${c(o.fill.avg)} + ${usd(o.fill.fee)} fee = <b>${usd(o.fill.cost)}</b>${o.fill.full?'':'<br><span class="small">book too thin for the full amount</span>'}`:`<span class="small">${esc(o.error||'nothing on the book')}</span>`}</td>
+      <td class="${o.fill&&o.fill.ev>0?'good':'bad'}">${o.fill?usd(o.fill.ev):'–'}</td>
+      <td><button data-i="${i}" ${o.fill?'':'disabled'}>Preview</button></td></tr>`).join('')
+    :'<tr><td colspan="6" class="small">No Polymarket US bet clears the bar right now. Bets appear here during live games that have Polymarket US markets.</td></tr>';
+  $('opps').querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>preview(O[+b.dataset.i]));
+  const T=S.trades||[];
+  $('trades').innerHTML=T.length?T.map(t=>`<tr><td><b>${esc(t.sel)}</b> <span class="small">${esc(t.matchup||'')}, ${new Date(t.at).toLocaleString([], {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}</span>${t.error?`<br><span class="bad small">${esc(t.error)}</span>`:''}</td>
+      <td>${t.qty}</td><td>${c(t.avg)}</td><td>${usd(t.fee)}</td><td>${usd(t.cost)}</td>
+      <td class="${t.status==='won'?'good':t.status==='lost'?'bad':''}">${t.status==='open'?'open':t.status==='unfilled'?'not filled':`${t.status} ${t.pl!=null?usd(t.pl):''}`}</td></tr>`).join('')
+    :'<tr><td colspan="6" class="small">No trades yet.</td></tr>';
+}
+async function preview(o){
+  busy=true; $('preview').hidden=false; $('pv').innerHTML='<p>Checking the order book…</p>';
+  const r=await post('/preview',{slug:o.trade.slug,outcome:o.trade.outcome,usd:S.limits.maxOrder}); const d=await r.json();
+  if(!r.ok){ $('pv').innerHTML=`<h2>Can't preview</h2><p>${esc(d.error)}</p><button id="pvClose">Close</button>`; $('pvClose').onclick=closePv; return; }
+  const P=d.plan, ok=d.checks.every(x=>x.ok);
+  let left=30;
+  $('pv').innerHTML=`<h2>${esc(P.sel)}</h2><p class="small">${esc(P.matchup)}, ${esc(P.type)} on Polymarket US (${P.outcome} on <code>${esc(P.slug)}</code>)</p>
+    <table><tbody>
+      <tr><td>Contracts</td><td><b>${P.qty}</b></td></tr>
+      <tr><td>Expected fill</td><td>${c(d.fill.avg)} avg + ${usd(d.fill.fee)} fee = <b>${usd(d.fill.cost)}</b></td></tr>
+      <tr><td>Limit price (your side)</td><td>${c(P.limitSide)}, worst case ${usd(P.maxCost)}</td></tr>
+      <tr><td>Pays if it wins</td><td>${usd(P.qty)}</td></tr>
+      <tr><td>Model's chance</td><td>${pc(P.model)}</td></tr>
+      <tr><td>Expected profit if the model is right</td><td class="${d.ev>0?'good':'bad'}">${usd(d.ev)}</td></tr>
+    </tbody></table>
+    ${d.exchange?'<p class="small good">Polymarket US accepted the preview.</p>':d.exchangeError?`<p class="small bad">Polymarket US preview: ${esc(d.exchangeError)}</p>`:''}
+    <ul class="checks">${d.checks.map(x=>`<li class="${x.ok?'good':'bad'}">${x.ok?'✓':'✗'} <span style="color:var(--ink);font-weight:500">${esc(x.msg)}</span></li>`).join('')}</ul>
+    <p class="small">The order is a limit order that fills immediately or cancels, so it can't fill worse than the limit price. If the price moved, part or all of it may not fill.</p>
+    <div class="row"><button class="primary" id="place" ${ok?'':'disabled'}>Place order (<span id="cd">30</span>s)</button><button id="pvClose">Cancel</button></div><p id="pvMsg"></p>`;
+  $('pvClose').onclick=closePv;
+  const tick=setInterval(()=>{ left--; const e=$('cd'); if(e) e.textContent=left; if(left<=0){ clearInterval(tick); const b=$('place'); if(b){ b.disabled=true; b.textContent='Preview expired'; } } },1000);
+  $('place').onclick=async()=>{
+    $('place').disabled=true; $('pvMsg').textContent='Sending…'; clearInterval(tick);
+    const r2=await post('/place',{token:d.token}); const j=await r2.json();
+    if(!r2.ok&&!j.trade){ $('pvMsg').innerHTML=`<span class="bad">${esc(j.error)}</span>`; return; }
+    const t=j.trade; $('pvMsg').innerHTML=t.qty>0?`<span class="good">Filled ${t.qty} at ${c(t.avg)}, fee ${usd(t.fee)}, total ${usd(t.cost)}.</span>`:`<span class="bad">Not filled${t.error?`: ${esc(t.error)}`:'. The price moved past your limit.'}</span>`;
+  };
+}
+function closePv(){ $('preview').hidden=true; busy=false; load(); }
+$('loginForm').onsubmit=async e=>{ e.preventDefault(); const r=await post('/login',{password:$('pw').value}); const j=await r.json(); if(r.ok){ $('pw').value=''; load(); } else $('loginMsg').textContent=j.error||'Failed'; };
+$('logout').onclick=async()=>{ await post('/logout'); load(); };
+load(); setInterval(()=>{ if(!document.hidden) load(); },10000);
+</script>
+</body></html>

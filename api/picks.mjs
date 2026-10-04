@@ -4,6 +4,9 @@
 // (wins, losses, profit per $1 contract) is what the home page shows. Nothing here places a bet.
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
+import { simulateFill, TAKER_THETA } from './pmus.mjs';
+
+const PAPER_STAKE = +process.env.PAPER_STAKE || 10; // dollars per bet in the realistic record
 
 const MIN_EDGE_ML = 0.05;    // moneyline: model probability at least 5 points above the ask
 const MIN_EDGE_LINE = 0.06;  // spread/total ladders only give a midpoint, so ask for a little more
@@ -21,6 +24,15 @@ export const pastWindow = S => S.qtr > 4 || (S.qtr === 4 && S.secs < WINDOW.to.s
 export function phaseOf(S) {
   if (S.qtr < 4) return `Q${S.qtr} ${S.secs > 450 ? 'early' : 'late'}`;
   return S.secs > 480 ? 'Q4 15:00-8:00' : S.secs > 180 ? 'Q4 8:00-3:00' : 'Q4 last 3:00';
+}
+
+// Grade one bet against a final score (sc: team id -> points). Shared with real trades.
+export function gradeBet(p, sc) {
+  const ids = Object.keys(sc), total = sc[ids[0]] + sc[ids[1]];
+  if (p.type === 'total') return total === p.line ? 'push' : (total > p.line) === p.over ? 'won' : 'lost';
+  const mine = sc[String(p.teamId)], theirs = sc[ids.find(i => i !== String(p.teamId))], m = mine - theirs;
+  if (p.type === 'moneyline') return m === 0 ? 'push' : m > 0 ? 'won' : 'lost';
+  return m === p.by ? 'push' : m > p.by ? 'won' : 'lost';
 }
 
 export function createPicks({ api, dir }) {
@@ -48,19 +60,45 @@ export function createPicks({ api, dir }) {
     const aIsAway = String(mk.awayId) === String(g.slotId.ND);
     const slotOf = side => (side === 'away') === aIsAway ? 'ND' : 'UNC';
     const name = slot => g.abbr[slot];
+    const usFee = p => TAKER_THETA * p * (1 - p);
+    const us = mk.pmus;
+    if (us && us.found) {
+      const V = 'Polymarket US', url = us.url;
+      for (const side of ['away', 'home']) {
+        const m = us[side]; if (!m || m.ask == null) continue;
+        const slot = slotOf(side), p = slot === 'ND' ? wA : 1 - wA, cost = m.ask + usFee(m.ask);
+        out.push({ venue: V, url, type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], cost, model: p, edge: p - cost, mid: m.p, ask: m.ask, trade: m.trade });
+      }
+      for (const sp of us.spreads || []) {
+        const slot = slotOf(sp.side), p = marginP(A, slot === 'ND', sp.by); if (p == null) continue;
+        const other = slot === 'ND' ? 'UNC' : 'ND', lbl = (t, by) => `${name(t)} ${by > 0 ? '−' + by : '+' + (-by)}`;
+        if (sp.ask != null) { const c = sp.ask + usFee(sp.ask);
+          out.push({ venue: V, url, type: 'spread', sel: lbl(slot, sp.by), slot, team: name(slot), teamId: g.slotId[slot], by: sp.by, cost: c, model: p, edge: p - c, mid: sp.p, ask: sp.ask, trade: { slug: sp.slug, outcome: 'YES' } }); }
+        if (sp.bid != null) { const a = 1 - sp.bid, c = a + usFee(a);
+          out.push({ venue: V, url, type: 'spread', sel: lbl(other, -sp.by), slot: other, team: name(other), teamId: g.slotId[other], by: -sp.by, cost: c, model: 1 - p, edge: (1 - p) - c, mid: 1 - sp.p, ask: a, trade: { slug: sp.slug, outcome: 'NO' } }); }
+      }
+      for (const t of us.totals || []) {
+        const pOver = overP(A, t.line); if (pOver == null) continue;
+        const yesP = t.yesOver ? pOver : 1 - pOver;
+        if (t.ask != null) { const c = t.ask + usFee(t.ask);
+          out.push({ venue: V, url, type: 'total', sel: `${t.yesOver ? 'Over' : 'Under'} ${t.line}`, over: t.yesOver, line: t.line, cost: c, model: yesP, edge: yesP - c, mid: t.yesOver ? t.p : 1 - t.p, ask: t.ask, trade: { slug: t.slug, outcome: 'YES' } }); }
+        if (t.bid != null) { const a = 1 - t.bid, c = a + usFee(a);
+          out.push({ venue: V, url, type: 'total', sel: `${t.yesOver ? 'Under' : 'Over'} ${t.line}`, over: !t.yesOver, line: t.line, cost: c, model: 1 - yesP, edge: (1 - yesP) - c, mid: t.yesOver ? 1 - t.p : t.p, ask: a, trade: { slug: t.slug, outcome: 'NO' } }); }
+      }
+    }
     for (const [venue, src] of [['Kalshi', mk.kalshi], ['Polymarket', mk.poly]]) {
       if (!src || !src.found) continue;
       for (const side of ['away', 'home']) {
         const m = src[side]; if (!m || m.implied) continue;
         const slot = slotOf(side), p = slot === 'ND' ? wA : 1 - wA;
         const cost = m.ask != null ? m.ask : m.p + 0.01;
-        out.push({ venue, url: src.url, type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), cost, model: p, edge: p - cost, mid: m.p });
+        out.push({ venue, url: src.url, type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], cost, model: p, edge: p - cost, mid: m.p });
       }
       for (const s of src.spreads || []) {
         const slot = slotOf(s.side), p = marginP(A, slot === 'ND', s.by); if (p == null) continue;
         const other = slot === 'ND' ? 'UNC' : 'ND', lbl = (t, by) => `${name(t)} ${by > 0 ? '−' + by : '+' + (-by)}`;
-        out.push({ venue, url: src.url, type: 'spread', sel: lbl(slot, s.by), slot, team: name(slot), by: s.by, cost: s.p + LINE_COST, model: p, edge: p - s.p - LINE_COST, mid: s.p });
-        out.push({ venue, url: src.url, type: 'spread', sel: lbl(other, -s.by), slot: other, team: name(other), by: -s.by, cost: 1 - s.p + LINE_COST, model: 1 - p, edge: (1 - p) - (1 - s.p) - LINE_COST, mid: 1 - s.p });
+        out.push({ venue, url: src.url, type: 'spread', sel: lbl(slot, s.by), slot, team: name(slot), teamId: g.slotId[slot], by: s.by, cost: s.p + LINE_COST, model: p, edge: p - s.p - LINE_COST, mid: s.p });
+        out.push({ venue, url: src.url, type: 'spread', sel: lbl(other, -s.by), slot: other, team: name(other), teamId: g.slotId[other], by: -s.by, cost: 1 - s.p + LINE_COST, model: 1 - p, edge: (1 - p) - (1 - s.p) - LINE_COST, mid: 1 - s.p });
       }
       for (const t of src.totals || []) {
         const p = overP(A, t.line); if (p == null) continue;
@@ -88,15 +126,26 @@ export function createPicks({ api, dir }) {
       teamId: e.slot ? g.slotId[e.slot] : null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null,
       price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock, score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`,
       phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), status: 'open' }, extra || {});
-    db.picks.push(pick); dirty = true; return pick;
+    db.picks.push(pick); dirty = true;
+    if (e.trade) fillPaper(pick, e.trade);
+    return pick;
   };
+  // What $PAPER_STAKE would actually have bought on the Polymarket US order book at that moment, fees included
+  async function fillPaper(pick, trade) {
+    try {
+      const bk = await api[pick.league].pmusBook(trade.slug);
+      const f = simulateFill(bk, trade.outcome, PAPER_STAKE);
+      pick.trade = trade; pick.fill = { stake: PAPER_STAKE, qty: f.qty, avg: f.avg && +f.avg.toFixed(4), fee: f.fee, cost: f.cost, full: f.full, at: new Date().toISOString() };
+    } catch (e) { pick.fill = { error: String(e.message || e) }; }
+    dirty = true;
+  }
   // The one automatic bet per game: the best qualifying edge once the game is inside the window
   function autoPick(g, A, mk, S) {
     const id = `${g.league}:${g.event}`;
     if (db.auto[id]) return null;
     if (pastWindow(S)) { db.auto[id] = { status: 'pass', at: new Date().toISOString(), matchup: g.title }; dirty = true; return null; }
     if (!inWindow(S)) return null;
-    const best = edges(g, A, mk)[0]; if (!best) return null;
+    const list = edges(g, A, mk), best = list.find(e => e.venue === 'Polymarket US') || list[0]; if (!best) return null;
     const pick = logPick(g, A, S, best, { auto: true });
     db.auto[id] = { status: 'bet', at: new Date().toISOString(), key: pick && pick.key, matchup: g.title }; dirty = true;
     return pick;
@@ -127,16 +176,11 @@ export function createPicks({ api, dir }) {
         const ids = Object.keys(sc); if (ids.length !== 2) continue;
         const total = sc[ids[0]] + sc[ids[1]];
         for (const p of open.filter(x => x.league === league && x.event === event)) {
-          let res;
-          if (p.type === 'total') res = total === p.line ? 'push' : (total > p.line) === p.over ? 'won' : 'lost';
-          else {
-            const mine = sc[p.teamId], theirs = sc[ids.find(i => i !== String(p.teamId))], m = mine - theirs;
-            if (p.type === 'moneyline') res = m === 0 ? 'push' : m > 0 ? 'won' : 'lost';
-            else res = m === p.by ? 'push' : m > p.by ? 'won' : 'lost';
-          }
+          const res = gradeBet(p, sc);
           p.status = res; p.final = `${sm.comps.map(c => `${c.abbr} ${c.score}`).join(', ')}`; p.settledAt = new Date().toISOString();
           // one $1 contract bought at the logged price
           p.pl = res === 'won' ? +(1 - p.price).toFixed(3) : res === 'lost' ? -p.price : 0;
+          if (p.fill && p.fill.qty > 0) p.fill.pl = +(res === 'won' ? p.fill.qty - p.fill.cost : res === 'lost' ? -p.fill.cost : 0).toFixed(2);
           dirty = true;
         }
       } catch {}
@@ -154,7 +198,10 @@ export function createPicks({ api, dir }) {
     const ps = db.picks.filter(p => !league || league === 'all' || p.league === league);
     const phases = {}; for (const p of ps) if (p.phase) (phases[p.phase] = phases[p.phase] || []).push(p);
     const passes = Object.entries(db.auto).filter(([k, v]) => v.status === 'pass' && (!league || league === 'all' || k.startsWith(league + ':'))).length;
-    const extra = { auto: summarize(ps.filter(p => p.auto)), autoOpen: ps.filter(p => p.auto && p.status === 'open').length, passes, window: WINDOW.label,
+    const real = ps.filter(p => p.fill && p.fill.qty > 0 && p.status !== 'open' && p.status !== 'push');
+    const rStake = real.reduce((a, p) => a + p.fill.cost, 0), rPl = real.reduce((a, p) => a + (p.fill.pl || 0), 0), rW = real.filter(p => p.status === 'won').length;
+    const extra = { realistic: { n: real.length, w: rW, l: real.length - rW, staked: +rStake.toFixed(2), pl: +rPl.toFixed(2), roi: rStake ? rPl / rStake : null, stake: PAPER_STAKE,
+        open: ps.filter(p => p.fill && p.fill.qty > 0 && p.status === 'open').length, unfillable: ps.filter(p => p.fill && p.fill.qty === 0).length }, auto: summarize(ps.filter(p => p.auto)), autoOpen: ps.filter(p => p.auto && p.status === 'open').length, passes, window: WINDOW.label,
       byPhase: Object.fromEntries(Object.entries(phases).map(([k, v]) => [k, summarize(v)])) };
     const done = ps.filter(p => p.status === 'won' || p.status === 'lost');
     const w = done.filter(p => p.status === 'won').length, l = done.length - w;
