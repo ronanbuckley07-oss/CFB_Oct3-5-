@@ -298,7 +298,7 @@ async function loadPicks(){
     if(!all.length&&!d.passes){ el.hidden=true; }
     else {
       const tierTag=t=>t?`<span class="tagtier t-${t}">${t==='low'?'low risk':t==='high'?'high risk':'medium'}</span>`:'';
-      const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.auto?'<span class="tagauto">game bet</span>':''}${tierTag(p.tier)} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.venue)}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
+      const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.auto?'<span class="tagauto">game bet</span>':''}${tierTag(p.tier)} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.venue)}</td><td>${c(p.ask??p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
       const head='<thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead>';
       const n=R.w+R.l, phases=Object.entries(d.byPhase||{});
       const order=['Q1 early','Q1 late','Q2 early','Q2 late','Q3 early','Q3 late','Q4 15:00-8:00','Q4 8:00-3:00','Q4 last 3:00'];
@@ -329,7 +329,7 @@ async function loadPicks(){
     const r=await fetch(`/api/picks/leading?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json(), el=$('lead');
     const anyLive=data&&(data.games||[]).some(g=>g.state==='in');
     if(!d.bets.length&&!anyLive){ el.hidden=true; return; }
-    el.innerHTML=`<h2>Leading bets right now <small>Live bets where the fair price (halfway between model and market) still beats what you'd pay. Edge = fair minus price. Updated every 30 seconds.</small></h2>
+    el.innerHTML=`<h2>Leading bets right now <small>Live bets where the fair price (halfway between model and market) still beats what you'd pay. Price is the live ask on that market; edge is fair minus price after fees. Updated every 30 seconds.</small></h2>
       ${d.bets.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th><th></th></tr></thead><tbody>${d.bets.map(b=>`<tr><td><b>${esc(b.sel)}</b>${b.tier?`<span class="tagtier t-${b.tier}">${b.tier==='low'?'low risk':b.tier==='high'?'high risk':'medium'}</span>`:''} <span style="color:var(--muted)">${esc(b.matchup||'')}, ${esc(b.type)}${b.clock?`, ${esc(b.clock)}`:''}${b.score?`, ${esc(b.score)}`:''}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td>${pc(b.fair)}</td><td class="edge">+${((b.fairEdge??b.edge)*100).toFixed(1)}</td><td><a class="go" href="${GAME}?event=${b.event}">Open game ›</a></td></tr>`).join('')}</tbody></table>
         <p class="sub" style="margin-top:8px">Open a game and look under Betting for the reasoning behind each one. Gaps over 20 points are skipped as likely stale prices.</p>`
       :'<p class="sub">No live bet clears the bar right now.</p>'}`;
@@ -339,12 +339,12 @@ async function loadPicks(){
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },30000);
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.14';
+const BUILD='2026-10-04.15';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.14'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.15'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

@@ -108,7 +108,7 @@ export function createLive({ api, pages, dataDir }) {
       // one row per bet: a watched game and the scanner can both report the same market
       const seen = new Set(), uniq = out.sort((a, b) => (b.fairEdge ?? b.edge) - (a.fairEdge ?? a.edge)).filter(e => { const k = `${e.event}|${e.venue}|${e.sel}`; if (seen.has(k)) return false; seen.add(k); return true; });
       leading[league] = uniq.slice(0, 20).map(e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url,
-        price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims,
+        price: +(e.ask ?? e.cost).toFixed(3), cost: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims,
         fair: e.fair != null ? +e.fair.toFixed(3) : null, fairEdge: e.fairEdge != null ? +e.fairEdge.toFixed(3) : null, tier: e.tier || null,
         trade: e.trade || null, teamId: e.teamId || null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null, team: e.team || null, mid: e.mid ?? null, ask: e.ask ?? null }));
     } catch {} finally { scanning[league] = false; }

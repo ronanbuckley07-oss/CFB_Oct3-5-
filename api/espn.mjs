@@ -335,12 +335,14 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   for (const m of sp) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const by = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
-    const sd = side(m.yes_sub_title || txt); if (sd && isFinite(by)) res.spreads.push({ side: sd, by, p: pr.p });
+    const sd = side(m.yes_sub_title || txt); if (sd && isFinite(by)) res.spreads.push({ side: sd, by, p: pr.p, bid: pr.bid ?? null, ask: pr.ask ?? null });
   }
   for (const m of to) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const line = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
-    if (isFinite(line)) res.totals.push({ line, p: /under|below/i.test(m.yes_sub_title || '') ? 1 - pr.p : pr.p });
+    if (isFinite(line)) { const under = /under|below/i.test(m.yes_sub_title || '');
+      // stored as the Over: ask = cost of Over, askOther = cost of Under
+      res.totals.push(under ? { line, p: 1 - pr.p, ask: pr.bid != null ? 1 - pr.bid : null, askOther: pr.ask ?? null } : { line, p: pr.p, ask: pr.ask ?? null, askOther: pr.bid != null ? 1 - pr.bid : null }); }
   }
   // Minute-by-minute price history for the game-winner market, so the chart has Kalshi's line from kickoff
   const hk = tickers.A || tickers.B;
@@ -372,6 +374,21 @@ async function polyEvents() {
   return out;
 }
 const PERIOD = /\b(1h|2h|1st half|2nd half|first half|second half|halftime|half|quarter|q[1-4]|[1-4]q|1st quarter|2nd quarter|3rd quarter|4th quarter)\b/i;
+// Live order books for many tokens at once, cached for 3 seconds
+const bookMemo = new Map();
+async function clobBooks(tokens) {
+  const now = Date.now(), out = {}, need = [];
+  for (const t of new Set(tokens)) { const h = bookMemo.get(t); if (h && h.exp > now) out[t] = h.b; else need.push(t); }
+  for (let i = 0; i < need.length; i += 20) {
+    const chunk = need.slice(i, i + 20); let list = null;
+    try { const r = await fetch('https://clob.polymarket.com/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(chunk.map(token_id => ({ token_id }))), signal: AbortSignal.timeout(8000) });
+      if (r.ok) list = await r.json(); } catch {}
+    if (!Array.isArray(list)) list = await Promise.all(chunk.map(t => fetch(`https://clob.polymarket.com/book?token_id=${t}`, { signal: AbortSignal.timeout(8000) }).then(r => r.ok ? r.json() : null).catch(() => null)));
+    list.forEach((b, j) => { if (!b) return; const t = b.asset_id || chunk[j]; out[t] = b; bookMemo.set(t, { exp: now + 3000, b }); });
+  }
+  if (bookMemo.size > 3000) for (const [k, v] of bookMemo) if (v.exp < now) bookMemo.delete(k);
+  return out;
+}
 const parseArr = x => { if (Array.isArray(x)) return x; try { return JSON.parse(x || '[]'); } catch { return []; } };
 async function polyFor(A, B, pin, kickoff, t0, t1) {
   let events;
@@ -408,21 +425,41 @@ async function polyFor(A, B, pin, kickoff, t0, t1) {
       if (!priced) continue;
       const line = isFinite(+m.line) && +m.line > 0 ? +m.line : +((q.match(/o\/u\s*([\d.]+)/i) || q.match(/([\d]+\.5)\s*$/) || [])[1]);
       const pOver = /over/i.test(outs[0]) ? p0 : 1 - p0;
-      if (isFinite(line) && line >= 20 && line <= 120) res.totals.push({ line, p: pOver, q: m.question });
+      const toks = parseArr(m.clobTokenIds), oi = /over/i.test(outs[0]) ? 0 : 1;
+      if (isFinite(line) && line >= 20 && line <= 120) res.totals.push({ line, p: pOver, q: m.question, tok: toks[oi], tokOther: toks[1 - oi] });
     } else if (/spread/i.test(type + ' ' + q)) {
       if (!priced) continue;
       // "Spread: Ohio State (-14.5)" with outcomes [Ohio State, Iowa]: first outcome covers the number in parentheses
       const h = isFinite(+m.line) && +m.line !== 0 ? +m.line : +((q.match(/\(([-+]?[\d.]+)\)/) || [])[1]);
-      const sd = side(outs[0]); if (sd && isFinite(h) && h !== 0 && Math.abs(h) <= 60) res.spreads.push({ side: sd, by: -h, p: p0, q: m.question });
+      const toks = parseArr(m.clobTokenIds);
+      const sd = side(outs[0]); if (sd && isFinite(h) && h !== 0 && Math.abs(h) <= 60) res.spreads.push({ side: sd, by: -h, p: p0, q: m.question, tok: toks[0], tokOther: toks[1] });
     } else if (!res.A && (type === 'moneyline' || !/half|quarter|1h|2h/i.test(q))) {
       const s0 = side(outs[0]), s1 = side(outs[1]); if (!s0 || !s1 || s0 === s1) continue;
       const pA = s0 === 'A' ? p0 : 1 - p0;
       res.A = { p: pA, label: outs[s0 === 'A' ? 0 : 1], vol: +m.volume || null }; res.B = { p: 1 - pA, label: outs[s0 === 'A' ? 1 : 0] };
       if (pr0 && pr0.bid != null && pr0.ask != null) { res.A.bid = s0 === 'A' ? pr0.bid : 1 - pr0.ask; res.A.ask = s0 === 'A' ? pr0.ask : 1 - pr0.bid; }
       const toks = parseArr(m.clobTokenIds); token = toks[s0 === 'A' ? 0 : 1] || null;
+      res.A.tok = toks[s0 === 'A' ? 0 : 1]; res.B.tok = toks[s0 === 'A' ? 1 : 0];
     }
   }
   if (!res.A) res.found = false;
+  // Gamma's listing can lag the market by minutes during a game. Every price we use comes from the CLOB order book
+  // right now; anything without a fresh two-sided book is dropped rather than shown with a stale number.
+  try {
+    const near = (arr) => arr.slice().sort((a, b) => Math.abs(a.p - 0.5) - Math.abs(b.p - 0.5)).slice(0, 6);
+    res.spreads = near(res.spreads); res.totals = near(res.totals);
+    const toks = [res.A && res.A.tok, res.B && res.B.tok, ...res.spreads.flatMap(x => [x.tok, x.tokOther]), ...res.totals.flatMap(x => [x.tok, x.tokOther])].filter(Boolean);
+    const books = await clobBooks(toks);
+    const top = t => { const b = books[t]; if (!b) return null; const bid = Math.max(0, ...(b.bids || []).map(x => +x.price)), asks = (b.asks || []).map(x => +x.price).filter(x => x > 0);
+      const ask = asks.length ? Math.min(...asks) : null; return ask == null || !(bid > 0) ? null : { bid, ask }; };
+    const ok = (a, b) => a && b && a.ask + b.ask - 1 <= 0.08; // both sides quoted and the round trip isn't wide
+    if (res.A) { const a = top(res.A.tok), b = top(res.B.tok);
+      if (ok(a, b)) { Object.assign(res.A, { bid: a.bid, ask: a.ask, p: (a.bid + a.ask) / 2 }); Object.assign(res.B, { bid: b.bid, ask: b.ask, p: (b.bid + b.ask) / 2 }); }
+      else { res.A = null; res.B = null; } }
+    const fresh = x => { const a = top(x.tok), b = top(x.tokOther); if (!ok(a, b)) return null; return { ...x, p: (a.bid + a.ask) / 2, bid: a.bid, ask: a.ask, askOther: b.ask }; };
+    res.spreads = res.spreads.map(fresh).filter(Boolean); res.totals = res.totals.map(fresh).filter(Boolean);
+    res.found = !!(res.A || res.spreads.length || res.totals.length); res.priced = 'clob';
+  } catch (e) { res.found = false; res.error = `order book unavailable (${e.message || e})`; }
   if (token && t0) {
     try {
       const d = await get(`https://clob.polymarket.com/prices-history?market=${token}&startTs=${t0}&endTs=${t1}&fidelity=1`, 60000);

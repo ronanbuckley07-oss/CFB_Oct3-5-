@@ -10,7 +10,6 @@ const PAPER_STAKE = +process.env.PAPER_STAKE || 10; // dollars per bet in the re
 
 const MIN_EDGE_ML = 0.05;    // moneyline: model probability at least 5 points above the ask
 const MIN_EDGE_LINE = 0.06;  // spread/total ladders only give a midpoint, so ask for a little more
-const LINE_COST = 0.015;     // assumed half-spread on ladder prices
 const MAX_OPEN_PER_GAME = 4;
 const MAX_EDGE = 0.20;
 // The model's number and the market's number, averaged. In a replay of the 2025 NFL season with tables built only from
@@ -97,24 +96,31 @@ export function createPicks({ api, dir }) {
           out.push({ venue: V, url, type: 'total', sel: `${t.yesOver ? 'Under' : 'Over'} ${t.line}`, over: !t.yesOver, line: t.line, cost: c, model: 1 - yesP, edge: (1 - yesP) - c, mid: t.yesOver ? 1 - t.p : t.p, ask: a, trade: { slug: t.slug, outcome: 'NO' } }); }
       }
     }
+    // Every price is the ask you would actually pay right now, plus that venue's taker fee. No midpoint estimates:
+    // a line without a real ask is skipped. Kalshi's fee is about 7% x p x (1 - p); international Polymarket is shown
+    // for comparison only (US residents can't trade it) and is priced without a fee.
+    const FEE = { Kalshi: p => 0.07 * p * (1 - p), Polymarket: () => 0 };
+    const usable = (ask, bid) => ask != null && ask > 0 && ask < 1 && (bid == null || ask - bid <= 0.08);
     for (const [venue, src] of [['Kalshi', mk.kalshi], ['Polymarket', mk.poly]]) {
       if (!src || !src.found) continue;
+      const fee = FEE[venue], push = (o, ask, mid) => { const cost = ask + fee(ask); out.push({ venue, url: src.url, ...o, ask, cost, edge: o.model - cost, mid }); };
       for (const side of ['away', 'home']) {
-        const m = src[side]; if (!m || m.implied) continue;
+        const m = src[side]; if (!m || m.implied || !usable(m.ask, m.bid)) continue;
         const slot = slotOf(side), p = slot === 'ND' ? wA : 1 - wA;
-        const cost = m.ask != null ? m.ask : m.p + 0.01;
-        out.push({ venue, url: src.url, type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], cost, model: p, edge: p - cost, mid: m.p });
+        push({ type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], model: p }, m.ask, m.p);
       }
       for (const s of src.spreads || []) {
         const slot = slotOf(s.side), p = marginP(A, slot === 'ND', s.by); if (p == null) continue;
         const other = slot === 'ND' ? 'UNC' : 'ND', lbl = (t, by) => `${name(t)} ${by > 0 ? '−' + by : '+' + (-by)}`;
-        out.push({ venue, url: src.url, type: 'spread', sel: lbl(slot, s.by), slot, team: name(slot), teamId: g.slotId[slot], by: s.by, cost: s.p + LINE_COST, model: p, edge: p - s.p - LINE_COST, mid: s.p });
-        out.push({ venue, url: src.url, type: 'spread', sel: lbl(other, -s.by), slot: other, team: name(other), teamId: g.slotId[other], by: -s.by, cost: 1 - s.p + LINE_COST, model: 1 - p, edge: (1 - p) - (1 - s.p) - LINE_COST, mid: 1 - s.p });
+        const askOther = s.askOther ?? (s.bid != null ? 1 - s.bid : null);
+        if (usable(s.ask, s.bid)) push({ type: 'spread', sel: lbl(slot, s.by), slot, team: name(slot), teamId: g.slotId[slot], by: s.by, model: p }, s.ask, s.p);
+        if (usable(askOther, s.ask != null ? 1 - s.ask : null)) push({ type: 'spread', sel: lbl(other, -s.by), slot: other, team: name(other), teamId: g.slotId[other], by: -s.by, model: 1 - p }, askOther, 1 - s.p);
       }
       for (const t of src.totals || []) {
         const p = overP(A, t.line); if (p == null) continue;
-        out.push({ venue, url: src.url, type: 'total', sel: `Over ${t.line}`, over: true, line: t.line, cost: t.p + LINE_COST, model: p, edge: p - t.p - LINE_COST, mid: t.p });
-        out.push({ venue, url: src.url, type: 'total', sel: `Under ${t.line}`, over: false, line: t.line, cost: 1 - t.p + LINE_COST, model: 1 - p, edge: (1 - p) - (1 - t.p) - LINE_COST, mid: 1 - t.p });
+        const askUnder = t.askOther ?? (t.bid != null ? 1 - t.bid : null);
+        if (usable(t.ask, t.bid)) push({ type: 'total', sel: `Over ${t.line}`, over: true, line: t.line, model: p }, t.ask, t.p);
+        if (usable(askUnder, t.ask != null ? 1 - t.ask : null)) push({ type: 'total', sel: `Under ${t.line}`, over: false, line: t.line, model: 1 - p }, askUnder, 1 - t.p);
       }
     }
     for (const e of out) { const mkt = e.mid != null ? e.mid : e.cost; e.fair = (e.model + mkt) / 2; e.fairEdge = e.fair - e.cost; e.tier = tierOf(e.cost); }
@@ -136,7 +142,7 @@ export function createPicks({ api, dir }) {
     const clock = `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`;
     const pick = Object.assign({ key, league: g.league, event: g.event, matchup: g.title, venue: e.venue, url: e.url, type: e.type, sel: e.sel, team: e.team || null,
       teamId: e.slot ? g.slotId[e.slot] : null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null,
-      price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier, clock, score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`,
+      price: +e.cost.toFixed(3), ask: e.ask != null ? +e.ask.toFixed(3) : null, model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier, clock, score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`,
       phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), status: 'open' }, extra || {});
     db.picks.push(pick); dirty = true;
     if (e.trade) fillPaper(pick, e.trade);
