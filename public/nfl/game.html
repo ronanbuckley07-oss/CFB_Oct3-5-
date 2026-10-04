@@ -206,7 +206,10 @@ header.top{align-items:center}
 .tabpanel{margin-top:0}
 .duo.manual{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
 .tvtag{display:inline-block;vertical-align:middle;margin-left:10px;font:600 14px/1 Barlow,sans-serif;letter-spacing:0;padding:5px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);position:relative;top:-3px}
-.brandrow{display:flex;align-items:center;gap:14px}
+.brandrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.lgnav{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.lgnav a{padding:4px 11px;font:700 13px Barlow,sans-serif;text-decoration:none;color:var(--muted)}
+.lgnav a[aria-current="page"]{background:var(--gold);color:#0C2340}
 .brand{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--ink);font:800 19px/1 "Barlow Condensed",sans-serif}
 .brand img{border-radius:7px;display:block}
 .flowhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
@@ -267,7 +270,7 @@ header.top{align-items:center}
 <body><div class="wrap">
 <header class="top">
   <div class="titles">
-    <div class="brandrow"><a class="brand" href="/" aria-label="NFL Live Sim home"><img src="/logo.svg" alt="" width="30" height="30"><span>NFL Live Sim</span></a><a class="back" href="/">All games</a></div>
+    <div class="brandrow"><a class="brand" href="/" aria-label="NFL Live Sim home"><img src="/logo.svg" alt="" width="30" height="30"><span>NFL Live Sim</span></a><a class="back" href="/">All games</a><nav class="lgnav" aria-label="League"><a href="/#college" id="lgC">College</a><a href="/nfl" id="lgN">NFL</a></nav></div>
     <h1><span id="gameTitle">Loading game</span><span class="tvtag" id="gameTv" hidden></span><small id="meta">Live Monte Carlo built on real play-by-play</small></h1>
   </div>
   <div class="board" aria-live="polite">
@@ -1634,6 +1637,7 @@ const QS=new URLSearchParams(location.search);
 const EVENT=(((location.pathname.match(/\/game\/(\d+)/)||[])[1])||QS.get('event')||'').replace(/\D/g,'')||(SAVED_GAME&&SAVED_GAME.LIVE&&SAVED_GAME.LIVE.event)||'';
 if(!EVENT) location.replace(LG.home);
 document.querySelectorAll('a[href="/"]').forEach(a=>a.setAttribute('href',LG.home));
+$(LG.id==='nfl'?'lgN':'lgC').setAttribute('aria-current','page');
 let CARD=null, gateTimer=null, sidePick=null, gateBusy=false;
 document.body.classList.add('gated');
 const escH=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

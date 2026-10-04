@@ -23,9 +23,12 @@ function readPage(file) {
 }
 
 export function createLive({ api, pages }) {
-  const cfb = readPage(pages.cfb), nfl = readPage(pages.nfl);
-  const LGS = { cfb: cfb.LG, nfl: nfl.LG };
-  const pool = createPool({ engineSrc: cfb.engineSrc, datas: { cfb: cfb.data, nfl: nfl.data } });
+  // A missing or broken page disables live mode for that league instead of taking the whole site down
+  const load = f => { try { return readPage(f); } catch (e) { console.error(`live: couldn't read ${f}: ${e.message}`); return null; } };
+  const cfb = load(pages.cfb), nfl = load(pages.nfl);
+  const LGS = { cfb: cfb && cfb.LG, nfl: nfl && nfl.LG };
+  const datas = {}; if (cfb) datas.cfb = cfb.data; if (nfl) datas.nfl = nfl.data;
+  const pool = (cfb || nfl) ? createPool({ engineSrc: (cfb || nfl).engineSrc, datas }) : null;
   const games = new Map();
 
   function handle(req, res, u) {
@@ -33,6 +36,7 @@ export function createLive({ api, pages }) {
     const event = String(u.searchParams.get('event') || '').replace(/\D/g, '');
     const side = String(u.searchParams.get('side') || '').replace(/\D/g, '');
     if (!event) { res.writeHead(400, { 'content-type': 'text/plain' }); res.end('missing event'); return; }
+    if (!pool || !LGS[league]) { res.writeHead(503, { 'content-type': 'text/plain' }); res.end('live mode unavailable for this league'); return; }
     const key = `${league}:${event}:${side}`;
     let g = games.get(key);
     if (!g) { g = new LiveGame(league, event, side); games.set(key, g); }
@@ -43,7 +47,7 @@ export function createLive({ api, pages }) {
     req.on('close', () => { clearInterval(ping); g.removeViewer(res); });
   }
   function status() {
-    return { pool: pool.stats(), games: [...games.values()].map(g => ({ league: g.league, event: g.event, side: g.side, viewers: g.viewers.size,
+    return { leagues: Object.keys(datas), pool: pool ? pool.stats() : null, games: [...games.values()].map(g => ({ league: g.league, event: g.event, side: g.side, viewers: g.viewers.size,
       polling: !!g.timer, state: g.state, key: g.key, histPoints: g.hist.length, error: g.error || null })) };
   }
   // forget games nobody has watched for a while
@@ -170,7 +174,7 @@ export function createLive({ api, pages }) {
       } catch {} finally { this.backfilling = false; }
     }
   }
-  return { handle, status };
+  return { handle, status, leagues: Object.keys(datas) };
 }
 
 // ---------- helpers ported from the page (kept identical so keys and states match the browser's) ----------

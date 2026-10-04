@@ -8,7 +8,7 @@ const CHUNK = 2000;
 
 export function createPool({ engineSrc, datas }) {
   // Main-thread engine copy, used only to merge results
-  const E = new Function('D0', `${engineSrc}\nsetData(D0);\nreturn { mergeAgg, newAgg };`)(datas.cfb);
+  const E = new Function('D0', `${engineSrc}\nsetData(D0);\nreturn { mergeAgg, newAgg };`)(datas.cfb || datas.nfl);
   const cpu = (os.availableParallelism ? os.availableParallelism() : os.cpus().length) || 1;
   const size = Math.max(1, +process.env.SIM_THREADS || Math.min(4, Math.max(1, cpu - 1)));
   const workers = [];
