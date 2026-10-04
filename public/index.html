@@ -101,6 +101,12 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .rec td a{color:inherit}
 .rec .sub{font-size:13px;color:var(--muted);margin:0 0 6px}
 .tagauto{font-size:11px;font-weight:700;color:#0C2340;background:var(--gold);border-radius:999px;padding:1px 7px;margin-left:4px}
+.rtabs{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0 10px}
+.rtabs button{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:5px 12px;font:700 14px Barlow,sans-serif;cursor:pointer}
+.rtabs button span{font-weight:600;opacity:.8;margin-left:4px}
+.rtabs button[aria-selected="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.tagtier{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:4px;border:1px solid currentColor}
+.t-low{color:#2E9E5B}.t-medium{color:var(--gold)}.t-high{color:var(--bad)}
 .rec details{margin-top:8px}.rec summary{cursor:pointer;color:var(--muted);font-weight:600;font-size:14px}
 .find{display:flex;gap:8px;flex-wrap:wrap;margin-top:30px;padding-top:16px;border-top:1px solid var(--line);align-items:center}
 .find input{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:min(320px,100%)}
@@ -291,23 +297,31 @@ async function loadPicks(){
     const all=[...d.open,...d.settled];
     if(!all.length&&!d.passes){ el.hidden=true; }
     else {
-      const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.auto?'<span class="tagauto">game bet</span>':''} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.venue)}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
+      const tierTag=t=>t?`<span class="tagtier t-${t}">${t==='low'?'low risk':t==='high'?'high risk':'medium'}</span>`:'';
+      const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.auto?'<span class="tagauto">game bet</span>':''}${tierTag(p.tier)} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.venue)}</td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
       const head='<thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead>';
       const n=R.w+R.l, phases=Object.entries(d.byPhase||{});
       const order=['Q1 early','Q1 late','Q2 early','Q2 late','Q3 early','Q3 late','Q4 15:00-8:00','Q4 8:00-3:00','Q4 last 3:00'];
       phases.sort((a,b)=>order.indexOf(a[0])-order.indexOf(b[0]));
-      const open=d.open.length;
-      el.innerHTML=`<h2>Model bets <small>Paper bets logged when the model beat the Kalshi or Polymarket price. Not betting advice.</small></h2>
+      const open=d.open.length, T=d.tiers||{};
+      let tab='all'; try{tab=localStorage.getItem('recTab')||'all';}catch(e){} if(tab!=='all'&&!T[tab]) tab='all';
+      const V=tab==='all'?{rec:R,real:d.realistic,auto:A,list:all,label:'All bets'}:{rec:T[tab].paper,real:T[tab].realistic,auto:T[tab].auto,list:all.filter(p=>p.tier===tab),label:T[tab].label,desc:T[tab].desc,passes:T[tab].passes};
+      const rr=V.rec, nn=rr.w+rr.l;
+      const tabs=`<div class="rtabs" role="tablist">${[['all','All bets'],...Object.entries(T).map(([k,v])=>[k,v.label])].map(([k,l])=>`<button role="tab" data-rt="${k}" aria-selected="${k===tab}">${esc(l)}${k!=='all'?` <span>${T[k].paper.w}–${T[k].paper.l}</span>`:''}</button>`).join('')}</div>`;
+      el.innerHTML=`<h2>Model bets <small>Paper bets, judged on a fair price halfway between the model and the market. Not betting advice.</small></h2>
+        ${tabs}
+        ${V.desc?`<p class="sub">${esc(V.label)}: ${esc(V.desc)}. One game bet per game in this tier, taken from ${esc(d.window||'Q3 7:30 to Q4 8:00')}.</p>`:''}
         <div class="recnums">
-          <div><b>${R.w}–${R.l}${R.push?`–${R.push}`:''}</b><span>record, all bets</span></div>
-          <div><b>${pc(R.pct)}</b><span>win rate${R.expected!=null?` (model said ${pc(R.expected)})`:''}</span></div>
-          <div><b>${money(R.pl||0)}</b><span>profit, $1 contract each</span></div>
-          <div><b>${R.roi==null?'–':(R.roi>0?'+':'')+(R.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
+          <div><b>${rr.w}–${rr.l}${rr.push?`–${rr.push}`:''}</b><span>record</span></div>
+          <div><b>${pc(rr.pct)}</b><span>win rate${rr.expected!=null?` (model said ${pc(rr.expected)})`:''}</span></div>
+          <div><b>${money(rr.pl||0)}</b><span>profit, $1 contract each</span></div>
+          <div><b>${rr.roi==null?'–':(rr.roi>0?'+':'')+(rr.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
         </div>
-        <p class="sub">${open?`${open} bet${open>1?'s':''} waiting on a final. `:''}Game bets (one per game, taken from ${esc(d.window||'Q3 7:30 to Q4 8:00')}): ${A.w}–${A.l}, ${pc(A.pct)}, ${money(A.pl||0)}.${d.realistic&&(d.realistic.n||d.realistic.open)?` Realistic, Polymarket US order book at $${d.realistic.stake} a bet with fees: ${d.realistic.w}–${d.realistic.l}, ${money(d.realistic.pl)}${d.realistic.roi!=null?` (${d.realistic.roi>0?'+':''}${(d.realistic.roi*100).toFixed(1)}%)`:''}${d.realistic.open?`, ${d.realistic.open} open`:''}${d.realistic.unfillable?`, ${d.realistic.unfillable} that the book couldn't fill`:''}.`:''}${d.passes?` ${d.passes} game${d.passes>1?'s':''} passed with no market or no big enough gap.`:''}${n&&n<50?` ${n} settled bet${n>1?'s':''} so far, which is still noise; it takes a few hundred to mean much.`:''}</p>
-        <details><summary>Past bets (${all.length})</summary><table>${head}<tbody>${all.map(row).join('')}</tbody></table></details>
+        <p class="sub">${V.list.filter(p=>p.status==='open').length?`${V.list.filter(p=>p.status==='open').length} waiting on a final. `:''}${V.real&&(V.real.n)?`Realistic, Polymarket US order book with fees: ${V.real.w}–${V.real.l}, ${money(V.real.pl)}${V.real.roi!=null?` (${V.real.roi>0?'+':''}${(V.real.roi*100).toFixed(1)}%)`:''}. `:''}${V.auto?`Game bets: ${V.auto.w}–${V.auto.l}, ${money(V.auto.pl||0)}. `:''}${V.passes?`${V.passes} game${V.passes>1?'s':''} had no bet in this tier. `:''}${nn&&nn<50?`${nn} settled so far, still noise; it takes a few hundred to mean much.`:''}</p>
+        <details><summary>Past bets (${V.list.length})</summary><table>${head}<tbody>${V.list.map(row).join('')}</tbody></table></details>
         ${phases.length?`<details><summary>When our bets hit</summary><table><thead><tr><th>When the bet was taken</th><th>Record</th><th>Win rate</th><th>Model said</th><th>Return</th></tr></thead><tbody>${phases.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.w}–${v.l}</td><td>${pc(v.pct)}</td><td>${pc(v.expected)}</td><td>${v.roi==null?'–':(v.roi>0?'+':'')+(v.roi*100).toFixed(1)+'%'}</td></tr>`).join('')}</tbody></table>
-          <p class="sub" style="margin-top:8px">The window comes from replaying 2023 to 2025 NFL games against Vegas win probability: between Q3 7:30 and Q4 8:00 the model's disagreements hit 57.5% of the time when it said 58.2%, a +9% return over 269 bets. Earlier, it was overconfident; later, prices were too extreme to matter. This table will show whether our own bets agree.</p></details>`:''}`;
+          <p class="sub" style="margin-top:8px">The window comes from replaying 2023 to 2025 NFL games against Vegas win probability: between Q3 7:30 and Q4 8:00 the model's disagreements hit 57.5% of the time when it said 58.2%, a +9% return over 269 bets. This table shows whether our own bets agree.</p></details>`:''}`;
+      el.querySelectorAll('[data-rt]').forEach(bt=>bt.onclick=()=>{ try{localStorage.setItem('recTab',bt.dataset.rt);}catch(e){} loadPicks(); });
       el.hidden=false;
     }
   }catch(e){}
@@ -315,22 +329,22 @@ async function loadPicks(){
     const r=await fetch(`/api/picks/leading?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json(), el=$('lead');
     const anyLive=data&&(data.games||[]).some(g=>g.state==='in');
     if(!d.bets.length&&!anyLive){ el.hidden=true; return; }
-    el.innerHTML=`<h2>Leading bets right now <small>Live games where the model and the market disagree by 5+ points, biggest gap first. Updated every 30 seconds.</small></h2>
-      ${d.bets.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Gap</th><th></th></tr></thead><tbody>${d.bets.map(b=>`<tr><td><b>${esc(b.sel)}</b> <span style="color:var(--muted)">${esc(b.matchup||'')}, ${esc(b.type)}${b.clock?`, ${esc(b.clock)}`:''}${b.score?`, ${esc(b.score)}`:''}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td class="edge">+${(b.edge*100).toFixed(1)}</td><td><a class="go" href="${GAME}?event=${b.event}">Open game ›</a></td></tr>`).join('')}</tbody></table>
+    el.innerHTML=`<h2>Leading bets right now <small>Live bets where the fair price (halfway between model and market) still beats what you'd pay. Edge = fair minus price. Updated every 30 seconds.</small></h2>
+      ${d.bets.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th><th></th></tr></thead><tbody>${d.bets.map(b=>`<tr><td><b>${esc(b.sel)}</b>${b.tier?`<span class="tagtier t-${b.tier}">${b.tier==='low'?'low risk':b.tier==='high'?'high risk':'medium'}</span>`:''} <span style="color:var(--muted)">${esc(b.matchup||'')}, ${esc(b.type)}${b.clock?`, ${esc(b.clock)}`:''}${b.score?`, ${esc(b.score)}`:''}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td>${pc(b.fair)}</td><td class="edge">+${((b.fairEdge??b.edge)*100).toFixed(1)}</td><td><a class="go" href="${GAME}?event=${b.event}">Open game ›</a></td></tr>`).join('')}</tbody></table>
         <p class="sub" style="margin-top:8px">Open a game and look under Betting for the reasoning behind each one. Gaps over 20 points are skipped as likely stale prices.</p>`
-      :'<p class="sub">No live game has a gap of 5 points or more right now.</p>'}`;
+      :'<p class="sub">No live bet clears the bar right now.</p>'}`;
     el.hidden=false;
   }catch(e){}
 }
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },30000);
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.12';
+const BUILD='2026-10-04.13';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.12'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.13'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

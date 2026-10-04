@@ -36,6 +36,9 @@ th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:12
 .good{color:var(--good);font-weight:700}.bad{color:var(--bad);font-weight:700}
 .checks{list-style:none;padding:0;margin:8px 0}.checks li{padding:2px 0}
 .warn{border-left:4px solid var(--bad)}
+.rtabs{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 8px}
+.rtabs button{border-radius:999px;padding:5px 12px;font-size:14px;color:var(--muted);background:transparent}
+.rtabs button span{opacity:.8;margin-left:3px}.rtabs button[aria-selected="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
 #preview{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
 #preview .card{max-width:560px;width:100%;margin:0;max-height:90vh;overflow:auto}
 </style></head>
@@ -52,8 +55,9 @@ th:first-child,td:first-child{text-align:left}th{color:var(--muted);font-size:12
   <section class="card" id="status"></section>
   <section class="card">
     <h2>Bets available now</h2>
-    <p class="small">The model's Polymarket US bets on live games with a gap of at least <span id="minEdge"></span> points after fees. "What your stake buys" walks the real order book.</p>
-    <div class="tblwrap"><table><thead><tr><th>Bet</th><th>Model</th><th>Ask</th><th>What $<span class="lim"></span> buys</th><th>Expected profit</th><th></th></tr></thead><tbody id="opps"></tbody></table></div>
+    <p class="small">The model's Polymarket US bets on live games. Each is judged on a fair price halfway between the model and the market, after fees. "What your stake buys" walks the real order book; expected profit uses the fair price.</p>
+    <div class="rtabs" id="tierTabs"></div><p class="small" id="tierDesc" style="margin-top:0"></p>
+    <div class="tblwrap"><table><thead><tr><th>Bet</th><th>Model</th><th>Fair</th><th>Ask</th><th>What $<span class="lim"></span> buys</th><th>Expected profit</th><th></th></tr></thead><tbody id="opps"></tbody></table></div>
   </section>
   <section class="card">
     <h2>Your trades</h2>
@@ -80,7 +84,13 @@ async function load(){
 }
 function render(){
   const L=S.limits, a=S.account;
-  $('minEdge').textContent=(L.minEdge*100).toFixed(0); document.querySelectorAll('.lim').forEach(e=>e.textContent=L.maxOrder);
+  document.querySelectorAll('.lim').forEach(e=>e.textContent=L.maxOrder);
+  const TD={all:['All',''],low:['Low risk','Favorites, 60¢ and up. Small payouts that hit most of the time.'],medium:['Medium','Near coin flips, 35¢ to 60¢.'],high:['High risk','Underdogs, 10¢ to 35¢. Lose more often, pay 2x to 9x when they hit.']};
+  let tier='all'; try{tier=localStorage.getItem('deskTier')||'all';}catch(e){}
+  const allO=S.opportunities||[];
+  $('tierTabs').innerHTML=Object.entries(TD).map(([k,[l]])=>`<button data-t="${k}" aria-selected="${k===tier}">${l} <span>${k==='all'?allO.length:allO.filter(o=>o.tier===k).length}</span></button>`).join('');
+  $('tierTabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{ try{localStorage.setItem('deskTier',b.dataset.t);}catch(e){} render(); });
+  $('tierDesc').textContent=TD[tier][1];
   $('status').className='card'+(S.killed||!S.enabled||!S.connected?' warn':'');
   $('status').innerHTML=`<div class="row" style="justify-content:space-between"><h2>Status</h2>
       <button class="${S.killed?'primary':'danger'}" id="kill">${S.killed?'Turn trading back on':'Kill switch: stop all trading'}</button></div>
@@ -95,13 +105,13 @@ function render(){
       Trading: <span class="pill ${S.enabled&&!S.killed?'on':'off'}">${S.killed?'stopped by kill switch':S.enabled?'enabled':'preview only'}</span>
       ${S.accountError?`<br>${esc(S.accountError)}`:''}</p>`;
   $('kill').onclick=async()=>{ await post('/kill',{on:!S.killed}); load(); };
-  const O=S.opportunities||[];
+  const O=tier==='all'?allO:allO.filter(o=>o.tier===tier);
   $('opps').innerHTML=O.length?O.map((o,i)=>`<tr><td><b>${esc(o.sel)}</b> <span class="small">${esc(o.type)}</span><br><span class="small"><a href="${o.league==='nfl'?'/nfl/game':'/game'}?event=${o.event}">${esc(o.matchup)}</a>${o.clock?`, ${esc(o.clock)}`:''}${o.score?`, ${esc(o.score)}`:''}</span></td>
-      <td>${pc(o.model)}</td><td>${c(o.ask)}</td>
+      <td>${pc(o.model)}</td><td>${pc(o.fair)}</td><td>${c(o.ask)}</td>
       <td>${o.fill?`${o.fill.qty} @ ${c(o.fill.avg)} + ${usd(o.fill.fee)} fee = <b>${usd(o.fill.cost)}</b>${o.fill.full?'':'<br><span class="small">book too thin for the full amount</span>'}`:`<span class="small">${esc(o.error||'nothing on the book')}</span>`}</td>
       <td class="${o.fill&&o.fill.ev>0?'good':'bad'}">${o.fill?usd(o.fill.ev):'–'}</td>
       <td><button data-i="${i}" ${o.fill?'':'disabled'}>Preview</button></td></tr>`).join('')
-    :'<tr><td colspan="6" class="small">No Polymarket US bet clears the bar right now. Bets appear here during live games that have Polymarket US markets.</td></tr>';
+    :'<tr><td colspan="7" class="small">No Polymarket US bet in this tier clears the bar right now. Bets appear here during live games that have Polymarket US markets.</td></tr>';
   $('opps').querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>preview(O[+b.dataset.i]));
   const T=S.trades||[];
   $('trades').innerHTML=T.length?T.map(t=>`<tr><td><b>${esc(t.sel)}</b> <span class="small">${esc(t.matchup||'')}, ${new Date(t.at).toLocaleString([], {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}</span>${t.error?`<br><span class="bad small">${esc(t.error)}</span>`:''}</td>
@@ -122,7 +132,8 @@ async function preview(o){
       <tr><td>Limit price (your side)</td><td>${c(P.limitSide)}, worst case ${usd(P.maxCost)}</td></tr>
       <tr><td>Pays if it wins</td><td>${usd(P.qty)}</td></tr>
       <tr><td>Model's chance</td><td>${pc(P.model)}</td></tr>
-      <tr><td>Expected profit if the model is right</td><td class="${d.ev>0?'good':'bad'}">${usd(d.ev)}</td></tr>
+      <tr><td>Fair chance (model and market averaged)</td><td>${pc(P.fair)}</td></tr>
+      <tr><td>Expected profit at the fair chance</td><td class="${d.ev>0?'good':'bad'}">${usd(d.ev)}</td></tr>
     </tbody></table>
     ${d.exchange?'<p class="small good">Polymarket US accepted the preview.</p>':d.exchangeError?`<p class="small bad">Polymarket US preview: ${esc(d.exchangeError)}</p>`:''}
     <ul class="checks">${d.checks.map(x=>`<li class="${x.ok?'good':'bad'}">${x.ok?'✓':'✗'} <span style="color:var(--ink);font-weight:500">${esc(x.msg)}</span></li>`).join('')}</ul>

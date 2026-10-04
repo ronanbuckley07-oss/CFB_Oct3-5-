@@ -12,7 +12,18 @@ const MIN_EDGE_ML = 0.05;    // moneyline: model probability at least 5 points a
 const MIN_EDGE_LINE = 0.06;  // spread/total ladders only give a midpoint, so ask for a little more
 const LINE_COST = 0.015;     // assumed half-spread on ladder prices
 const MAX_OPEN_PER_GAME = 4;
-const MAX_EDGE = 0.20;       // a bigger gap than this is almost always a stale or mismatched market price, not an edge
+const MAX_EDGE = 0.20;
+// The model's number and the market's number, averaged. In a replay of the 2025 NFL season with tables built only from
+// 2024 and earlier, a 50/50 average of the model and Vegas win probability beat both on their own (Brier 0.15785 vs.
+// 0.15816 Vegas, 0.15829 model; better than Vegas in 74% of game resamples). Season-fitted reweightings did worse out
+// of sample. So bets are judged on this "fair" probability, which roughly halves the raw gap and keeps only bets where
+// even half the model's disagreement still beats the price.
+export const TIERS = {
+  low:    { label: 'Low risk',  desc: 'favorites, 60¢ and up: small payouts, hit most of the time', min: 0.60, max: 0.95, fairEdge: 0.025 },
+  medium: { label: 'Medium',    desc: 'near coin flips, 35¢ to 60¢', min: 0.35, max: 0.60, fairEdge: 0.03 },
+  high:   { label: 'High risk', desc: 'underdogs, 10¢ to 35¢: lose more often, pay 2x to 9x', min: 0.10, max: 0.35, fairEdge: 0.04 },
+};
+export const tierOf = cost => cost >= TIERS.low.min ? 'low' : cost >= TIERS.medium.min ? 'medium' : cost >= TIERS.high.min ? 'high' : null;       // a bigger gap than this is almost always a stale or mismatched market price, not an edge
 
 // When in a game to take the one automatic bet. From replaying 2023-25 NFL games against Vegas win probability
 // (10,478 snaps, tools/timing.mjs): model-vs-market gaps were best calibrated and most profitable from the middle of the
@@ -106,8 +117,9 @@ export function createPicks({ api, dir }) {
         out.push({ venue, url: src.url, type: 'total', sel: `Under ${t.line}`, over: false, line: t.line, cost: 1 - t.p + LINE_COST, model: 1 - p, edge: (1 - p) - (1 - t.p) - LINE_COST, mid: 1 - t.p });
       }
     }
-    return out.filter(e => e.cost > 0.05 && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge >= (e.type === 'moneyline' ? MIN_EDGE_ML : MIN_EDGE_LINE) && e.edge <= MAX_EDGE)
-      .sort((a, b) => b.edge - a.edge);
+    for (const e of out) { const mkt = e.mid != null ? e.mid : e.cost; e.fair = (e.model + mkt) / 2; e.fairEdge = e.fair - e.cost; e.tier = tierOf(e.cost); }
+    return out.filter(e => e.tier && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= TIERS[e.tier].fairEdge)
+      .sort((a, b) => b.fairEdge - a.fairEdge);
   }
 
   // Log the qualifying bets once each (best venue at that moment), at most a few per game
@@ -119,12 +131,12 @@ export function createPicks({ api, dir }) {
       median: [med(A.ndH), med(A.ucH)], start: g.pregame || null, mid: e.mid ?? null };
   };
   const logPick = (g, A, S, e, extra) => {
-    const key = `${g.league}:${g.event}:${e.type}:${e.sel}${extra && extra.auto ? ':auto' : ''}`;
+    const key = `${g.league}:${g.event}:${e.type}:${e.sel}${extra && extra.auto ? ':auto:' + e.tier : ''}`;
     if (db.picks.some(p => p.key === key)) return null;
     const clock = `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`;
     const pick = Object.assign({ key, league: g.league, event: g.event, matchup: g.title, venue: e.venue, url: e.url, type: e.type, sel: e.sel, team: e.team || null,
       teamId: e.slot ? g.slotId[e.slot] : null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null,
-      price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock, score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`,
+      price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier, clock, score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`,
       phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), status: 'open' }, extra || {});
     db.picks.push(pick); dirty = true;
     if (e.trade) fillPaper(pick, e.trade);
@@ -140,15 +152,21 @@ export function createPicks({ api, dir }) {
     dirty = true;
   }
   // The one automatic bet per game: the best qualifying edge once the game is inside the window
+  // Game bets: inside the window, the best qualifying bet in each risk tier, at most one per tier per game
   function autoPick(g, A, mk, S) {
-    const id = `${g.league}:${g.event}`;
-    if (db.auto[id]) return null;
-    if (pastWindow(S)) { db.auto[id] = { status: 'pass', at: new Date().toISOString(), matchup: g.title }; dirty = true; return null; }
-    if (!inWindow(S)) return null;
-    const list = edges(g, A, mk), best = list.find(e => e.venue === 'Polymarket US') || list[0]; if (!best) return null;
-    const pick = logPick(g, A, S, best, { auto: true });
-    db.auto[id] = { status: 'bet', at: new Date().toISOString(), key: pick && pick.key, matchup: g.title }; dirty = true;
-    return pick;
+    const done = t => db.auto[`${g.league}:${g.event}:${t}`];
+    if (Object.keys(TIERS).every(done)) return null;
+    if (pastWindow(S)) { for (const t of Object.keys(TIERS)) if (!done(t)) db.auto[`${g.league}:${g.event}:${t}`] = { status: 'pass', at: new Date().toISOString(), matchup: g.title }; dirty = true; return null; }
+    if (!inWindow(S) || !A || !mk) return null;
+    const list = edges(g, A, mk), picked = [];
+    for (const t of Object.keys(TIERS)) {
+      if (done(t)) continue;
+      const inT = list.filter(e => e.tier === t), best = inT.find(e => e.venue === 'Polymarket US') || inT[0];
+      if (!best) continue; // keep looking until the window closes
+      const pick = logPick(g, A, S, best, { auto: true });
+      db.auto[`${g.league}:${g.event}:${t}`] = { status: 'bet', at: new Date().toISOString(), key: pick && pick.key, matchup: g.title }; dirty = true; picked.push(pick);
+    }
+    return picked;
   }
   function consider(g, A, mk, S) {
     const list = edges(g, A, mk);
@@ -200,7 +218,13 @@ export function createPicks({ api, dir }) {
     const passes = Object.entries(db.auto).filter(([k, v]) => v.status === 'pass' && (!league || league === 'all' || k.startsWith(league + ':'))).length;
     const real = ps.filter(p => p.fill && p.fill.qty > 0 && p.status !== 'open' && p.status !== 'push');
     const rStake = real.reduce((a, p) => a + p.fill.cost, 0), rPl = real.reduce((a, p) => a + (p.fill.pl || 0), 0), rW = real.filter(p => p.status === 'won').length;
-    const extra = { realistic: { n: real.length, w: rW, l: real.length - rW, staked: +rStake.toFixed(2), pl: +rPl.toFixed(2), roi: rStake ? rPl / rStake : null, stake: PAPER_STAKE,
+    const realOf = list => { const r = list.filter(p => p.fill && p.fill.qty > 0 && p.status !== 'open' && p.status !== 'push');
+      const st = r.reduce((a, p) => a + p.fill.cost, 0), pl = r.reduce((a, p) => a + (p.fill.pl || 0), 0);
+      return { n: r.length, w: r.filter(p => p.status === 'won').length, l: r.filter(p => p.status === 'lost').length, staked: +st.toFixed(2), pl: +pl.toFixed(2), roi: st ? pl / st : null }; };
+    const tiers = Object.fromEntries(Object.entries(TIERS).map(([k, t]) => { const tp = ps.filter(p => p.tier === k);
+      return [k, { label: t.label, desc: t.desc, minFairEdge: t.fairEdge, paper: summarize(tp), auto: summarize(tp.filter(p => p.auto)), realistic: realOf(tp), open: tp.filter(p => p.status === 'open').length,
+        passes: Object.entries(db.auto).filter(([id, v]) => v.status === 'pass' && id.endsWith(':' + k) && (!league || league === 'all' || id.startsWith(league + ':'))).length }]; }));
+    const extra = { tiers, realistic: { n: real.length, w: rW, l: real.length - rW, staked: +rStake.toFixed(2), pl: +rPl.toFixed(2), roi: rStake ? rPl / rStake : null, stake: PAPER_STAKE,
         open: ps.filter(p => p.fill && p.fill.qty > 0 && p.status === 'open').length, unfillable: ps.filter(p => p.fill && p.fill.qty === 0).length }, auto: summarize(ps.filter(p => p.auto)), autoOpen: ps.filter(p => p.auto && p.status === 'open').length, passes, window: WINDOW.label,
       byPhase: Object.fromEntries(Object.entries(phases).map(([k, v]) => [k, summarize(v)])) };
     const done = ps.filter(p => p.status === 'won' || p.status === 'lost');
@@ -212,6 +236,6 @@ export function createPicks({ api, dir }) {
       open: ps.filter(p => p.status === 'open').slice(-500).reverse(), settled: ps.filter(p => p.status !== 'open').slice(-500).reverse() };
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event));
-  const autoDone = (league, event) => !!db.auto[`${league}:${event}`];
+  const autoDone = (league, event) => Object.keys(TIERS).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
   return { edges, consider, autoPick, autoDone, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

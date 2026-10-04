@@ -56,6 +56,27 @@ The server reads the engine, the model tables and each league's settings straigh
   "Leading bets right now" panel. Each logged bet stores the state and numbers behind it, which the game page turns into
   the "Why the model likes this" explanation.
 
+## Accuracy study (October 2026)
+
+Built NFL tables from 1999-2024 only (`MAXS=2024 tools/build_nfl_data.py`), ran the model on every 6th play of 2024
+and 2025 (`tools/backtest_raw.mjs`, 5,442 and 5,353 snaps, 600 sims each), and scored win, cover and over
+probabilities against outcomes and nflfastR's Vegas win probability.
+- Out of sample on 2025 the raw model matched Vegas: Brier 0.15829 vs 0.15816 (Q4: 0.10967 vs 0.10977).
+- Reweighting fit on 2024 made 2025 worse in every form tried (`tools/backtest_calibrate.py`: win 0.15829 to 0.16004;
+  `tools/backtest_blend.py`: fitted model+Vegas blends 0.1595). How predictable a season is moves from year to year.
+- Strength uncertainty 4 vs 5.5 points: within sim noise; left at 5.5.
+- A plain 50/50 average of model and market beat both: 0.15785, better than Vegas in 74% of game resamples.
+  That is now the "fair" probability every bet is judged on.
+- Raw calibration on 2025: underdogs the model priced at 3% won 7%, at 15% won 20%. The fair price pulls those toward
+  the market, and contracts under 10¢ are no longer bet.
+College could not be replayed offline (no 2025 college play-by-play reachable from the build machine).
+
+## Risk tiers
+
+Bets are sorted by price: low risk 60¢ and up (fair edge 2.5+ points), medium 35-60¢ (3+), high risk 10-35¢ (4+).
+Each game gets up to one game bet per tier between Q3 7:30 and Q4 8:00. The home page and the trading desk have a tab
+per tier with its own record.
+
 ## Trading (Polymarket US)
 
 Two layers, both built on Polymarket US, the CFTC-regulated exchange US residents can legally trade
@@ -73,7 +94,7 @@ One-tap trading, private, at `/trade`.
 3. In Render > Environment set `TRADE_PASSWORD` (long and unique), `POLYMARKET_US_KEY_ID`, `POLYMARKET_US_SECRET_KEY`.
    Leave `TRADING_ENABLED=false` at first: the desk previews orders with Polymarket US but cannot place them.
 4. When you're ready, set `TRADING_ENABLED=true`. Limits: `MAX_ORDER_USD`, `MAX_DAILY_USD`, `MAX_OPEN_BETS`,
-   `MAX_SLIPPAGE_CENTS`, `MIN_EDGE`.
+   `MAX_SLIPPAGE_CENTS`, `MIN_FAIR_EDGE`.
 Every order is previewed first and needs a confirm within 30 seconds. Orders are limit orders, immediate-or-cancel,
 sized so the worst-case cost fits the per-order limit. The server re-checks every limit at placement, refuses a second
 position in the same market, and has a kill switch (persisted on the disk). Trades are logged to `$DATA_DIR/trades.json`

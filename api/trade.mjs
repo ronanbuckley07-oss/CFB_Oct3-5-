@@ -21,7 +21,7 @@ const env = (k, d) => (process.env[k] == null || process.env[k] === '' ? d : pro
 export function createTrading({ api, dir, leading }) {
   const PASSWORD = env('TRADE_PASSWORD', '');
   const LIMITS = { maxOrder: +env('MAX_ORDER_USD', 10), maxDaily: +env('MAX_DAILY_USD', 50), maxOpen: +env('MAX_OPEN_BETS', 5),
-    slip: +env('MAX_SLIPPAGE_CENTS', 2) / 100, minEdge: +env('MIN_EDGE', 0.05) };
+    slip: +env('MAX_SLIPPAGE_CENTS', 2) / 100, minEdge: +env('MIN_FAIR_EDGE', 0.025) };
   const ENABLED = env('TRADING_ENABLED', 'false') === 'true';
   let trader = null; try { trader = createPmusTrader(); } catch (e) { console.error('trade: bad Polymarket US key', e.message); }
   const SECRET = crypto.createHash('sha256').update(`${PASSWORD}:${env('POLYMARKET_US_KEY_ID', '')}:session`).digest();
@@ -47,12 +47,12 @@ export function createTrading({ api, dir, leading }) {
   const openBets = () => db.trades.filter(t => t.qty > 0 && t.status === 'open').length;
 
   async function opportunities() {
-    const L = leading('all').bets.filter(b => b.venue === 'Polymarket US' && b.trade && b.edge >= LIMITS.minEdge);
+    const L = leading('all').bets.filter(b => b.venue === 'Polymarket US' && b.trade && (b.fairEdge ?? 0) >= LIMITS.minEdge);
     const out = [];
     for (const b of L.slice(0, 12)) {
       try {
         const bk = await api[b.league].pmusBook(b.trade.slug), f = simulateFill(bk, b.trade.outcome, LIMITS.maxOrder);
-        const ev = f.qty ? b.model * f.qty - f.cost : null;
+        const ev = f.qty ? (b.fair ?? b.model) * f.qty - f.cost : null;
         out.push({ ...b, fill: f.qty ? { qty: f.qty, avg: +f.avg.toFixed(4), fee: f.fee, cost: f.cost, worst: f.worst, full: f.full, ev: +ev.toFixed(2) } : null, depth: f.depth });
       } catch (e) { out.push({ ...b, fill: null, error: String(e.message || e) }); }
     }
@@ -117,9 +117,9 @@ export function createTrading({ api, dir, leading }) {
       if (trader) try { exchange = await trader.preview({ slug: b.trade.slug, outcome: b.trade.outcome, qty, limitYesPx }); } catch (e) { exchangeError = String(e.message || e); }
       const plan = { slug: b.trade.slug, outcome: b.trade.outcome, qty, limitSide, limitYesPx, estCost: +(f.avg * qty + takerFee(qty, f.avg)).toFixed(2), maxCost: +(qty * limitSide + takerFee(qty, limitSide)).toFixed(2),
         league: b.league, event: b.event, matchup: b.matchup, sel: b.sel, type: b.type, teamId: b.teamId, by: b.by, line: b.line, over: b.over,
-        model: b.model, exp: Date.now() + 30000 };
+        model: b.model, fair: b.fair ?? null, tier: b.tier || null, exp: Date.now() + 30000 };
       return send(res, 200, { plan, token: makeToken(plan), fill: { qty, avg: f.avg, fee: takerFee(qty, f.avg), cost: plan.estCost }, exchange, exchangeError,
-        ev: +(b.model * qty - plan.estCost).toFixed(2), checks: checks(plan) });
+        ev: +((b.fair ?? b.model) * qty - plan.estCost).toFixed(2), checks: checks(plan) });
     }
     if (route === '/place' && req.method === 'POST') {
       const { token } = await body(req); const plan = readToken(token);

@@ -1,8 +1,10 @@
 import pandas as pd, numpy as np, json, math
 rng=np.random.default_rng(7)
 df=pd.read_pickle('pbp.pkl')
-df=df[df.season_type.isin(['REG','POST'])].copy()
-NOW=2026
+import os
+MAXS=int(os.environ.get('MAXS','2026'))
+df=df[df.season_type.isin(['REG','POST'])&(df.season<=MAXS)].copy()
+NOW=MAXS
 YB=[0,5,10,20,35,50,65,80,100]
 def distB(x): return 0 if x<=1 else 1 if x<=2 else 2 if x<=4 else 3 if x<=7 else 4 if x<=10 else 5
 def ytgB(y):
@@ -113,13 +115,13 @@ print('punt net mean',np.mean(punt_net))
 
 # ---------- kickoffs: 2025 on (touchback to the 35 under the new kickoff rule) ----------
 # nflfastR lists the receiving team as posteam on kickoff rows
-ko=c[(c.kickoff_attempt==1)&(c.season>=2025)&(c.penalty!=1)&(c.return_touchdown!=1)&c.nyl.notna()&(c.npos==c.posteam)]
+ko=c[(c.kickoff_attempt==1)&(c.season>=min(2025,MAXS))&(c.penalty!=1)&(c.return_touchdown!=1)&c.nyl.notna()&(c.npos==c.posteam)]
 kick=ko.nyl.astype(int); kick=kick[(kick>=30)&(kick<=99)]
 kick=[int(v) for v in rng.choice(kick.values,400,replace=len(kick)<400)]
 print('kick start (own yd line) mean',100-np.mean(kick), 'n',len(ko))
 
 # ---------- conversion rates ----------
-xp=df[(df.extra_point_attempt==1)&(df.season>=2023)]; P_XP=float((xp.extra_point_result=='good').mean())
+xp=df[(df.extra_point_attempt==1)&(df.season>=MAXS-3)]; P_XP=float((xp.extra_point_result=='good').mean())
 tp=df[(df.two_point_attempt==1)&(df.season>=2015)]; P_2PT=float((tp.two_point_conv_result=='success').mean())
 print('xp',P_XP,'2pt',P_2PT)
 
@@ -154,12 +156,12 @@ def team(abbr,season=2026):
     opp=sorted(set(t.defteam.dropna()))
     return {'qbs':[[nm,int(v)] for nm,v in qbs.items()],'rush':rush,'recv':recv,'games':int(games),'plays':int(len(sc2)),
             'ypp':round(float(sc2.yards_gained.mean()),2),'passrate':round(float((sc2['pass']==1).mean()),3),'opps':opp}
-teams={'ND':team('KC'),'UNC':team('BUF')}
+teams={'ND':team('KC',MAXS),'UNC':team('BUF',MAXS)}
 outcome_years=f"{int(pl.season.min())}\u2013{int(pl.season.max())}"
 D={'YB':YB,'calls':{'k4':k4,'k3':k3,'k2':k2},'pools':pools,'clk':clk,'fg':[round(a,4),round(b,5)],
    'punt':{'net':punt_net,'gross_land':punt_net},'kick':kick,'teams':teams,
    'rules':{'ot':'nfl','twoMin':True,'xp':round(P_XP,3),'two':round(P_2PT,3),'fgMax':66},
    'meta':{'rho':round(rho,4),'plays':int(len(pl)),'games':int(pl.game_id.nunique()),'years':outcome_years,'callPlays':int(len(calls)),
            'clockScale':1.0,'snaps':round(snaps,1),'sig':round(float(resid.std()),2)}}
-json.dump(D,open('nfl_data.json','w'),separators=(',',':'))
+json.dump(D,open(os.environ.get('OUT','nfl_data.json'),'w'),separators=(',',':'))
 print('size',len(json.dumps(D,separators=(',',':'))))

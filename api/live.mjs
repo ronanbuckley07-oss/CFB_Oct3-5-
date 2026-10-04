@@ -83,7 +83,7 @@ export function createLive({ api, pages, dataDir }) {
       if (this.S.pos != null) this.S.dist = Math.min(this.S.dist, 100 - this.S.pos);
       const S = Object.assign({}, this.S), pk = playKey(o), now = Date.now();
       const autoDue = inWindow(S) && !picks.autoDone(this.league, this.event);
-      if (!autoDue && !((pk !== this.pk && now - this.lastScan > 120000) || now - this.lastScan > 300000)) return;
+      if (!((autoDue && now - this.lastScan > 60000) || (pk !== this.pk && now - this.lastScan > 120000) || now - this.lastScan > 300000)) return;
       this.pk = pk; this.lastScan = now;
       const A = await pool.run(this.league, this.rosters, this.tk, prepS0(S, S.edge, S.total, LGS[this.league].cal), autoDue ? N_FULL : N_SCAN, { prio: autoDue ? 2 : 0 });
       if (!A) return;
@@ -106,14 +106,15 @@ export function createLive({ api, pages, dataDir }) {
         for (const e of g.last.edges.edges.slice(0, 3)) out.push({ ...e, event: g.event, matchup: g.title, clock: g.last.edges.clock, score: g.last.edges.score, at: g.last.edges.at, sims: 25000 });
       for (const [id, c] of scans) if (id.startsWith(league + ':')) for (const e of c.edges) out.push({ ...e, event: c.event, matchup: c.title });
       // one row per bet: a watched game and the scanner can both report the same market
-      const seen = new Set(), uniq = out.sort((a, b) => b.edge - a.edge).filter(e => { const k = `${e.event}|${e.venue}|${e.sel}`; if (seen.has(k)) return false; seen.add(k); return true; });
+      const seen = new Set(), uniq = out.sort((a, b) => (b.fairEdge ?? b.edge) - (a.fairEdge ?? a.edge)).filter(e => { const k = `${e.event}|${e.venue}|${e.sel}`; if (seen.has(k)) return false; seen.add(k); return true; });
       leading[league] = uniq.slice(0, 20).map(e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url,
         price: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims,
+        fair: e.fair != null ? +e.fair.toFixed(3) : null, fairEdge: e.fairEdge != null ? +e.fairEdge.toFixed(3) : null, tier: e.tier || null,
         trade: e.trade || null, teamId: e.teamId || null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null, team: e.team || null, mid: e.mid ?? null, ask: e.ask ?? null }));
     } catch {} finally { scanning[league] = false; }
   }
   if (pool) { setInterval(() => { scanLeague('cfb'); scanLeague('nfl'); }, 30000).unref(); setTimeout(() => { scanLeague('cfb'); scanLeague('nfl'); }, 20000).unref(); }
-  const leadingFor = league => ({ updated: new Date().toISOString(), window: WINDOW.label, bets: league === 'all' ? [...leading.cfb, ...leading.nfl].sort((a, b) => b.edge - a.edge) : leading[league] || [] });
+  const leadingFor = league => ({ updated: new Date().toISOString(), window: WINDOW.label, bets: league === 'all' ? [...leading.cfb, ...leading.nfl].sort((a, b) => (b.fairEdge ?? b.edge) - (a.fairEdge ?? a.edge)) : leading[league] || [] });
 
   function status() {
     const sc = [...scans.values()];
