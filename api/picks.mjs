@@ -106,6 +106,9 @@ export function createPicks({ api, dir }) {
     const open = db.picks.filter(p => p.event === g.event && p.league === g.league && !p.auto);
     for (const e of list) {
       if (open.length >= MAX_OPEN_PER_GAME) break;
+      // One bet per market type per game. Four spread lines on the same team are one opinion, not four, and
+      // counting them separately would make the record look far more certain than it is.
+      if (open.some(p => p.type === e.type)) continue;
       const pick = logPick(g, A, S, e); if (pick) open.push(pick);
     }
     return list.slice(0, 8);

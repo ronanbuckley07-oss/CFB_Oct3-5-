@@ -113,7 +113,11 @@ export function createLive({ api, pages, dataDir }) {
   const leadingFor = league => ({ updated: new Date().toISOString(), window: WINDOW.label, bets: league === 'all' ? [...leading.cfb, ...leading.nfl].sort((a, b) => b.edge - a.edge) : leading[league] || [] });
 
   function status() {
-    return { leagues: Object.keys(datas), pool: pool ? pool.stats() : null, games: [...games.values()].map(g => ({ league: g.league, event: g.event, side: g.side, viewers: g.viewers.size,
+    const sc = [...scans.values()];
+    return { leagues: Object.keys(datas), pool: pool ? pool.stats() : null,
+      scanner: { liveGames: sc.length, withMarkets: sc.filter(c => c.mk && !c.noMk).length, inWindow: sc.filter(c => c.S && inWindow(c.S)).length,
+        games: sc.map(c => ({ league: c.league, event: c.event, matchup: c.title || null, clock: c.S ? clockOf(c.S) : null, markets: c.mk ? !c.noMk : null, gameBet: picks.autoDone(c.league, c.event) })) },
+      games: [...games.values()].map(g => ({ league: g.league, event: g.event, side: g.side, viewers: g.viewers.size,
       polling: !!g.timer, state: g.state, key: g.key, histPoints: g.hist.length, error: g.error || null })) };
   }
   // forget games nobody has watched for a while
