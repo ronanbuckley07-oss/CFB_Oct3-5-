@@ -1,0 +1,425 @@
+{
+ "cost": 0.02,
+ "seasons": [
+  2023,
+  2024,
+  2025,
+  2026
+ ],
+ "snaps": 12641,
+ "games": 903,
+ "brier": {
+  "model": 0.1594,
+  "price": 0.1597
+ },
+ "calibration": [
+  {
+   "b": 0,
+   "n": 1065,
+   "model": 0.052,
+   "price": 0.07,
+   "won": 0.071
+  },
+  {
+   "b": 1,
+   "n": 963,
+   "model": 0.151,
+   "price": 0.157,
+   "won": 0.148
+  },
+  {
+   "b": 2,
+   "n": 1042,
+   "model": 0.25,
+   "price": 0.245,
+   "won": 0.242
+  },
+  {
+   "b": 3,
+   "n": 1115,
+   "model": 0.352,
+   "price": 0.34,
+   "won": 0.33
+  },
+  {
+   "b": 4,
+   "n": 1186,
+   "model": 0.449,
+   "price": 0.434,
+   "won": 0.409
+  },
+  {
+   "b": 5,
+   "n": 1273,
+   "model": 0.551,
+   "price": 0.533,
+   "won": 0.535
+  },
+  {
+   "b": 6,
+   "n": 1526,
+   "model": 0.649,
+   "price": 0.641,
+   "won": 0.653
+  },
+  {
+   "b": 7,
+   "n": 1368,
+   "model": 0.749,
+   "price": 0.742,
+   "won": 0.811
+  },
+  {
+   "b": 8,
+   "n": 1455,
+   "model": 0.852,
+   "price": 0.842,
+   "won": 0.889
+  },
+  {
+   "b": 9,
+   "n": 1648,
+   "model": 0.948,
+   "price": 0.929,
+   "won": 0.95
+  }
+ ],
+ "table": [
+  {
+   "T": 0.02,
+   "fit": {
+    "n": 467,
+    "hit": 0.51,
+    "modelSaid": 0.519,
+    "avgPrice": 0.483,
+    "roi": 0.055,
+    "roiLo": -0.034,
+    "roiHi": 0.134,
+    "pProfit": 0.887
+   },
+   "test": {
+    "n": 266,
+    "hit": 0.477,
+    "modelSaid": 0.526,
+    "avgPrice": 0.489,
+    "roi": -0.023,
+    "roiLo": -0.131,
+    "roiHi": 0.09,
+    "pProfit": 0.331
+   },
+   "all": {
+    "n": 733,
+    "hit": 0.498,
+    "modelSaid": 0.522,
+    "avgPrice": 0.485,
+    "roi": 0.027,
+    "roiLo": -0.039,
+    "roiHi": 0.094,
+    "pProfit": 0.795
+   }
+  },
+  {
+   "T": 0.03,
+   "fit": {
+    "n": 393,
+    "hit": 0.55,
+    "modelSaid": 0.551,
+    "avgPrice": 0.503,
+    "roi": 0.092,
+    "roiLo": 0.008,
+    "roiHi": 0.176,
+    "pProfit": 0.982
+   },
+   "test": {
+    "n": 212,
+    "hit": 0.528,
+    "modelSaid": 0.568,
+    "avgPrice": 0.517,
+    "roi": 0.023,
+    "roiLo": -0.088,
+    "roiHi": 0.134,
+    "pProfit": 0.63
+   },
+   "all": {
+    "n": 605,
+    "hit": 0.542,
+    "modelSaid": 0.557,
+    "avgPrice": 0.508,
+    "roi": 0.067,
+    "roiLo": 0,
+    "roiHi": 0.136,
+    "pProfit": 0.977
+   }
+  },
+  {
+   "T": 0.04,
+   "fit": {
+    "n": 287,
+    "hit": 0.561,
+    "modelSaid": 0.575,
+    "avgPrice": 0.514,
+    "roi": 0.09,
+    "roiLo": -0.011,
+    "roiHi": 0.189,
+    "pProfit": 0.96
+   },
+   "test": {
+    "n": 170,
+    "hit": 0.559,
+    "modelSaid": 0.585,
+    "avgPrice": 0.523,
+    "roi": 0.068,
+    "roiLo": -0.067,
+    "roiHi": 0.201,
+    "pProfit": 0.839
+   },
+   "all": {
+    "n": 457,
+    "hit": 0.56,
+    "modelSaid": 0.579,
+    "avgPrice": 0.518,
+    "roi": 0.082,
+    "roiLo": 0.007,
+    "roiHi": 0.159,
+    "pProfit": 0.986
+   }
+  },
+  {
+   "T": 0.05,
+   "fit": {
+    "n": 217,
+    "hit": 0.608,
+    "modelSaid": 0.618,
+    "avgPrice": 0.545,
+    "roi": 0.116,
+    "roiLo": 0.011,
+    "roiHi": 0.212,
+    "pProfit": 0.985
+   },
+   "test": {
+    "n": 126,
+    "hit": 0.587,
+    "modelSaid": 0.606,
+    "avgPrice": 0.532,
+    "roi": 0.103,
+    "roiLo": -0.042,
+    "roiHi": 0.242,
+    "pProfit": 0.908
+   },
+   "all": {
+    "n": 343,
+    "hit": 0.601,
+    "modelSaid": 0.614,
+    "avgPrice": 0.541,
+    "roi": 0.111,
+    "roiLo": 0.02,
+    "roiHi": 0.192,
+    "pProfit": 0.991
+   }
+  },
+  {
+   "T": 0.06,
+   "fit": {
+    "n": 160,
+    "hit": 0.631,
+    "modelSaid": 0.655,
+    "avgPrice": 0.569,
+    "roi": 0.108,
+    "roiLo": -0.009,
+    "roiHi": 0.218,
+    "pProfit": 0.965
+   },
+   "test": {
+    "n": 93,
+    "hit": 0.634,
+    "modelSaid": 0.635,
+    "avgPrice": 0.55,
+    "roi": 0.153,
+    "roiLo": -0.007,
+    "roiHi": 0.315,
+    "pProfit": 0.971
+   },
+   "all": {
+    "n": 253,
+    "hit": 0.632,
+    "modelSaid": 0.648,
+    "avgPrice": 0.562,
+    "roi": 0.124,
+    "roiLo": 0.031,
+    "roiHi": 0.214,
+    "pProfit": 0.994
+   }
+  },
+  {
+   "T": 0.08,
+   "fit": {
+    "n": 84,
+    "hit": 0.631,
+    "modelSaid": 0.657,
+    "avgPrice": 0.547,
+    "roi": 0.154,
+    "roiLo": -0.002,
+    "roiHi": 0.318,
+    "pProfit": 0.973
+   },
+   "test": {
+    "n": 44,
+    "hit": 0.682,
+    "modelSaid": 0.673,
+    "avgPrice": 0.564,
+    "roi": 0.208,
+    "roiLo": 0.015,
+    "roiHi": 0.406,
+    "pProfit": 0.985
+   },
+   "all": {
+    "n": 128,
+    "hit": 0.648,
+    "modelSaid": 0.663,
+    "avgPrice": 0.553,
+    "roi": 0.173,
+    "roiLo": 0.046,
+    "roiHi": 0.31,
+    "pProfit": 0.998
+   }
+  },
+  {
+   "T": 0.1,
+   "fit": {
+    "n": 43,
+    "hit": 0.651,
+    "modelSaid": 0.718,
+    "avgPrice": 0.576,
+    "roi": 0.131,
+    "roiLo": -0.087,
+    "roiHi": 0.33,
+    "pProfit": 0.892
+   },
+   "test": {
+    "n": 26,
+    "hit": 0.769,
+    "modelSaid": 0.735,
+    "avgPrice": 0.606,
+    "roi": 0.27,
+    "roiLo": 0.061,
+    "roiHi": 0.47,
+    "pProfit": 0.994
+   },
+   "all": {
+    "n": 69,
+    "hit": 0.696,
+    "modelSaid": 0.725,
+    "avgPrice": 0.587,
+    "roi": 0.185,
+    "roiLo": 0.031,
+    "roiHi": 0.332,
+    "pProfit": 0.991
+   }
+  },
+  {
+   "T": 0.12,
+   "fit": {
+    "n": 29,
+    "hit": 0.69,
+    "modelSaid": 0.768,
+    "avgPrice": 0.604,
+    "roi": 0.142,
+    "roiLo": -0.101,
+    "roiHi": 0.369,
+    "pProfit": 0.892
+   },
+   "test": {
+    "n": 11,
+    "hit": 0.818,
+    "modelSaid": 0.782,
+    "avgPrice": 0.622,
+    "roi": 0.315,
+    "roiLo": -0.005,
+    "roiHi": 0.65,
+    "pProfit": 0.972
+   },
+   "all": {
+    "n": 40,
+    "hit": 0.725,
+    "modelSaid": 0.772,
+    "avgPrice": 0.609,
+    "roi": 0.19,
+    "roiLo": -0.009,
+    "roiHi": 0.383,
+    "pProfit": 0.969
+   }
+  },
+  {
+   "T": 0.15,
+   "fit": {
+    "n": 14,
+    "hit": 0.571,
+    "modelSaid": 0.793,
+    "avgPrice": 0.589,
+    "roi": -0.029,
+    "roiLo": -0.401,
+    "roiHi": 0.259,
+    "pProfit": 0.427
+   },
+   "test": {
+    "n": 6,
+    "hit": 0.833,
+    "modelSaid": 0.881,
+    "avgPrice": 0.674,
+    "roi": 0.237,
+    "roiLo": -0.223,
+    "roiHi": 0.564,
+    "pProfit": 0.862
+   },
+   "all": {
+    "n": 20,
+    "hit": 0.65,
+    "modelSaid": 0.819,
+    "avgPrice": 0.614,
+    "roi": 0.058,
+    "roiLo": -0.224,
+    "roiHi": 0.277,
+    "pProfit": 0.676
+   }
+  }
+ ],
+ "threshold": 0.05,
+ "chosen": {
+  "T": 0.05,
+  "fit": {
+   "n": 217,
+   "hit": 0.608,
+   "modelSaid": 0.618,
+   "avgPrice": 0.545,
+   "roi": 0.116,
+   "roiLo": 0.011,
+   "roiHi": 0.212,
+   "pProfit": 0.985
+  },
+  "test": {
+   "n": 126,
+   "hit": 0.587,
+   "modelSaid": 0.606,
+   "avgPrice": 0.532,
+   "roi": 0.103,
+   "roiLo": -0.042,
+   "roiHi": 0.242,
+   "pProfit": 0.908
+  },
+  "all": {
+   "n": 343,
+   "hit": 0.601,
+   "modelSaid": 0.614,
+   "avgPrice": 0.541,
+   "roi": 0.111,
+   "roiLo": 0.02,
+   "roiHi": 0.192,
+   "pProfit": 0.991
+  }
+ },
+ "priceRange": [
+  0.1,
+  0.9
+ ],
+ "at": "2026-10-04"
+}

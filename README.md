@@ -1,102 +1,88 @@
-# College football + NFL live board and Monte Carlo simulator
+# NFL live board, server-side Monte Carlo simulator, and trading signals
 
-Two pages served by one small Node server, built for Render.
+One small Node server (no dependencies) serves three things:
 
-- `/` is the board. Every game this week, Top 25 by default or all FBS, with score, clock, down and distance, a field strip
-  showing the line of scrimmage and the line to gain, ESPN's win probability and the betting line. It refreshes every
-  30 seconds and runs no simulations, so it's cheap to leave open.
-- `/nfl` and `/nfl/game?event=ID` are the same two pages for the NFL, with their own model tables.
-- `/game?event=ID` (or `/game/ID`) is the simulator. It opens on a start screen with the matchup, the current situation and
-  a choice of which team's win probability to show. Nothing simulates until you tap Go live. After that it pulls the game
-  from ESPN every 30 seconds and re-runs 25,000 sims whenever the state changes.
+- `/` is the board: every game this week with score, down and distance, a field strip and win probability, plus the
+  running record of every bet the trading menu has flagged.
+- `/game?event=ID` is the simulator for one game. It draws what the server sends; nothing simulates in the browser.
+- The server itself, which runs one shared simulation per game, only while someone is watching.
+
+## How the shared simulation works
+
+Each game has one simulator on the server. A game wakes up when the first viewer opens its page (an open event stream
+counts as watching, and a hidden tab disconnects after 30 seconds). While anyone is watching, the server checks ESPN every
+8 seconds and, whenever the game state changes, runs 25,000 simulations once and pushes the same result to every viewer.
+Ten viewers cost the same as one. When the last viewer leaves, polling and simulating stop after 30 seconds, and the
+game's history stays in memory for six hours so the next viewer gets the full chart. Plays that happened while nobody
+was watching are filled into the chart later at lower priority.
+
+Work is split into chunks on a worker-thread pool with a priority queue: the live play first, then 4th-down options,
+then manual and what-if runs, then chart backfill, then backtests. A run whose game state has moved on is cancelled.
+Manual and what-if runs are rate limited per visitor and cached, and finished-game backtests are simulated once and kept.
+
+## The model
+
+`scripts/train.py` builds `sim/data.json` from nflverse play-by-play, every season available (1999 through the current
+season, about 890,000 scrimmage plays from 7,300 games). Recent seasons count more (five-season half-life), so old
+seasons fill in rare situations while the call mix looks like today's league. Kickoffs use the current kickoff era only,
+field goals a logistic fit on the last eight seasons, punts are bucketed by field position, and turnovers place the
+ball where the other team really took over. The engine (`sim/engine.mjs`) plays NFL rules: 2025 overtime (both teams
+possess unless the defense scores on the first possession, ties in the regular season, playoff periods until a winner),
+the two-minute warning, onside kicks when trailing late, and timeouts used by both sides late in halves.
+
+`scripts/calibrate.mjs` fits how a spread and total become engine settings, so kickoff sims average the line and total and
+final margins scatter about 13 points around the spread, as real games since 2010 do. Simulated games reach overtime about
+6% of the time and end tied about 0.35%, close to the real rates.
+
+## Trading signals and the record
+
+For every Kalshi and Polymarket contract on a game (winner, spread ladder, total ladder) the server computes the edge:
+the model's probability minus the cost to buy, which is the ask plus about 1 cent of fees. A contract is flagged when the
+edge reaches 5 points and its cost is between 10 and 90 cents. The first flag on each market type in each game goes into
+the ledger, is graded when the game ends (a slow background check settles games that ended with nobody watching), and
+feeds the record on the home page: won-lost, current streak, longest winning run, units at one unit per bet, and hit rate
+next to what the model expected.
+
+The 5-point bar comes from `scripts/trading_study.mjs`. It replayed 12,641 snaps from 903 games (2023 through 2026) with
+play tables trained only on seasons through 2022, and priced each bet off nflfastR's spread-adjusted win probability,
+because historical in-game exchange prices aren't public. The threshold was picked on 2023-24 only (the one whose
+5th-percentile bootstrap return was best) and then checked on 2025-26:
+
+| Seasons | Bets | Won | Avg. cost | Return on money staked | 90% range |
+|---|---|---|---|---|---|
+| 2023-24 (used to pick) | 217 | 61% | 55 cents | +11.6% | +1% to +21% |
+| 2025-26 (held out) | 126 | 59% | 53 cents | +10.3% | -4% to +24% |
+
+Treat that as a ceiling. Real exchanges are likely sharper than the stand-in price, the held-out range still includes
+losing money, and only watched games can produce signals. The live record is the real test.
+
+Regenerate everything with:
+
+```
+python scripts/train.py /path/to/pbp sim/data.json          # nflverse play_by_play_YYYY.parquet files
+node scripts/calibrate.mjs
+MAX_SEASON=2022 python scripts/train.py /path/to/pbp /tmp/oos.json   # out-of-sample tables for the study
+python scripts/trading_snaps.py /path/to/pbp 2021
+node scripts/trading_study.mjs run /tmp/oos.json 2023 && node scripts/trading_study.mjs fit
+```
+
+## Deploy on Render
+
+Push to GitHub, then New > Blueprint. `render.yaml` sets up a Starter web service with a 1 GB disk at `/var/data` for the
+ledger. Without a disk the record resets on every deploy. The free plan works for a quiet game, but it has a fraction of
+a CPU, and a Sunday slate with several watched games will lag. `SIM_THREADS` sets worker threads (default: cores minus one,
+max 4), `SIM_N` the sims per play (25,000).
+
+Run locally with `npm start` and open http://localhost:3000.
 
 ## Files
 
 ```
-server.mjs        static files (brotli/gzip, cached in memory) + /api/espn + /healthz. No dependencies.
-api/espn.mjs      ESPN proxy. Every ESPN call is memoized for a few seconds, so many viewers cost one upstream request.
-public/index.html the board
-public/game.html  the simulator (engine and model tables are inline, ~1 MB raw, ~160 KB compressed)
-render.yaml       Render blueprint
+server.mjs          static files, ESPN proxy, event streams, sim and ledger endpoints
+api/espn.mjs        ESPN, Kalshi and Polymarket proxy, memoized
+sim/engine.mjs      the NFL play engine          sim/pool.mjs, worker.mjs   worker-thread pool
+sim/live.mjs        per-game shared simulator    sim/trading.mjs            signals, ledger, settlement
+sim/data.json       trained tables               sim/trading.json           study results and threshold
+public/             index.html (board + record), game.html (simulator + trading menu)
+scripts/            train.py, calibrate.mjs, trading_snaps.py, trading_study.mjs
 ```
-
-## Live sims run on the server
-
-When someone presses Go live, their page opens a Server-Sent Events connection to `/api/live`. The server keeps one
-tracker per game (per orientation: a viewer showing the other team's win probability gets a second stream). While at
-least one person is connected, that tracker checks ESPN every second; after every play (new down, distance, spot,
-possession, score or play text, or 30 seconds of clock, 5 inside the last two minutes of a half) it runs the sims once (3,000 for a quick read, then 25,000, plus 8,000 per option on 4th down) and pushes the
-same result to everyone watching. It also fills in the model line for plays nobody was around for, at low priority.
-
-Nobody connected: no polling and no sims. A tab left in the background for a minute disconnects itself, and a game with
-no viewers stops after a minute and is forgotten after 20. `/api/live/status` shows what's running.
-
-All games share one pool of simulation threads (`SIM_THREADS`, set in render.yaml), and the current play always goes
-ahead of backfill. Compute grows with the number of games being watched, not the number of viewers. On the Starter
-plan (half a CPU) a play takes a couple of seconds to simulate; if many games are watched at once on a busy Saturday,
-results queue up and a bigger instance with more threads is the fix. Manual entry, the Run button, What if and the
-backtest still simulate in the browser, since those are one person's questions. If the live server can't be reached,
-the page falls back to simulating in the browser on its own.
-
-The server reads the engine, the model tables and each league's settings straight out of `public/game.html` and
-`public/nfl/game.html`, so the browser and server can't drift apart.
-
-## NFL model
-
-`public/nfl/game.html` is generated, not edited by hand. After changing `public/game.html`, run
-`python3 tools/build_nfl.py`, which copies the app and swaps in the NFL tables (`tools/nfl_data.json`) and settings.
-
-The NFL tables come from nflverse / nflfastR play-by-play, every season from 1999 through 2026 week 4
-(1.29M plays; 899,843 runs and passes from 7,322 games). Using all of it as-is would teach 2026 teams to throw
-interceptions like 2001 teams (INT rate fell from 2.9% to 1.9%), so older seasons count, but less:
-- play results: all seasons, sampled with a 6-season half-life
-- play calling: 2006 on with a 3-season half-life, because 4th-down go rates jumped from ~40% to ~75% after 2018
-- clock: 2018 on; field goals: 2010 on (5-season half-life); punts and 2-pt rate: 2015 on; extra points: 2023 on
-- kickoffs: 2025 on, after the touchback moved to the 35
-NFL rules in the engine: two-minute warning, 10-minute overtime where both teams get the ball and then the next
-score wins, ties, tied teams playing for a last-second field goal. The clock is scaled so simulated games average
-the real 134 snaps, and the spread/total mapping is refit (`tools/calibrate_nfl.mjs`).
-
-Holdout check on 2025 regular-season games (1,785 snaps, 272 games, 800 sims each), against nflfastR's own
-Vegas-adjusted win probability: Brier 0.1575 vs 0.1576, log loss 0.4752 vs 0.4750. 2025 plays are also in the
-resampling pools, so treat that as a sanity check, not a clean out-of-sample win.
-
-To rebuild from scratch: `tools/load_nflverse.py` (downloads are in the script's comments), then
-`tools/build_nfl_data.py`, then refit the clock scale and `cal` with `tools/calibrate_nfl.mjs`.
-
-## Deploy on Render
-
-1. Push this folder to a GitHub repo.
-2. In Render: New > Blueprint, pick the repo. `render.yaml` sets up a Node web service with `node server.mjs`
-   and a health check on `/healthz`. (Or New > Web Service with build command `npm install` and start command `npm start`.)
-3. That's it. Render sets `PORT`; the server reads it.
-
-The free plan sleeps after 15 minutes without traffic, and the first request after that takes 30 to 60 seconds to wake it.
-For game days, the cheapest paid instance stays awake.
-
-Run locally with `npm start` and open http://localhost:3000.
-
-## API
-
-`/api/espn` keeps every kind the old Netlify function had (`summary`, `find`, `team`, `list`, and the default
-`?event=&date=` scoreboard entry) and adds two:
-
-- `?kind=scoreboard&scope=top|fbs[&date=YYYYMMDD]`: trimmed games for the board
-- `?kind=card&event=ID[&date=YYYYMMDD]`: one game in the same shape, for the start screen
-- `?kind=box&event=ID`: box score (line score, team stats, player stat lines)
-- `?kind=markets&event=ID[&kalshi=TICKER][&poly=SLUG]`: Kalshi (series KXNCAAFGAME) and Polymarket win prices for both teams.
-  Add `&debug` to see every market title the server checked, which is how to diagnose a game that didn't match.
-- `?kind=team&id=TEAMID` now also returns played games with results and ESPN's FPI win chance for each remaining game
-
-`/.netlify/functions/espn` still answers as an alias, so old bookmarks and cached pages keep working.
-
-## Notes
-
-- Live games are checked every second (`POLL_MS` in api/live.mjs; `LIVE.every` for the browser fallback).
-- Finished games leave the home board 6 hours after they end. ESPN's win-probability line and market prices
-  refresh every 15 seconds and the box score every 30 (6 while its tab is open). The server caches each ESPN response
-  for 2 to 3 seconds, so viewers share requests.
-- Sims run in 1,500-sim chunks across up to 8 threads. When a new play arrives mid-run, the old run stops handing out
-  chunks, so the update starts within a fraction of a second instead of waiting for 25,000 stale sims.
-- The Top 25 filter uses ESPN's poll rank. Weeks with no ranked games fall back to all FBS games.
-- Model, data sources and known limits are unchanged from v1.

@@ -1,12 +1,13 @@
 {
-  "name": "cfb-live-sim",
-  "version": "2.0.0",
+  "name": "nfl-live-sim",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Live college football board and Monte Carlo play simulator",
+  "description": "Live NFL board and server-side Monte Carlo play simulator",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node --watch server.mjs"
+    "dev": "NODE_ENV=development node --watch server.mjs",
+    "calibrate": "node scripts/calibrate.mjs"
   },
   "engines": { "node": ">=20" }
 }

@@ -1,14 +1,16 @@
 services:
   - type: web
-    name: cfb-live-sim
+    name: nfl-live-sim
     runtime: node
-    plan: starter
+    plan: starter          # the free plan's CPU is too small for Sunday afternoons, and disks need a paid plan
     buildCommand: npm install
     startCommand: node server.mjs
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
-      # Simulation threads for live games. Starter has half a CPU, so one thread leaves room for serving pages.
-      # On Standard (1 CPU) or Pro (2 CPU), raise this to 1-2 or 2-3.
-      - key: SIM_THREADS
-        value: "1"
+      - key: LEDGER_PATH
+        value: /var/data/ledger.json
+    disk:                  # keeps the signal record through deploys and restarts
+      name: ledger
+      mountPath: /var/data
+      sizeGB: 1
