@@ -37,6 +37,13 @@ export const TIERS = {
 // and the price being a play apart (ESPN's feed one play behind the exchange: 20% hit at 24-cent prices, -18%).
 export const tierActive = t => !!TIERS[t] && !TIERS[t].paused;
 
+// Small-edge bets ("leans"): the model and the market agree on the side, but the fair price beats what you'd pay by
+// only 1 point or more, under the tier bar (2.5 for favorites, 3 near coin flips). Same order-book checks, same 35-95c
+// price range as the active tiers. Shown in their own list and kept out of every other record, with their own, so
+// they add lines to look at without diluting the main numbers. Not tested on the replay: treat as unproven.
+export const LEAN = { label: 'Small edge', fairEdge: 0.01, min: 0.35, max: 0.95, perGame: 8,
+  desc: 'the fair price beats what you pay by 1+ point, under the main bar; untested, lower confidence' };
+
 // Steady picks: a narrow low-risk rule, the one that held up when replayed on games the model never saw.
 // Moneyline only, Q2 through Q4, on a team priced 65 to 85 cents (fees in) that already leads by 4+, and only when the
 // model at least agrees: the fair price (model and market averaged) is at or above what you pay. Then cash out (sell)
@@ -80,6 +87,10 @@ export function createPicks({ api, dir }) {
   try { db = JSON.parse(readFileSync(file, 'utf8')); } catch {}
   if (!Array.isArray(db.picks)) db.picks = [];
   if (!db.auto || typeof db.auto !== 'object') db.auto = {}; // league:event -> { status: 'bet' | 'pass', at }
+  // Open bets from before order-book checks (international Polymarket, or no contract to check) were never buyable at
+  // their logged price. They're voided: off the game's list and out of every record. Graded ones stay as history.
+  { let n = 0; for (const p of db.picks) if (p.status === 'open' && (!BUYABLE.has(p.venue) || !p.trade)) { p.status = 'void'; p.voidReason = 'logged before order-book price checks; never buyable at that price'; n++; }
+    if (n) { console.log(`picks: voided ${n} unbuyable open bets`); try { mkdirSync(dir, { recursive: true }); writeFileSync(file + '.tmp', JSON.stringify(db)); renameSync(file + '.tmp', file); } catch {} } }
   let dirty = false;
   const save = () => {
     if (!dirty) return; dirty = false;
@@ -134,7 +145,7 @@ export function createPicks({ api, dir }) {
     const usable = (ask, bid) => ask != null && ask > 0 && ask < 1 && (bid == null || ask - bid <= 0.08);
     for (const [venue, src] of [['Kalshi', mk.kalshi], ['Polymarket', mk.poly]]) {
       if (!src || !src.found) continue;
-      const fee = FEE[venue], kx = (x, outcome) => venue === 'Kalshi' && x.ticker ? { trade: { ticker: x.ticker, outcome }, mkt: info(x, src) } : {};
+      const fee = FEE[venue], kx = (x, outcome) => venue === 'Kalshi' && x.ticker ? { trade: { ticker: x.ticker, outcome }, mkt: info(x, src), ...(x.url ? { url: x.url } : {}) } : {};
       const push = (o, ask, mid) => { const cost = ask + fee(ask); out.push({ venue, url: src.url, ...o, ask, cost, edge: o.model - cost, mid }); };
       for (const side of ['away', 'home']) {
         const m = src[side]; if (!m || m.implied || !usable(m.ask, m.bid)) continue;
@@ -163,6 +174,8 @@ export function createPicks({ api, dir }) {
   // server reads. International Polymarket prices stay on the page for comparison, never as bets.
   const passes = e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= TIERS[e.tier].fairEdge;
   const edges = (g, A, mk) => contracts(g, A, mk).filter(e => BUYABLE.has(e.venue) && e.trade && passes(e)).sort((a, b) => b.fairEdge - a.fairEdge);
+  const leanOk = e => e.cost >= LEAN.min && e.cost <= LEAN.max && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= LEAN.fairEdge && !passes(e);
+  const leanCands = (g, A, mk) => contracts(g, A, mk).filter(e => BUYABLE.has(e.venue) && e.trade && leanOk(e)).sort((a, b) => b.fairEdge - a.fairEdge);
   // What PAPER_STAKE dollars buys on the live order book right now. The price becomes the average fill, fee included,
   // so a bet is shown and logged at a price you can actually get. Too thin to fill the stake: not a bet.
   const bookFill = async (league, venue, trade) => {
@@ -194,7 +207,9 @@ export function createPicks({ api, dir }) {
   }
   // Current buy price (per contract, fee in) for open picks, so the page can say whether a logged price is still there
   async function nowPrices(g, ps) {
-    return Promise.all(ps.map(async p => {
+    // the 25 most recent open bets get a live price (bounded order-book load); older ones just show their logged price
+    const live = new Set(ps.filter(p => p.status === 'open').slice(-25).map(p => p.key));
+    return Promise.all(ps.filter(p => live.has(p.key)).map(async p => {
       if (p.status !== 'open') return { key: p.key, now: null, why: null };
       if (!BUYABLE.has(p.venue)) return { key: p.key, now: null, why: `${p.venue} can't be traded from the US` };
       if (!p.trade) return { key: p.key, now: null, why: 'logged before price checks' };
@@ -213,7 +228,7 @@ export function createPicks({ api, dir }) {
       median: [med(A.ndH), med(A.ucH)], start: g.pregame || null, mid: e.mid ?? null };
   };
   const logPick = (g, A, S, e, extra) => {
-    const key = `${g.league}:${g.event}:${e.type}:${e.sel}${extra && extra.auto ? ':auto:' + e.tier : ''}${extra && extra.steady ? ':steady' : ''}`;
+    const key = `${g.league}:${g.event}:${e.type}:${e.sel}${extra && extra.auto ? ':auto:' + e.tier : ''}${extra && extra.steady ? ':steady' : ''}${extra && extra.lean ? ':lean' : ''}`;
     if (db.picks.some(p => p.key === key)) return null;
     const clock = `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`;
     const pick = Object.assign({ key, league: g.league, event: g.event, matchup: g.title, venue: e.venue, url: e.url, type: e.type, sel: e.sel, team: e.team || null,
@@ -260,6 +275,12 @@ export function createPicks({ api, dir }) {
   function logFound(g, A, S, list) {
     if (!A || quoteAge(g) > QUOTE_MAX_AGE) return [];
     const out = []; for (const e of list) { const pick = logPick(g, A, S, e); if (pick) out.push(pick); } return out;
+  }
+  // Small-edge bets: checked on the book, logged once per contract per game with their own record
+  async function considerLeans(g, A, mk, S, cands) {
+    const list = await verifyList(g, cands || leanCands(g, A, mk), LEAN.perGame, leanOk);
+    if (A && quoteAge(g) <= QUOTE_MAX_AGE) for (const e of list) logPick(g, A, S, e, { lean: true });
+    return list;
   }
   // Returns the bets that are buyable right now (checked on the book) and logs every new one
   async function consider(g, A, mk, S) {
@@ -367,7 +388,7 @@ export function createPicks({ api, dir }) {
       expected: done.length ? +(done.reduce((a, p) => a + p.model, 0) / done.length).toFixed(3) : null };
   }
   function report(league) {
-    const mine = db.picks.filter(p => !league || league === 'all' || p.league === league), ps = mine.filter(p => !p.steady), sp = mine.filter(p => p.steady);
+    const mine = db.picks.filter(p => p.status !== 'void' && (!league || league === 'all' || p.league === league)), ps = mine.filter(p => !p.steady && !p.lean), sp = mine.filter(p => p.steady), lp = mine.filter(p => p.lean);
     const phases = {}; for (const p of ps) if (p.phase) (phases[p.phase] = phases[p.phase] || []).push(p);
     const passes = Object.entries(db.auto).filter(([k, v]) => v.status === 'pass' && (!league || league === 'all' || k.startsWith(league + ':'))).length;
     const real = ps.filter(p => p.fill && p.fill.qty > 0 && p.status !== 'open' && p.status !== 'push');
@@ -391,9 +412,10 @@ export function createPicks({ api, dir }) {
     return { ...extra, record: { w, l, push: ps.filter(p => p.status === 'push').length, pct: done.length ? w / done.length : null, pl: +pl.toFixed(2), roi: cost ? pl / cost : null,
         expected: done.length ? +(done.reduce((a, p) => a + p.model, 0) / done.length).toFixed(3) : null, avgPrice: done.length ? +(cost / done.length).toFixed(3) : null }, byType,
       open: ps.filter(p => p.status === 'open').reverse(), settled: ps.filter(p => p.status !== 'open').reverse(),
+      lean: { rule: LEAN, paper: summarize(lp), realistic: realOf(lp), open: lp.filter(p => p.status === 'open').length },
       steady: { rule: STEADY, paper: steadySummary(sp), realistic: steadySummary(sp).realistic, open: sp.filter(p => p.status === 'open').reverse(), settled: sp.filter(p => p.status !== 'open').reverse() } };
   }
-  const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event));
+  const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event) && p.status !== 'void');
   const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, edges, verifyList, nowPrices, consider, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

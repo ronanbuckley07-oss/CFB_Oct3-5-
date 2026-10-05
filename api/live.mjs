@@ -51,10 +51,12 @@ export function createLive({ api, pages, dataDir }) {
   // ---------- Scanner: every live game with Kalshi or Polymarket prices, watched or not ----------
   // A light 3,000-sim read at most every 2 minutes per game feeds the "leading bets" list, and once a game reaches the
   // betting window it gets a full 25,000-sim run and the one automatic bet. Lowest priority in the pool.
-  const scans = new Map(), scanning = {}, leading = { cfb: [], nfl: [] };
+  const scans = new Map(), scanning = {}, leading = { cfb: [], nfl: [] }, leadingLeans = { cfb: [], nfl: [] };
+  const slimBet = league => e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url, cost: +e.cost.toFixed(3),
+    model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier || null, clock: e.clock, score: e.score, at: e.at, book: e.book || null, how: e.how || null });
   const watched = (league, event) => [...games.values()].find(g => g.league === league && g.event === String(event) && g.viewers.size && g.last.edges);
   class ScanGame {
-    constructor(league, card) { Object.assign(this, { league, event: String(card.id), card, pk: null, lastScan: 0, mkAt: 0, noMk: false, edges: [], cands: [] }); }
+    constructor(league, card) { Object.assign(this, { league, event: String(card.id), card, pk: null, lastScan: 0, mkAt: 0, noMk: false, edges: [], cands: [], leans: [], leanCands: [] }); }
     call(q) { return api[this.league](new Request(`http://local/api?${q}`)).then(r => r.json()); }
     async init() {
       const c = this.card; // away team takes slot A
@@ -94,11 +96,12 @@ export function createLive({ api, pages, dataDir }) {
       const steadyDue = S.qtr >= 2 && S.qtr <= 4 && !picks.steadyDone(this.league, this.event) && this.steadyPk !== pk
         && now - this.pkAt >= 40000 && (this.mkFetched || 0) - this.pkAt >= 40000;
       // Bets are only good for the play they were simulated on: a new play clears them until the next run
-      if (this.edges.length && this.edgesPk !== pk) { this.edges = []; this.cands = []; picks.dropSteadyLive(this.league, this.event); }
+      if ((this.edges.length || (this.leans && this.leans.length)) && this.edgesPk !== pk) { this.edges = []; this.cands = []; this.leans = []; this.leanCands = []; picks.dropSteadyLive(this.league, this.event); }
       // Same play, nothing new to simulate: re-check the order book for the bets we already have (every 10s tick)
-      if (this.cands && this.cands.length && this.edgesPk === pk && now - (this.verAt || 0) >= 10000) {
+      if (((this.cands && this.cands.length) || (this.leanCands && this.leanCands.length)) && this.edgesPk === pk && now - (this.verAt || 0) >= 10000) {
         this.verAt = now; const found = await picks.verifyList(this, this.cands, picks.MAX_CHECK);
         if (this.lastA) picks.logFound(this, this.lastA, S, found); this.edges = this.tag(found.slice(0, 3), S, now);
+        if (this.lastA && this.leanCands && this.leanCands.length) this.leans = this.tag((await picks.considerLeans(this, this.lastA, this.mk, S, this.leanCands)).slice(0, 3), S, now);
       }
       // Re-simulate on every new play (was: at most every 2 minutes), so the leading list keeps up with the game
       if (!(steadyDue || (autoDue && now - this.lastScan > 60000) || (pk !== this.pk && now - this.lastScan > 20000) || now - this.lastScan > 300000)) return;
@@ -110,6 +113,8 @@ export function createLive({ api, pages, dataDir }) {
       const found = await picks.verifyList(this, this.cands, picks.MAX_CHECK); this.lastA = A;
       picks.logFound(this, A, S, found); // every bet found in every game is logged, watched or not
       this.edges = this.tag(found.slice(0, 3), S, Date.now(), A.n);
+      this.leanCands = picks.leanCands(this, A, this.mk);
+      this.leans = this.tag((await picks.considerLeans(this, A, this.mk, S, this.leanCands)).slice(0, 3), S, Date.now(), A.n);
       await picks.autoPick(this, A, this.mk, S);
       if (playKey(o) === this.pkSeen) await picks.steadyPick(this, A, this.mk, S, Date.now() - this.pkAt);
     }
@@ -125,12 +130,18 @@ export function createLive({ api, pages, dataDir }) {
       for (const [id, c] of scans) if (id.startsWith(league + ':') && !ids.has(id)) { c.finish(); scans.delete(id); }
       for (const id of ids) { try { await scans.get(id).tick(); } catch {} }
       // leading bets: watched games' latest numbers plus the scanner's
-      const out = [];
-      for (const g of games.values()) if (g.league === league && g.viewers.size && g.last.edges && Date.now() - (g.last.edges.at || 0) < 600000)
-        for (const e of g.last.edges.edges.slice(0, 3)) out.push({ ...e, event: g.event, matchup: g.title, clock: g.last.edges.clock, score: g.last.edges.score, at: g.last.edges.at, sims: 25000 });
-      for (const [id, c] of scans) if (id.startsWith(league + ':')) for (const e of c.edges) out.push({ ...e, event: c.event, matchup: c.title });
+      const out = [], lout = [];
+      // watched games' bets, unless the play has moved on since they were checked (those are stale)
+      for (const g of games.values()) if (g.league === league && g.viewers.size && g.last.edges && !g.last.edges.stale && Date.now() - (g.last.edges.at || 0) < 600000) {
+        const meta = { event: g.event, matchup: g.title, clock: g.last.edges.clock, score: g.last.edges.score, at: g.last.edges.at, sims: 25000 };
+        for (const e of g.last.edges.edges.slice(0, 3)) out.push({ ...e, ...meta });
+        for (const e of (g.last.edges.leans || []).slice(0, 3)) lout.push({ ...e, ...meta });
+      }
+      for (const [id, c] of scans) if (id.startsWith(league + ':')) { for (const e of c.edges) out.push({ ...e, event: c.event, matchup: c.title }); for (const e of c.leans || []) lout.push({ ...e, event: c.event, matchup: c.title }); }
       // one row per bet: a watched game and the scanner can both report the same market
-      const seen = new Set(), uniq = out.sort((a, b) => (b.fairEdge ?? b.edge) - (a.fairEdge ?? a.edge)).filter(e => { const k = `${e.event}|${e.venue}|${e.sel}`; if (seen.has(k)) return false; seen.add(k); return true; });
+      const dedupe = list => { const seen = new Set(); return list.sort((a, b) => (b.fairEdge ?? b.edge) - (a.fairEdge ?? a.edge)).filter(e => { const k = `${e.event}|${e.venue}|${e.sel}`; if (seen.has(k)) return false; seen.add(k); return true; }); };
+      const uniq = dedupe(out);
+      leadingLeans[league] = dedupe(lout).slice(0, 12).map(slimBet(league));
       leading[league] = uniq.slice(0, 20).map(e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url,
         price: +(e.ask ?? e.cost).toFixed(3), cost: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims,
         fair: e.fair != null ? +e.fair.toFixed(3) : null, fairEdge: e.fairEdge != null ? +e.fairEdge.toFixed(3) : null, tier: e.tier || null,
@@ -139,7 +150,9 @@ export function createLive({ api, pages, dataDir }) {
   }
   // Every 10 seconds (was 30): the scanner is what logs game bets and steady picks, so it has to keep up with the game
   if (pool) { setInterval(() => { scanLeague('cfb'); scanLeague('nfl'); }, 10000).unref(); setTimeout(() => { scanLeague('cfb'); scanLeague('nfl'); }, 20000).unref(); }
-  const leadingFor = league => ({ updated: new Date().toISOString(), window: WINDOW.label, bets: league === 'all' ? [...leading.cfb, ...leading.nfl].sort((a, b) => (b.fairEdge ?? b.edge) - (a.fairEdge ?? a.edge)) : leading[league] || [] });
+  const byEdge = (a, b) => (b.fairEdge ?? b.edge) - (a.fairEdge ?? a.edge);
+  const leadingFor = league => ({ updated: new Date().toISOString(), window: WINDOW.label, bets: league === 'all' ? [...leading.cfb, ...leading.nfl].sort(byEdge) : leading[league] || [],
+    leans: league === 'all' ? [...leadingLeans.cfb, ...leadingLeans.nfl].sort(byEdge) : leadingLeans[league] || [] });
 
   function status() {
     const sc = [...scans.values()];
@@ -252,9 +265,10 @@ export function createLive({ api, pages, dataDir }) {
       try {
         const edges = E.pending ? [] : await picks.verifyList(this, this.cands || [], picks.MAX_CHECK);
         if (this.lastAgg && edges.length) picks.logFound(this, this.lastAgg, this.lastS, edges);
+        const leans = E.pending || !this.lastAgg ? [] : await picks.considerLeans(this, this.lastAgg, this.mk, this.lastS, this.leanCands || []);
         const logged = picks.forEvent(this.league, this.event);
         if (this.last.edges !== E) return; // a new run replaced it meanwhile
-        this.last.edges = { ...E, edges, logged, now: await picks.nowPrices(this, logged), at: Date.now() };
+        this.last.edges = { ...E, edges, leans, logged, now: await picks.nowPrices(this, logged), at: Date.now() };
         this.broadcast('edges', this.last.edges);
       } catch {} finally { this.rechecking = false; }
     }
@@ -275,9 +289,10 @@ export function createLive({ api, pages, dataDir }) {
         this.broadcast('hist', { pts: [pt] });
         if (this.mk && this.state !== 'post') {
           const ed = await picks.consider(this, A, this.mk, S); await picks.autoPick(this, A, this.mk, S); this.lastAgg = A; this.lastS = S;
-          this.cands = picks.edges(this, A, this.mk);
+          this.cands = picks.edges(this, A, this.mk); this.leanCands = picks.leanCands(this, A, this.mk);
+          const leans = await picks.considerLeans(this, A, this.mk, S, this.leanCands);
           const logged = picks.forEvent(this.league, this.event);
-          this.last.edges = { key, pk: playKey(S), edges: ed, logged, now: await picks.nowPrices(this, logged), at: Date.now(), clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}` };
+          this.last.edges = { key, pk: playKey(S), edges: ed, leans, logged, now: await picks.nowPrices(this, logged), at: Date.now(), clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}` };
           this.broadcast('edges', this.last.edges);
         }
         if (S.down === 4) { // the 4th-down decision bot: each option simulated separately

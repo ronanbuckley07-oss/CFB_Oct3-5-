@@ -324,6 +324,8 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   if (!best) return { found: false, checked: events.length };
   const tk = best.ev.event_ticker || '';
   const res = { found: true, title: best.ev.title, ticker: tk, url: `https://kalshi.com/markets/${LG.kx.toLowerCase()}game/${tk.toLowerCase()}`, spreads: [], totals: [] };
+  // KXNFLSPREAD-26OCT05DETCAR-DET3 -> kalshi.com/markets/kxnflspread/kxnflspread-26oct05detcar
+  const kurl = t => { const p = String(t || '').split('-'); return p.length >= 2 ? `https://kalshi.com/markets/${p[0].toLowerCase()}/${p.slice(0, 2).join('-').toLowerCase()}` : null; };
   const side = label => { const sa = nameScore(label, A), sb = nameScore(label, B); return sa > sb && sa > 0 ? 'A' : sb > sa && sb > 0 ? 'B' : null; };
   const px = m => midPrice(m.yes_bid_dollars ?? m.yes_bid, m.yes_ask_dollars ?? m.yes_ask, m.last_price_dollars ?? m.last_price);
   const tickers = {};
@@ -354,14 +356,14 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   for (const m of sp) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const by = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
-    const sd = side(m.yes_sub_title || txt); if (sd && isFinite(by)) res.spreads.push({ side: sd, by, p: pr.p, bid: pr.bid ?? null, ask: pr.ask ?? null, ticker: m.ticker, name: m.yes_sub_title || m.title || null });
+    const sd = side(m.yes_sub_title || txt); if (sd && isFinite(by)) res.spreads.push({ side: sd, by, p: pr.p, bid: pr.bid ?? null, ask: pr.ask ?? null, ticker: m.ticker, name: m.yes_sub_title || m.title || null, url: kurl(m.ticker) });
   }
   for (const m of to) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const line = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
     if (isFinite(line)) { const under = /under|below/i.test(m.yes_sub_title || '');
       // stored as the Over: ask = cost of Over, askOther = cost of Under
-      res.totals.push(under ? { line, p: 1 - pr.p, ask: pr.bid != null ? 1 - pr.bid : null, askOther: pr.ask ?? null, ticker: m.ticker, yesOver: false, name: m.yes_sub_title || m.title || null } : { line, p: pr.p, ask: pr.ask ?? null, askOther: pr.bid != null ? 1 - pr.bid : null, ticker: m.ticker, yesOver: true, name: m.yes_sub_title || m.title || null }); }
+      res.totals.push(under ? { line, p: 1 - pr.p, ask: pr.bid != null ? 1 - pr.bid : null, askOther: pr.ask ?? null, ticker: m.ticker, yesOver: false, name: m.yes_sub_title || m.title || null, url: kurl(m.ticker) } : { line, p: pr.p, ask: pr.ask ?? null, askOther: pr.bid != null ? 1 - pr.bid : null, ticker: m.ticker, yesOver: true, name: m.yes_sub_title || m.title || null, url: kurl(m.ticker) }); }
   }
   // Minute-by-minute price history for the game-winner market, so the chart has Kalshi's line from kickoff
   const hk = tickers.A || tickers.B;

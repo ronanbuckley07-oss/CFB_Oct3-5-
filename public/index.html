@@ -112,6 +112,29 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .howbuy .yn{display:inline-block;padding:0 7px;border-radius:999px;background:#2E9E5B;color:#fff;font-weight:800}.howbuy .yn.no{background:#B4472E}
 .howbuy .tid{font-size:11px;color:var(--muted);word-break:break-all}.howbuy.sell{border-left-color:var(--gold);background:color-mix(in srgb,var(--gold) 10%,transparent)}
 tr.howrow td{border-top:0;padding-top:0}
+.bcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin:6px 0 4px}
+.bcard{border:1px solid var(--line);border-left:4px solid #2E9E5B;border-radius:12px;padding:12px 14px;background:var(--card);font-size:15px;line-height:1.4;min-width:0}
+.bcard.lean{border-left-color:var(--gold)}.bcard.sell{border-left-color:var(--gold)}
+.bcard.stale{border-left-color:var(--bad);opacity:.72}
+.bc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.bc-sel{font-size:21px;font-weight:800;line-height:1.15}
+.bc-tag{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:1px 8px;border:1px solid currentColor;white-space:nowrap;margin-left:4px}
+.bc-tag.lean{color:var(--gold)}.bc-tag.t-low{color:#2E9E5B}.bc-tag.t-medium{color:var(--gold)}.bc-tag.t-high{color:var(--bad)}
+.bc-game{font-size:13px;color:var(--muted);margin-top:2px}
+.bc-stale{margin:8px 0 2px;padding:6px 9px;border-radius:8px;background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad);font-weight:800;font-size:14px}
+.bc-steps{margin:8px 0 6px;padding-left:22px}.bc-steps li{margin:3px 0;padding-left:2px}
+.bc-steps a{font-weight:800}
+.bc-yn{display:inline-block;padding:1px 10px;border-radius:999px;background:#2E9E5B;color:#fff;font-weight:900;letter-spacing:.02em}.bc-yn.no{background:#B4472E}
+.bc-side{color:var(--muted);font-size:14px}.bc-big{font-size:18px}
+.bc-pays{font-size:14px;margin:4px 0}.bc-money{color:var(--muted)}
+.bc-nums{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;color:var(--muted);margin-top:6px}.bc-edge{color:#2E9E5B;font-weight:700}
+.lrows{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+.lrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font-size:14px}
+.lrow .l-sel{font-weight:800;font-size:15.5px}.lrow .l-meta{color:var(--muted);font-size:12.5px}.lrow .l-res{margin-left:auto;font-weight:700}
+.lrow .won{color:#2E9E5B}.lrow .lost{color:var(--bad)}
+@media (max-width:520px){.bcards{grid-template-columns:1fr}.bcard{padding:11px 12px}.bc-sel{font-size:20px}}
+
+.bc-none{margin:0;font-size:14.5px}
 .age{font-size:11.5px;color:var(--muted);white-space:nowrap;margin-left:6px}.age.old{color:var(--bad);font-weight:800}
 .steady .how{margin:2px 0 10px;padding-left:18px;font-size:14px}.steady .how li{margin:2px 0}
 .steady .warn{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;margin-top:10px}
@@ -304,15 +327,27 @@ const OLD_MS=30000, ageTag=at=>at?`<span class="age" data-at="${at}"></span>`:''
 function tickAges(){ document.querySelectorAll('.age[data-at]').forEach(el=>{ const s=Math.max(0,Math.round((Date.now()-+el.dataset.at)/1000)), old=s*1000>OLD_MS;
   el.textContent=old?`OLD · checked ${s<120?s+'s':Math.round(s/60)+' min'} ago`:`checked ${s}s ago`; el.classList.toggle('old',old); }); }
 setInterval(()=>{ if(!document.hidden) tickAges(); },1000);
-// "How to buy": the exact exchange, market (as the exchange titles it), Yes or No, the most to pay, and what it pays on
+// ===== Bet cards: one card per bet, built for a phone. Every card says exactly what to tap and what to pay. =====
 const hEsc=s=>String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-function howBox(h, sell){
-  if(!h) return ''; const c=v=>Math.round(v*100)+'¢';
-  const venue=h.url?`<a href="${hEsc(h.url)}" target="_blank" rel="noopener">${hEsc(h.venue)} ›</a>`:hEsc(h.venue);
-  const where=[h.event?`the game “${hEsc(h.event)}”`:'',h.market&&h.market!==h.event?`the market “${hEsc(h.market)}”`:''].filter(Boolean).join(', then ');
-  const side=`<span class="yn ${h.buy==='No'?'no':''}">${hEsc(h.buy)}</span>${h.side?` (${hEsc(h.side)})`:''}`;
-  if(sell) return `<div class="howbuy sell"><b>How to sell:</b> on <b>${venue}</b>${where?`, open ${where}`:''}, and sell your ${side} shares at the best bid.${h.id?` <span class="tid">ID ${hEsc(h.id)}</span>`:''}</div>`;
-  return `<div class="howbuy"><b>How to buy:</b> on <b>${venue}</b>${where?`, open ${where}`:''}, and buy ${side}${h.limit!=null?` with a limit price of <b>${c(h.limit)}</b> or less (about ${c(h.perShare)} a share with the fee)`:''}. Each share pays $1 if <b>${hEsc(h.pays)}</b>.${h.id?` <span class="tid">ID ${hEsc(h.id)}</span>`:''}</div>`;
+const bcC=v=>v==null?'–':Math.round(v*100)+'¢', bcP=v=>v==null?'–':Math.round(v*100)+'%';
+function bcTier(t,lean){ if(lean) return '<span class="bc-tag lean">small edge</span>'; return t?`<span class="bc-tag t-${t}">${t==='low'?'low risk':t==='high'?'high risk':'medium'}</span>`:''; }
+function betCard(b,o={}){
+  const h=b.how||{venue:b.venue,url:b.url,buy:'Yes',pays:null}, stale=!!o.stale, sell=!!o.sell;
+  const venue=h.url?`<a href="${hEsc(h.url)}" target="_blank" rel="noopener">${hEsc(h.venue||b.venue)} ›</a>`:`<b>${hEsc(h.venue||b.venue)}</b>`;
+  const yn=`<span class="bc-yn ${h.buy==='No'?'no':''}">${hEsc(String(h.buy||'Yes').toUpperCase())}</span>${h.side?` <span class="bc-side">(${hEsc(h.side)})</span>`:''}`;
+  const steps=[`Open ${venue}`];
+  if(h.event) steps.push(`Find the game <b>“${hEsc(h.event)}”</b>`);
+  if(h.market&&h.market!==h.event) steps.push(`Tap the market <b>“${hEsc(h.market)}”</b>`);
+  if(sell) steps.push(`<b>Sell</b> your ${yn} shares at the best bid`);
+  else steps.push(`Buy ${yn}${h.limit!=null?` at <b class="bc-big">${bcC(h.limit)}</b> or less`:b.cost!=null?` at about <b class="bc-big">${bcC(b.cost)}</b>`:''}`);
+  const qty=b.book&&b.book.qty, stake=b.book&&b.book.stake;
+  const pays=h.pays&&!sell?`<div class="bc-pays">Wins if <b>${hEsc(h.pays)}</b>.${qty&&stake&&!sell?` <span class="bc-money">$${stake} buys ${qty} shares → <b>$${qty}</b> back if it hits.</span>`:''}</div>`:'';
+  const nums=sell?'':`<div class="bc-nums">${b.model!=null?`<span>Model ${bcP(b.model)}</span>`:''}${b.fair!=null?`<span>Fair ${bcP(b.fair)}</span>`:''}${b.cost!=null?`<span>Cost ${bcC(b.cost)} w/ fee</span>`:''}${b.fairEdge!=null?`<span class="bc-edge">Edge +${(b.fairEdge*100).toFixed(1)}</span>`:''}${!stale&&o.at?`<span class="age" data-at="${o.at}"></span>`:''}</div>`;
+  const game=o.game?`<div class="bc-game">${o.game}</div>`:'';
+  return `<div class="bcard${stale?' stale':''}${o.lean?' lean':''}${sell?' sell':''}">
+    <div class="bc-top"><div class="bc-sel">${hEsc(b.sel)}</div><div>${bcTier(b.tier,o.lean)}${o.extraTag||''}</div></div>${game}
+    ${stale?'<div class="bc-stale">OLD · this was for the last play. Don\'t buy it until it refreshes.</div>':''}
+    <ol class="bc-steps">${steps.map(s=>`<li>${s}</li>`).join('')}</ol>${pays}${nums}${o.after||''}</div>`;
 }
 let REPLAY=null; // replayed 2025-26 NFL bets (public/replay_bets.json), loaded once
 async function loadReplay(){ if(REPLAY) return REPLAY; try{ const r=await fetch('/replay_bets.json'); if(r.ok) REPLAY=await r.json(); }catch(e){} return REPLAY||{bets:[]}; }
@@ -348,7 +383,7 @@ async function loadPicks(){
           <div><b>${money(rr.pl||0)}</b><span>profit, $1 contract each</span></div>
           <div><b>${rr.roi==null?'–':(rr.roi>0?'+':'')+(rr.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
         </div>
-        <p class="sub">${V.list.filter(p=>p.status==='open').length?`${V.list.filter(p=>p.status==='open').length} waiting on a final. `:''}${V.real&&(V.real.n)?`Realistic, Polymarket US order book with fees: ${V.real.w}–${V.real.l}, ${money(V.real.pl)}${V.real.roi!=null?` (${V.real.roi>0?'+':''}${(V.real.roi*100).toFixed(1)}%)`:''}. `:''}${V.auto?`Game bets: ${V.auto.w}–${V.auto.l}, ${money(V.auto.pl||0)}. `:''}${V.passes?`${V.passes} game${V.passes>1?'s':''} had no bet in this tier. `:''}${nn&&nn<50?`${nn} settled so far, still noise; it takes a few hundred to mean much.`:''}</p>
+        <p class="sub">${V.list.filter(p=>p.status==='open').length?`${V.list.filter(p=>p.status==='open').length} waiting on a final. `:''}${V.real&&(V.real.n)?`Realistic, Polymarket US order book with fees: ${V.real.w}–${V.real.l}, ${money(V.real.pl)}${V.real.roi!=null?` (${V.real.roi>0?'+':''}${(V.real.roi*100).toFixed(1)}%)`:''}. `:''}${V.auto?`Game bets: ${V.auto.w}–${V.auto.l}, ${money(V.auto.pl||0)}. `:''}${tab==='all'&&d.lean&&(d.lean.paper.w+d.lean.paper.l+d.lean.open)?`Small-edge bets (own record, not in the numbers above): ${d.lean.paper.w}–${d.lean.paper.l}, ${money(d.lean.paper.pl||0)}${d.lean.paper.roi!=null?` (${d.lean.paper.roi>0?'+':''}${(d.lean.paper.roi*100).toFixed(1)}%)`:''}${d.lean.open?`, ${d.lean.open} open`:''}. `:''}${V.passes?`${V.passes} game${V.passes>1?'s':''} had no bet in this tier. `:''}${nn&&nn<50?`${nn} settled so far, still noise; it takes a few hundred to mean much.`:''}</p>
         <details ${showReplay?'open':''}><summary>Past bets (${V.list.length}${showReplay&&rp.length?` + ${rp.length} replayed`:''})</summary>
           ${rp.length?`<label class="replaytoggle"><input type="checkbox" id="replayToggle" ${showReplay?'checked':''}> Add ${rp.length} replayed bets from the 2025-26 NFL seasons (model built only from earlier seasons; not counted in the record)</label>`:''}
           <table>${head}<tbody>${past.map(row).join('')}</tbody></table></details>
@@ -363,11 +398,14 @@ async function loadPicks(){
   try{
     const r=await fetch(`/api/picks/leading?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json(), el=$('lead');
     const anyLive=data&&(data.games||[]).some(g=>g.state==='in');
-    if(!d.bets.length&&!anyLive){ el.hidden=true; return; }
-    el.innerHTML=`<h2>Leading bets right now <small>Polymarket US and Kalshi bets where the fair price (halfway between model and market) still beats what you'd pay. Price is what a $10 order fills at on that venue's live order book, fee included, re-checked every 10 seconds and cleared on every new play. Red OLD means don't count on that price.</small></h2>
-      ${d.bets.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th><th></th></tr></thead><tbody>${d.bets.map(b=>`<tr><td><b>${esc(b.sel)}</b>${ageTag((b.book&&b.book.at)||b.at)}${b.tier?`<span class="tagtier t-${b.tier}">${b.tier==='low'?'low risk':b.tier==='high'?'high risk':'medium'}</span>`:''} <span style="color:var(--muted)">${esc(b.matchup||'')}, ${esc(b.type)}${b.clock?`, ${esc(b.clock)}`:''}${b.score?`, ${esc(b.score)}`:''}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td>${pc(b.fair)}</td><td class="edge">+${((b.fairEdge??b.edge)*100).toFixed(1)}</td><td><a class="go" href="${GAME}?event=${b.event}">Open game ›</a></td></tr>${b.how?`<tr class="howrow"><td colspan="7">${howBox(b.how)}</td></tr>`:''}`).join('')}</tbody></table>
-        <p class="sub" style="margin-top:8px">Open a game and look under Betting for the reasoning behind each one. Gaps over 20 points are skipped as likely stale prices.</p>`
-      :'<p><b>No live bets right now.</b> <span class="sub">No moneyline, spread or total on Polymarket US or Kalshi clears the bar at a price $10 can actually buy on the order book.</span></p>'}`;
+    const leans=d.leans||[];
+    if(!d.bets.length&&!leans.length&&!anyLive){ el.hidden=true; return; }
+    const gm=b=>`<a href="${GAME}?event=${b.event}">${esc(b.matchup||'Open game')} ›</a>${b.clock?` · ${esc(b.clock)}`:''}${b.score?` · ${esc(b.score)}`:''}`;
+    el.innerHTML=`<h2>Leading bets right now <small>Every price is what a $10 order fills at on the live Polymarket US or Kalshi order book, fee included, re-checked every 10 seconds. Red OLD means don't count on it.</small></h2>
+      ${d.bets.length?`<div class="bcards">${d.bets.map(b=>betCard(b,{at:(b.book&&b.book.at)||b.at,game:gm(b)})).join('')}</div>`
+        :'<p class="bc-none"><b>No main bets right now.</b> <span class="sub">Nothing on Polymarket US or Kalshi beats a price $10 can actually buy by the main bar.</span></p>'}
+      <h3 style="margin:14px 0 4px;font-size:17px">Small edges <span class="sub" style="font-weight:500">more lines, lower confidence: the model prefers these by 1 to 3 points after fees. Untested; bet smaller.</span></h3>
+      ${leans.length?`<div class="bcards">${leans.map(b=>betCard(b,{lean:true,at:(b.book&&b.book.at)||b.at,game:gm(b)})).join('')}</div>`:'<p class="bc-none sub">None right now.</p>'}`;
     el.hidden=false; tickAges();
   }catch(e){}
 }
@@ -377,10 +415,11 @@ async function renderSteady(d, RP, lg){
   const st=d&&d.steady; if(!st){ el.hidden=true; return; }
   let now={games:[]}; try{ const r=await fetch(`/api/picks/steady?league=${lg}`,{cache:'no-store'}); if(r.ok) now=await r.json(); }catch(e){}
   const R=st.paper, n=R.w+R.l, rp=lg==='nfl'&&st.rule&&st.rule.replay, list=[...st.open,...st.settled];
-  const cash=(now.held||[]).filter(h=>h.cashOut), cashT=cash.length?`<h3 style="margin:10px 0 4px;font-size:17px;color:#2E9E5B">Cash out now</h3><table><thead><tr><th>Sell</th><th>Market</th><th>Bought at</th><th>Sell price now</th><th></th></tr></thead><tbody>${cash.map(h=>`<tr><td><b>${esc(h.sel)}</b> <span style="color:var(--muted)">${esc(h.matchup||'')}</span></td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.venue)}</a>`:esc(h.venue)}</td><td>${c(h.price)}</td><td>${c(h.cashOut.bid)}</td><td class="won">+${Math.round(h.cashOut.pl*100)}¢</td></tr>${h.how?`<tr class="howrow"><td colspan="5">${howBox(h.how,true)}</td></tr>`:''}`).join('')}</tbody></table>`:'';
-  const live=now.games.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Pay at most</th><th>Model</th><th></th></tr></thead><tbody>${now.games.map(g=>{const b=g.bets[0];
-      return `<tr><td><b>${esc(b.sel)}</b>${ageTag((b.book&&b.book.at)||g.at)}${g.logged?' <span class="tagtier t-low">logged</span>':''} <span style="color:var(--muted)">${esc(g.matchup||'')}, ${esc(g.clock||'')}, ${esc(g.score||'')}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td><a class="go" href="${GAME}?event=${g.event}">Open game ›</a></td></tr>${b.how?`<tr class="howrow"><td colspan="5">${howBox(b.how)}</td></tr>`:''}`;}).join('')}</tbody></table>`
-    :'<p><b>No live steady picks right now.</b> <span class="sub">They show up here during live games, usually right after a score, a timeout or a quarter break, priced from the live Polymarket US or Kalshi order book.</span></p>';
+  const gmS=g=>`<a href="${GAME}?event=${g.event}">${esc(g.matchup||'Open game')} ›</a>${g.clock?` · ${esc(g.clock)}`:''}${g.score?` · ${esc(g.score)}`:''}`;
+  const cash=(now.held||[]).filter(h=>h.cashOut), cashT=cash.length?`<h3 style="margin:10px 0 4px;font-size:17px;color:#2E9E5B">Cash out now</h3><div class="bcards">${cash.map(h=>betCard({sel:h.sel,how:h.how||{venue:h.venue,url:h.url,buy:'Yes'}},{sell:true,game:gmS(h),
+      after:`<div class="bc-pays">Bought at ${c(h.price)}, sells now at <b>${c(h.cashOut.bid)}</b>: <b class="won">+${Math.round(h.cashOut.pl*100)}¢</b> a share.</div>`})).join('')}</div>`:'';
+  const live=now.games.length?`<div class="bcards">${now.games.map(g=>{const b=g.bets[0]; return betCard({...b,tier:'low'},{at:(b.book&&b.book.at)||g.at,game:gmS(g),extraTag:g.logged?' <span class="bc-tag t-low">logged</span>':''});}).join('')}</div>`
+    :'<p class="bc-none"><b>No live steady picks right now.</b> <span class="sub">They show up here during live games, usually right after a score, a timeout or a quarter break, priced from the live Polymarket US or Kalshi order book.</span></p>';
   const row=p=>`<tr><td><b>${esc(p.sel)}</b> <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.clock||'')}</span></td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.cashOut?'won':p.status}">${p.cashOut?`cashed at ${c(p.cashOut.bid)} +${Math.round(p.cashOut.pl*100)}¢`:p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
   el.innerHTML=`<h2>Steady picks <small>Low-risk favorites, from the one rule that held up on games the model had never seen. Not a sure thing.</small></h2>
     <ol class="how">
@@ -405,12 +444,12 @@ async function renderSteady(d, RP, lg){
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },10000); // 10s: steady picks and cash-outs are time-sensitive
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-05.7';
+const BUILD='2026-10-05.8';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.7'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.8'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

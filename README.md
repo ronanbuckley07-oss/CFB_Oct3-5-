@@ -142,6 +142,25 @@ market has moved past it or the bet is on a venue that can't be traded. With not
 "No live bets right now". Only order-book-checked bets count toward the one-bet-per-type limit for a watched game,
 so bets logged earlier on other venues no longer block new ones.
 
+## Small edges (more lines)
+
+Bets where the model and the market agree on the side but the fair price beats what you'd pay by only 1+ point (under
+the 2.5/3-point main bar), priced 35-95 cents, checked on the order book like every other bet (`LEAN` in
+`api/picks.mjs`). Up to 8 per game per run. They show in their own "Small edges" list on the game page and the home
+page, are logged once per contract per game with `lean: true`, and have their own record, kept out of every other
+record. Untested on the replay: treat them as unproven and bet smaller.
+
+## Bet cards (phone first)
+
+Every bet is a card: the bet in large type, then numbered steps (open the exchange, find the game, tap the market,
+buy Yes or No at this price or less), what has to happen for it to pay, what $10 buys and returns, the model's numbers
+and a live "checked Xs ago". Stale cards get a red "OLD · don't buy" banner. Kalshi spread and total cards link to
+that market's own event page. Logged bets are compact rows (newest first) with a "How to buy it now" card while the
+logged price is still available.
+
+Open bets logged before order-book checks (international Polymarket, or nothing to check) are voided on startup:
+removed from game lists and every record; they were never buyable at their logged price.
+
 ## Update speed
 
 - Scanner: every 10 seconds (was 30), re-simulating a game on every new play (was at most every 2 minutes). Prices for a game in the betting window, or with a steady pick possible or
