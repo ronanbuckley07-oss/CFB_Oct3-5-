@@ -241,13 +241,18 @@ function drawForm(summary){
       <label>End<input type="datetime-local" id="f_end" value="${toLocal(c.end)}"></label>
       <label>Leagues<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_cfb" ${c.leagues.includes('cfb')?'checked':''}> College</span><span><input type="checkbox" id="f_nfl" ${c.leagues.includes('nfl')?'checked':''}> NFL</span></span></label>
       <label>Mode<select id="f_mode"><option value="paper">Paper (no real money)</option><option value="live" ${live?'':'disabled'}>Live money${live?'':' (off in Render)'}</option></select></label>
+      <label>Sell when a position is up (%)<input type="number" id="f_tp" min="1" step="1" placeholder="off: hold to the final" value="${c.takeProfit??''}"></label>
+      <label>Sell when a position is down (%)<input type="number" id="f_sl" min="1" max="99" step="1" placeholder="off: hold to the final" value="${c.stopLossPct??''}"></label>
+      <label>Games<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_one" ${c.oneGame?'checked':''}> Only one game (the first one it bets on)</span></span></label>
     </div>
+    <p class="small" style="margin:4px 0 0">Return is what selling the position right now would bring, fees out, against what it cost. Example: bought for $1.00, sells now for $1.30 = up 30%. Leave a box empty to hold to the final. Steady picks also sell at 90¢.</p>
     <p class="small" id="apSum">${esc(summary||'')}</p>
     <div class="row"><button class="primary" id="apStart">Start autopilot</button><button id="apCancel">Cancel</button></div>`;
   $('apCancel').onclick=()=>{ apDraft=null; $('apForm').innerHTML=''; };
   $('apStart').onclick=async()=>{
     const cfg={budget:+$('f_budget').value,maxPerBet:+$('f_max').value,stopLoss:+$('f_stop').value,risk:$('f_risk').value,start:new Date($('f_start').value).toISOString(),end:new Date($('f_end').value).toISOString(),
-      leagues:[$('f_cfb').checked&&'cfb',$('f_nfl').checked&&'nfl'].filter(Boolean),mode:$('f_mode').value};
+      leagues:[$('f_cfb').checked&&'cfb',$('f_nfl').checked&&'nfl'].filter(Boolean),mode:$('f_mode').value,
+      takeProfit:+$('f_tp').value||null,stopLossPct:+$('f_sl').value||null,oneGame:$('f_one').checked};
     if(cfg.mode==='live'&&!confirm(`Start LIVE autopilot with up to $${cfg.budget} of real money?`)) return;
     const r=await post('/autopilot/start',{config:cfg}); const j=await r.json(); if(!r.ok){ $('apSum').innerHTML=`<span class="bad">${esc(j.error)}</span>`; return; }
     apDraft=null; load(); };

@@ -45,6 +45,9 @@ function ruleParse(text, now = new Date()) {
     stopLoss: near(/(?:stop|quit|pause)[^.]{0,30}?(?:down|lose|lost|loss of)\D{0,6}\$?\s?(\d+(?:\.\d+)?)/) ?? near(/(?:max(?:imum)? loss|loss limit)\D{0,8}\$?\s?(\d+(?:\.\d+)?)/),
     risk: /high|aggress|underdog|long ?shot|big payout|yolo/.test(t) ? 'high' : /low|safe|conservative|careful|favorite/.test(t) ? 'low' : 'medium',
     leagues: /nfl|pro football/.test(t) && !/college|cfb|ncaa/.test(t) ? ['nfl'] : /college|cfb|ncaa/.test(t) && !/nfl/.test(t) ? ['cfb'] : ['cfb', 'nfl'],
+    takeProfit: near(/(?:take profit|sell|cash out)[^.]{0,25}?(?:up|above|over|at|gain(?:s|ing)?)\D{0,6}(\d+(?:\.\d+)?)\s?%/) ?? near(/(?:take profit|profit target)\D{0,8}(\d+(?:\.\d+)?)\s?%/),
+    stopLossPct: near(/(?:sell|get out|cut)[^.]{0,25}?(?:down|below|loses?|losing)\D{0,6}(\d+(?:\.\d+)?)\s?%/) ?? near(/stop[- ]?loss\D{0,8}(\d+(?:\.\d+)?)\s?%/),
+    oneGame: /\b(one|1|single)\s+game\b/.test(t),
   };
   let start = new Date(now), end = null;
   const hrs = t.match(/(?:next|for)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/), until = t.match(/until\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
@@ -59,7 +62,7 @@ function ruleParse(text, now = new Date()) {
 }
 async function claudeParse(text, now) {
   const key = process.env.ANTHROPIC_API_KEY; if (!key) return null;
-  const sys = `Turn the user's instructions for a sports-betting autopilot into JSON only, no prose. Fields: budget (dollars total), maxPerBet (dollars), stopLoss (dollars of loss that stops the run), risk ("low"|"medium"|"high"), leagues (array of "cfb","nfl"), start and end (ISO 8601 with timezone; now is ${now.toISOString()}, the user is in US Eastern time). If something isn't said, use: maxPerBet = budget/8, stopLoss = budget/2, risk "medium", both leagues, start now, end 11:59pm Eastern today.`;
+  const sys = `Turn the user's instructions for a sports-betting autopilot into JSON only, no prose. Fields: budget (dollars total), maxPerBet (dollars), stopLoss (dollars of loss that stops the run), risk ("low"|"medium"|"high"), leagues (array of "cfb","nfl"), takeProfit (percent return at which to sell a position, or null), stopLossPct (percent loss at which to sell a position, or null), oneGame (true to bet on one game only), start and end (ISO 8601 with timezone; now is ${now.toISOString()}, the user is in US Eastern time). If something isn't said, use: maxPerBet = budget/8, stopLoss = budget/2, risk "medium", both leagues, start now, end 11:59pm Eastern today.`;
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', signal: AbortSignal.timeout(20000),
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
@@ -72,7 +75,9 @@ export function clampConfig(c, limits, live) {
   const n = (v, d) => (isFinite(+v) && +v > 0 ? +v : d);
   const out = { budget: Math.min(n(c.budget, 50), 100000), maxPerBet: n(c.maxPerBet, 5), stopLoss: n(c.stopLoss, 25),
     risk: RISK[c.risk] ? c.risk : 'medium', leagues: (Array.isArray(c.leagues) ? c.leagues : ['cfb', 'nfl']).filter(l => l === 'cfb' || l === 'nfl'),
-    start: new Date(c.start || Date.now()).toISOString(), end: new Date(c.end || Date.now() + 3 * 3600000).toISOString(), mode: c.mode === 'live' ? 'live' : 'paper' };
+    start: new Date(c.start || Date.now()).toISOString(), end: new Date(c.end || Date.now() + 3 * 3600000).toISOString(), mode: c.mode === 'live' ? 'live' : 'paper',
+    // exits, per position: sell when its return reaches +takeProfit% or falls to -stopLossPct% (null = hold to the final)
+    takeProfit: +c.takeProfit > 0 ? Math.min(500, +c.takeProfit) : null, stopLossPct: +c.stopLossPct > 0 ? Math.min(99, +c.stopLossPct) : null, oneGame: !!c.oneGame };
   if (!out.leagues.length) out.leagues = ['cfb', 'nfl'];
   if (out.mode === 'live') { out.maxPerBet = Math.min(out.maxPerBet, limits.maxOrder); out.budget = Math.min(out.budget, limits.maxDaily); }
   out.maxPerBet = Math.min(out.maxPerBet, out.budget); out.stopLoss = Math.min(out.stopLoss, out.budget);
@@ -82,7 +87,8 @@ export function clampConfig(c, limits, live) {
 }
 export const describe = c => `${c.mode === 'live' ? 'LIVE money' : 'Paper (no real orders)'}: up to $${c.budget} total, at most $${c.maxPerBet} a bet, `
   + `${RISK[c.risk].label}, ${c.leagues.map(l => l === 'nfl' ? 'NFL' : 'college').join(' and ')}, from ${new Date(c.start).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} `
-  + `to ${new Date(c.end).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} ET, stop after losing $${c.stopLoss}.`;
+  + `to ${new Date(c.end).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} ET, stop after losing $${c.stopLoss}.`
+  + `${c.oneGame ? ' One game only.' : ''} Sell a position ${c.takeProfit || c.stopLossPct ? [c.takeProfit ? `when it's up ${c.takeProfit}%` : '', c.stopLossPct ? `when it's down ${c.stopLossPct}%` : ''].filter(Boolean).join(' or ') : 'only at the final'}${' (steady picks also at 90¢)'}.`;
 
 // ---------- learning how much to trust the model ----------
 export function learnTrust(picks) {
@@ -110,24 +116,60 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
     const openCost = T.filter(t => t.status === 'open').reduce((a, t) => a + t.cost, 0);
     return { bets: T.length, spent: +spent.toFixed(2), realized: +pl.toFixed(2), openCost: +openCost.toFixed(2), won: settled.filter(t => t.status === 'won' || (t.status === 'cashed' && t.pl > 0)).length, cashed: settled.filter(t => t.status === 'cashed').length, lost: settled.filter(t => t.status === 'lost').length };
   }
-  // Steady positions are sold once that side's price reaches 90 cents, as the rule says. Paper mode sells at the bid
-  // (fee out). Live mode logs "cash out now" and leaves the sale to you: the sell path hasn't been tested against the
-  // exchange, and a wrong order type could open a new position instead of closing this one.
-  async function cashOuts(A) {
-    for (const t of db.trades.filter(t => t.run === A.id && t.steady && t.status === 'open' && t.qty > 0)) {
+  // What selling `qty` of a position would bring right now: walk the side we'd sell into. YES positions sell into YES
+  // bids; NO positions (held as short YES) close by buying YES from the offers, worth 1 - price per share to us.
+  function sellFill(bk, outcome, qty) {
+    const levels = outcome === 'YES' ? bk.bids.map(l => ({ px: l.px, qty: l.qty })) : bk.offers.map(l => ({ px: 1 - l.px, qty: l.qty }));
+    let left = qty, gross = 0, worst = null;
+    for (const l of levels) { if (left <= 0) break; const take = Math.min(left, l.qty); gross += take * l.px; left -= take; worst = l.px; }
+    if (left > 0) return null; // not enough on the book to sell the whole position at once: wait
+    const fee = takerFee(qty, gross / qty);
+    return { proceeds: +(gross - fee).toFixed(2), avg: gross / qty, worst, fee };
+  }
+  // Exits, checked for every open position of this run on every tick:
+  //   steady picks: sold when their side's price reaches 90c (the rule);
+  //   any position: sold when its return (what selling now brings, fees out, vs. what it cost) reaches +takeProfit%
+  //   or falls to -stopLossPct%, if you set them.
+  // Paper mode records the sale at the book. Live mode sends a limit order, immediate-or-cancel, at the worst level the
+  // sale needs minus the slippage allowance, so it can't fill worse than that. The close order is the reverse of the
+  // buy (sell YES / buy back YES); if the exchange ever treated it as a new position instead, holding both sides of one
+  // market locks in the same value until settlement, so it still can't add risk.
+  async function exits(A) {
+    const c = A.config;
+    for (const t of db.trades.filter(t => t.run === A.id && t.status === 'open' && t.qty > 0)) {
       try {
-        const bk = await api.book(t.league, t.slug), bid = t.outcome === 'YES' ? bk.bids[0]?.px : bk.offers[0] ? 1 - bk.offers[0].px : null,
-          ask = t.outcome === 'YES' ? bk.offers[0]?.px : bk.bids[0] ? 1 - bk.bids[0].px : null;
-        if (bid == null || ask == null || (bid + ask) / 2 < STEADY.cashOut) continue;
-        if (t.mode === 'paper') {
-          const proceeds = t.qty * bid - takerFee(t.qty, bid);
-          Object.assign(t, { status: 'cashed', pl: +(proceeds - t.cost).toFixed(2), cashedAt: new Date().toISOString(), cashBid: bid });
-          log(`Cashed out ${t.sel} (${t.matchup}): sold ${t.qty} @ ${Math.round(bid * 100)}¢, ${t.pl >= 0 ? '+' : ''}$${t.pl.toFixed(2)}.`); save();
-        } else if (!t.cashFlagged) { t.cashFlagged = new Date().toISOString(); log(`CASH OUT NOW: ${t.sel} (${t.matchup}) is at ${Math.round(bid * 100)}¢. Sell your ${t.qty} shares on Polymarket US.`); save(); }
-      } catch {}
+        const bk = await api.book(t.league, t.slug), s = sellFill(bk, t.outcome, t.qty); if (!s) continue;
+        const bid = t.outcome === 'YES' ? bk.bids[0]?.px : bk.offers[0] ? 1 - bk.offers[0].px : null, ask = t.outcome === 'YES' ? bk.offers[0]?.px : bk.bids[0] ? 1 - bk.bids[0].px : null;
+        const ret = (s.proceeds - t.cost) / t.cost, mid = bid != null && ask != null ? (bid + ask) / 2 : null;
+        const why = t.steady && mid != null && mid >= STEADY.cashOut ? 'steady pick reached 90¢'
+          : c.takeProfit != null && ret * 100 >= c.takeProfit ? `up ${(ret * 100).toFixed(0)}% (take profit at +${c.takeProfit}%)`
+          : c.stopLossPct != null && ret * 100 <= -c.stopLossPct ? `down ${(-ret * 100).toFixed(0)}% (stop loss at -${c.stopLossPct}%)` : null;
+        if (!why) continue;
+        if (t.mode === 'paper') { closeAs(t, t.qty, s.proceeds, s.avg, why); continue; }
+        if (t.exitTriedAt && Date.now() - Date.parse(t.exitTriedAt) < 30000) continue; // one live attempt per 30s per position
+        t.exitTriedAt = new Date().toISOString();
+        const floor = Math.max(0.01, +(s.worst - limits.slip).toFixed(2)); // the worst per-share price we accept for our side
+        const order = { slug: t.slug, outcome: t.outcome === 'YES' ? 'NO' : 'YES', qty: t.qty, limitYesPx: t.outcome === 'YES' ? floor : +(1 - floor).toFixed(2) };
+        let r; try { r = await trader.place(order); } catch (e) { log(`Couldn't sell ${t.sel}: ${e.message || e}. Will retry.`); save(); continue; }
+        let q = 0, gross = 0, fee = 0;
+        for (const x of ((r && r.executions) || []).filter(x => /FILL/.test(x.type || ''))) { const sh = +x.lastShares || 0, px = +(x.lastPx && x.lastPx.value) || 0;
+          q += sh; gross += sh * (t.outcome === 'YES' ? px : 1 - px); fee += +(x.commissionNotionalCollected && x.commissionNotionalCollected.value) || 0; }
+        if (!q) { log(`Tried to sell ${t.sel} (${why}): no fill at ${Math.round(floor * 100)}¢ or better. Will retry.`); save(); continue; }
+        closeAs(t, Math.min(q, t.qty), +(gross - fee).toFixed(2), gross / q, why);
+      } catch (e) { /* one position's book failing must not stop the others */ }
     }
   }
-  let busy = false, errors = 0;
+  // Record a sale of q shares of trade t for `proceeds`. A partial sale splits the trade: the sold part is closed, the
+  // rest stays open with its share of the cost.
+  function closeAs(t, q, proceeds, avg, why) {
+    const part = q / t.qty, cost = +(t.cost * part).toFixed(2), now = new Date().toISOString();
+    if (q < t.qty) {
+      db.trades.push({ ...t, qty: q, cost, status: 'cashed', pl: +(proceeds - cost).toFixed(2), cashedAt: now, cashBid: +avg.toFixed(4), exit: why, splitFrom: t.orderId || t.at });
+      t.qty -= q; t.cost = +(t.cost - cost).toFixed(2);
+    } else Object.assign(t, { status: 'cashed', pl: +(proceeds - t.cost).toFixed(2), cashedAt: now, cashBid: +avg.toFixed(4), exit: why });
+    log(`Sold ${q} ${t.sel} (${t.matchup}) @ ${Math.round(avg * 100)}¢: ${why}. ${proceeds - cost >= 0 ? '+' : '−'}$${Math.abs(proceeds - cost).toFixed(2)}.`); save();
+  }
+  let busy = false, errors = 0; const skipNoted = new Set();
   async function tick() {
     const A = db.autopilot; if (!A || A.status !== 'running' || busy) return;
     busy = true;
@@ -139,9 +181,16 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
       if (-st.realized >= c.stopLoss) return stop(`loss limit hit (down $${(-st.realized).toFixed(2)})`);
       let room = c.budget - st.spent; if (room < 1) return stop('budget used');
       if (c.mode === 'live' && !enabledLive()) return stop('live trading switched off in Render');
+      if (c.mode === 'live' && !trader) return stop('no Polymarket US keys in Render');
       const trust = learnTrust(api.picksAll());
       const tiers = RISK[c.risk].tiers;
-      await cashOuts(A);
+      await exits(A);
+      // one game only: after the first fill, only that game; once its bets are all closed or graded, the run is done
+      if (c.oneGame && A.lockedEvent) {
+        const mine = runTrades().filter(t => t.event === A.lockedEvent && t.qty > 0 && t.status !== 'void');
+        if (mine.length && !mine.some(t => t.status === 'open') && (mine.some(t => t.status === 'won' || t.status === 'lost' || t.status === 'push')
+            || Date.now() - Math.max(...mine.map(t => Date.parse(t.cashedAt || t.at))) > 30 * 60000)) return stop(`one game done (${A.lockedMatchup})`);
+      }
       // Candidates: steady picks first (the rule that held up on the replay), then the model's tier bets
       // Candidates: every pick the model logs (steady picks, tier bets; small edges too on the High setting), copied
       // within 2 minutes on Polymarket US at no more than the logged price
@@ -151,15 +200,18 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
         .map(p => ({ src: kindOf(p), league: p.league, event: p.event, matchup: p.matchup, sel: p.sel, type: p.type, teamId: p.teamId, by: p.by, line: p.line, over: p.over,
           tier: p.steady ? 'low' : p.tier, model: p.model, mid: p.why && p.why.mid != null ? p.why.mid : p.price, fair: p.fair, logged: p.price, trade: p.trade, key: p.key }))
         .filter(b => b.model - b.mid <= MAX_GAP)                                     // big gaps are information the model lacks
+        .filter(b => !(c.oneGame && A.lockedEvent) || b.event === A.lockedEvent)     // one game only: stay on it
         .filter(b => !runTrades().some(t => t.pick === b.key || (t.qty > 0 && t.slug === b.trade.slug)))  // each pick and market once
         .sort((a, b) => (a.src === 'steady' ? 0 : a.src === 'model' ? 1 : 2) - (b.src === 'steady' ? 0 : b.src === 'model' ? 1 : 2));
       let bought = 0;
       const inGame = ev => db.trades.filter(t => t.qty > 0 && t.event === ev && (t.status === 'open' || t.run === A.id));
       for (const b of cands) {
         if (bought >= PER_TICK || room < 1) break;
+        if (c.oneGame && A.lockedEvent && b.event !== A.lockedEvent) continue;
+        try {
         const held = inGame(b.event);
         if (held.some(t => t.status === 'open' && conflicts(t, b))) continue;           // never the other side of an open bet
-        const gameRoom = GAME_SHARE * c.budget - held.filter(t => t.status === 'open').reduce((a, t) => a + t.cost, 0);
+        const gameRoom = (c.oneGame ? 1 : GAME_SHARE) * c.budget - held.filter(t => t.status === 'open').reduce((a, t) => a + t.cost, 0); // one-game runs put the whole budget on that game
         if (gameRoom < 1) continue;                                                       // this game already has its share
         const w = b.src === 'steady' ? 0.5 : trust[b.tier].w, p = w * b.model + (1 - w) * b.mid;
         const bk = await api.book(b.league, b.trade.slug);
@@ -197,7 +249,9 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
         }
         db.trades.push(t);
         log(`${t.qty > 0 ? 'Bought' : 'Tried'} ${b.sel} (${b.matchup}): ${t.qty} @ ${t.avg != null ? Math.round(t.avg * 100) + '¢' : '–'}, $${t.cost} total. Model ${(b.model * 100).toFixed(1)}%, market ${(b.mid * 100).toFixed(1)}%, trust ${Math.round(w * 100)}% model, so ${(p * 100).toFixed(1)}% vs ${Math.round(cost1 * 100)}¢.`);
+        if (t.qty > 0 && c.oneGame && !A.lockedEvent) { A.lockedEvent = b.event; A.lockedMatchup = b.matchup; log(`One game only: ${b.matchup}.`); }
         save(); bought++; if (t.qty > 0) room -= t.cost; // up to PER_TICK buys per check; each walks its own fresh order book
+        } catch (e) { const k = `${b.key}|${e.message}`; if (!skipNoted.has(k)) { skipNoted.add(k); log(`Skipped ${b.sel}: ${e.message || e}`); } } // one bad book or order mustn't stop the rest (logged once)
       }
     } catch (e) { log(`Error: ${e.message || e}`); }
     finally { busy = false; }

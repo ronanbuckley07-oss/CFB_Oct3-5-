@@ -257,9 +257,20 @@ every 15 seconds with up to 3 buys per check. Guard rails:
   same-side bets are fine;
 - at most a quarter of the budget in any one game;
 - model-minus-market gaps over 10 points are skipped, like the logged bets;
-- steady picks: only at 65-85¢, flat stake of a tenth of the budget, cashed out at 90¢ (paper: sold at the bid; live:
-  the log says "CASH OUT NOW" and the sale is left to you, since the sell path hasn't been tested against the exchange);
+- steady picks: only at 65-85¢, flat stake of a tenth of the budget (at least $1), sold at 90¢;
 - every other copied pick gets at least $1 (quarter Kelly on a small budget otherwise rounds most to zero).
+Exits (set on /trade): sell a position when its return reaches +X% or falls to -Y% (return = what selling it right
+now brings, fees out, against what it cost; empty = hold to the final). Checked every 15 seconds for every open
+position of the run. Paper mode records the sale at the book. Live mode sends a limit, immediate-or-cancel order at
+the worst level the sale needs minus the slippage allowance (never fills worse), retries every 30 seconds if it
+doesn't fill, and splits the position on a partial fill. The close is the reverse of the buy (sell YES; for a NO
+position, buy YES back); if the exchange ever treated it as a new position, holding both sides of one market locks in
+the same value until settlement, so it can't add risk.
+One game only: after its first fill the run stays on that game (the whole budget is for it), and stops when that
+game's positions are all graded or sold.
+Robustness: one candidate's failing order book or order no longer stops the others in the same check (logged once);
+live mode stops at once without Polymarket US keys, after 3 order errors in a row, on the kill switch, at the loss
+limit, at the end of the window, or when Render's switches are turned off.
 It copies the model's picks; nothing here can promise the paper record's return, much of which came from prices that
 weren't actually available (see the holdout test above).
 
