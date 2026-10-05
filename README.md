@@ -122,7 +122,9 @@ them in any record.
 Every bet the site shows or logs is a Polymarket US or Kalshi contract checked on that venue's live order book: the
 price is the average a `PAPER_STAKE` ($10) order fills at, fee included (Polymarket US 6.95%, Kalshi 7%, x p x (1-p)),
 and a book too thin to fill it means no bet. Kalshi's book is read from its public `/markets/{ticker}/orderbook`
-(it lists bids only; a NO bid at x is a YES offer at 1 - x). International Polymarket stays in the market table for
+(it lists bids only; a NO bid at x is a YES offer at 1 - x). To check the Kalshi import on the live server, open `/api/nfl?kind=kalshicheck&event=ID` (or `/api/espn?...` for
+college): every Kalshi contract for the game with its ticker, quote, best book prices and what $10 fills at right now.
+International Polymarket stays in the market table for
 comparison but is never a bet: it can't be traded from the US. The trade desk and autopilot still trade Polymarket US
 only (the keys are for that exchange); Kalshi bets are paper picks you can place yourself.
 

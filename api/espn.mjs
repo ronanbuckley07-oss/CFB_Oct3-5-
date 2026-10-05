@@ -1,4 +1,4 @@
-import { createPmusData } from './pmus.mjs';
+import { createPmusData, simulateFill } from './pmus.mjs';
 // ESPN proxy, served at /api/espn by server.mjs. The browser never calls ESPN directly, and every ESPN response is
 // memoized briefly in memory, so a hundred people watching the board cost the same as one.
 //   ?kind=scoreboard[&scope=top|fbs][&date=YYYYMMDD] -> this week's games, trimmed for the home page (no sims)
@@ -59,6 +59,25 @@ const handler = async (req) => {
     if (kind === 'box') {
       if (!event) return json({ error: 'missing event' }, 400);
       return json(trimBox(await get(`${BASE}/summary?event=${event}`, 8000)), 200, 10);
+    }
+    // Proof that Kalshi lines are coming in: every Kalshi contract for the game with its ticker, the quote, and what $10
+    // really fills at on Kalshi's live order book right now (fee included). /api/espn?kind=kalshicheck&event=ID
+    if (kind === 'kalshicheck') {
+      if (!event) return json({ error: 'missing event' }, 400);
+      const mk = await markets(event, u.searchParams.get('kalshi'), null, false, true), k = mk.kalshi || {};
+      if (!k.found) return json({ found: false, note: 'No Kalshi game matched this event', error: k.error || null, checked: k.checked ?? null }, 200, 0);
+      const rows = [];
+      const add = (sel, q, ticker, outcome) => { if (ticker) rows.push({ sel, ticker, outcome, quoteBid: q.bid ?? null, quoteAsk: q.ask ?? null }); };
+      for (const side of ['away', 'home']) if (k[side] && !k[side].implied) add(`${side} to win`, k[side], k[side].ticker, 'YES');
+      for (const sp of k.spreads || []) { add(`${sp.side} by more than ${sp.by}`, sp, sp.ticker, 'YES'); add(`${sp.side === 'away' ? 'home' : 'away'} ${sp.by} or less (NO)`, { bid: sp.ask != null ? 1 - sp.ask : null, ask: sp.bid != null ? 1 - sp.bid : null }, sp.ticker, 'NO'); }
+      for (const t of k.totals || []) { add(`Over ${t.line}`, { ask: t.ask }, t.ticker, t.yesOver === false ? 'NO' : 'YES'); add(`Under ${t.line}`, { ask: t.askOther }, t.ticker, t.yesOver === false ? 'YES' : 'NO'); }
+      const out = await Promise.all(rows.map(async r => {
+        try { const bk = await handler.kalshiBook(r.ticker), f = simulateFill(bk, r.outcome, 10, 0.97, 0.07);
+          const yes = r.outcome === 'YES', bb = bk.bids[0]?.px, bo = bk.offers[0]?.px; // prices for the side being bought
+          return { ...r, bookBestBid: (yes ? bb : bo != null ? +(1 - bo).toFixed(4) : null) ?? null, bookBestOffer: (yes ? bo : bb != null ? +(1 - bb).toFixed(4) : null) ?? null, fill10: f.qty ? { contracts: f.qty, avg: +f.avg.toFixed(4), fee: f.fee, cost: f.cost, perContract: +(f.cost / f.qty).toFixed(4), full: f.full } : null }; }
+        catch (e) { return { ...r, error: String(e.message || e) }; }
+      }));
+      return json({ found: true, title: k.title, ticker: k.ticker, url: k.url, at: new Date().toISOString(), contracts: out }, 200, 0);
     }
     if (kind === 'markets') {
       if (!event) return json({ error: 'missing event' }, 400);
@@ -673,9 +692,10 @@ function json(body, status = 200, maxAge = 0) {
 handler.pmusBook = slug => (PMUS = PMUS || createPmusData(get)).book(slug);
 // Kalshi order book (public, no key), in the same shape as Polymarket US: YES bids and YES offers, prices 0-1.
 // Kalshi lists resting bids only, for YES and for NO; a NO bid at x is someone selling YES at 1 - x.
-// Newer responses carry dollar strings (yes_dollars: [["0.4500", 120]]), older ones cents (yes: [[45, 120]]).
+// Shape (from Kalshi's official SDK, kalshi_python_sync 3.2.0): { orderbook: { yes: [[cents, count]], no: [...],
+// yes_dollars: [["0.4500", "120"]], no_dollars: [...] } }. Dollar strings are preferred; counts can be strings.
 handler.kalshiBook = async ticker => {
-  const d = await getAny(KALSHI.map(b => `${b}/markets/${encodeURIComponent(ticker)}/orderbook`), 1500);
+  const d = await getAny(KALSHI.map(b => `${b}/markets/${encodeURIComponent(ticker)}/orderbook?depth=10`), 1500);
   const ob = d.orderbook_fp || d.orderbook || {};
   const lv = (dollars, cents) => (dollars || cents || []).map(l => ({ px: dollars ? +l[0] : +l[0] / 100, qty: +l[1] || 0 })).filter(l => l.px > 0 && l.px < 1 && l.qty > 0);
   const yes = lv(ob.yes_dollars, ob.yes), no = lv(ob.no_dollars, ob.no);
