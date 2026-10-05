@@ -175,6 +175,13 @@ new tier and small-edge bets, re-learned every 30 minutes, so blocks lift if the
 their own rule. `/api/picks/audit` returns the voided counts by reason, the record by feature and the current blocks;
 the home page shows it under "What the model learned".
 
+## Owner reset (Oct 5, 2026)
+
+Every bet logged from 8:00 PM ET Sunday Oct 4 (the Lions-Panthers night game) on is removed, along with the autopilot's
+paper trades from that time; earlier bets the cleanup had voided are restored, so the running total is what it was
+before that game. Removed bets keep their result for the learning. `/api/picks/removed` lists them with what the model
+saw (price, model, market, gap, clock, score, fill) for review.
+
 ## Small edges (more lines)
 
 Bets where the model and the market agree on the side but the fair price beats what you'd pay by only 1+ point (under

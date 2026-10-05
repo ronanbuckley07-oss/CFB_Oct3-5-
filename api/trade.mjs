@@ -44,6 +44,16 @@ export function createTrading({ api, dir, leading, picks }) {
     }
     db.cleanupV = 2; if (n) console.log(`trade: cleanup voided ${n} paper trades`); save();
   }
+  // Owner reset (Oct 5, 2026): autopilot paper trades from last night's game (from 8 PM ET Oct 4) are removed; earlier
+  // paper trades the cleanup voided are restored. Real-money trades are never touched.
+  if ((db.resetV || 0) < 1) {
+    const FROM = '2026-10-05T00:00:00.000Z';
+    for (const t of db.trades.filter(t => t.mode === 'paper')) {
+      if (t.at >= FROM) { if (t.status !== 'void') { t.voidedStatus = t.status; t.status = 'void'; t.voidReason = "removed by owner: last night's game"; } }
+      else if (t.status === 'void') { t.status = t.voidedStatus || 'open'; delete t.voidedStatus; delete t.voidReason; }
+    }
+    db.resetV = 1; save();
+  }
 
   // ---------- auth: one password, an HMAC-signed session cookie, strict same-site ----------
   const sign = s => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');

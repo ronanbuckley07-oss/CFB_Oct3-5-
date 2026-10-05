@@ -137,6 +137,28 @@ export function createPicks({ api, dir }) {
   }
   if ((db.cleanupV || 0) < 2) { cleanup(); db.cleanupV = 2; dirty = true; }
 
+  // ---------- owner reset (Oct 5, 2026): drop last night's game, restore the record from before it ----------
+  // Every bet logged from 8:00 PM ET Sunday Oct 4 (the Lions-Panthers night game) on is removed. Earlier bets that the
+  // cleanup voided are restored to how they were, so the running total is what it was before that game. Removed bets
+  // keep their result in voidedStatus: the learning still uses them, and /api/picks/removed lists them for review.
+  const RESET_FROM = '2026-10-05T00:00:00.000Z', RESET_WHY = "removed by owner: last night's game (from 8 PM ET Oct 4)";
+  if ((db.resetV || 0) < 1) {
+    let removed = 0, restored = 0;
+    for (const p of db.picks) {
+      if (p.at >= RESET_FROM) { if (p.status !== 'void') { voidIt(p, RESET_WHY); removed++; } else { p.voidReason = `${RESET_WHY}; earlier: ${p.voidReason}`; } }
+      else if (p.status === 'void') { p.status = p.voidedStatus || 'open'; delete p.voidedStatus; delete p.voidReason; delete p.voidedAt; restored++; }
+    }
+    for (const [k, v] of Object.entries(db.auto)) if (v && v.at >= RESET_FROM) delete db.auto[k];
+    for (const k of Object.keys(db.steady || {})) if (db.steady[k] && db.steady[k].at >= RESET_FROM) delete db.steady[k];
+    db.resetV = 1; dirty = true; console.log(`picks: owner reset removed ${removed} bets from last night, restored ${restored} earlier bets`);
+  }
+  // What was removed, with what the model saw, for working out why those bets were bad
+  const removedList = () => db.picks.filter(p => p.status === 'void' && String(p.voidReason || '').startsWith('removed by owner')).map(p => ({
+    at: p.at, matchup: p.matchup, sel: p.sel, type: p.type, kind: p.steady ? 'steady' : p.lean ? 'small edge' : p.auto ? 'game bet' : 'main', tier: p.tier, venue: p.venue,
+    clock: p.clock, score: p.score, price: p.price, model: p.model, market: p.why ? p.why.mid : null, gap: p.why && p.why.mid != null ? +(p.model - p.why.mid).toFixed(3) : null,
+    fair: p.fair, fairEdge: p.fairEdge, result: p.voidedStatus, quoteAge: p.quoteAge ?? null, fill: p.fill ? { qty: p.fill.qty, avg: p.fill.avg, cost: p.fill.cost, pl: p.fill.pl ?? null } : null,
+    state: p.why ? p.why.state : null, pregame: p.why && p.why.start ? p.why.start.edge ?? null : null }));
+
   // ---------- learning: which kinds of bets lose ----------
   // Every settled bet (voided ones included, at their original result) is grouped by a few plain features. A kind of
   // bet is blocked for new tier and small-edge bets when it has 25+ settled results, returns worse than -15%, and does
@@ -522,5 +544,5 @@ export function createPicks({ api, dir }) {
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event) && p.status !== 'void');
   const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, audit: () => ({ ...audit(), learned, rules: LEARN }), relearn: learn, anchorAgg, contracts, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, removed: removedList, audit: () => ({ ...audit(), learned, rules: LEARN }), relearn: learn, anchorAgg, contracts, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }
