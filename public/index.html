@@ -389,6 +389,15 @@ async function loadPicks(){
           <table>${head}<tbody>${past.map(row).join('')}</tbody></table></details>
         ${phases.length?`<details><summary>When our bets hit</summary><table><thead><tr><th>When the bet was taken</th><th>Record</th><th>Win rate</th><th>Model said</th><th>Return</th></tr></thead><tbody>${phases.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.w}–${v.l}</td><td>${pc(v.pct)}</td><td>${pc(v.expected)}</td><td>${v.roi==null?'–':(v.roi>0?'+':'')+(v.roi*100).toFixed(1)+'%'}</td></tr>`).join('')}</tbody></table>
           <p class="sub" style="margin-top:8px">The window comes from replaying 2023 to 2025 NFL games against Vegas win probability: between Q3 7:30 and Q4 8:00 the model's disagreements hit 57.5% of the time when it said 58.2%, a +9% return over 269 bets. This table shows whether our own bets agree.</p></details>`:''}`;
+      // What the model learned: voided bets and why, kinds of bets now blocked, and the record by feature
+      try{ const au=await fetch('/api/picks/audit',{cache:'no-store'}).then(r=>r.ok?r.json():null);
+        if(au){ const L={gap:'Model vs market gap',phase:'When in the game',type:'Bet type',price:'Price',venue:'Exchange',kind:'List'};
+          const vo=Object.entries(au.voided||{}).sort((a,b)=>b[1]-a[1]), bl=(au.learned&&au.learned.blocks)||[];
+          const feat=Object.entries(au.features||{}).map(([k,vals])=>`<tr><td colspan="4" style="padding-top:8px"><b>${esc(L[k]||k)}</b></td></tr>`+Object.entries(vals).sort((a,b)=>b[1].n-a[1].n).map(([v,r])=>`<tr><td>${esc(v)}</td><td>${r.w}–${r.n-r.w}</td><td>${r.n?Math.round(r.w/r.n*100)+'%':'–'}</td><td class="${r.roi>0?'won':r.roi<0?'lost':''}">${r.roi==null?'–':(r.roi>0?'+':'')+(r.roi*100).toFixed(1)+'%'}</td></tr>`).join('')).join('');
+          el.insertAdjacentHTML('beforeend',`<details id="learnBox" ${window.__learnOpen?'open':''}><summary>What the model learned (${au.settled} settled bets)</summary>
+            <p class="sub" style="margin-top:6px"><b>Removed:</b> ${vo.length?vo.map(([r,n])=>`${n} · ${esc(r)}`).join('<br>'):'nothing'}. Removed by rule whether they won or lost; their results still count below, so the lessons stay.</p>
+            <p class="sub"><b>Blocked now:</b> ${bl.length?bl.map(b=>`${esc(L[b.feature]||b.feature)} = ${esc(b.value)} (${b.w}–${b.n-b.w}, ${(b.roi*100).toFixed(0)}%)`).join('; '):'nothing yet. A kind of bet is blocked once it has 25+ settled results and loses more than 15%.'}</p>
+            ${feat?`<table><thead><tr><th>Kind of bet</th><th>Record</th><th>Win rate</th><th>Return</th></tr></thead><tbody>${feat}</tbody></table>`:''}</details>`); const lb=$('learnBox'); if(lb) lb.ontoggle=()=>{ window.__learnOpen=lb.open; }; } }catch(e){}
       el.querySelectorAll('[data-rt]').forEach(bt=>bt.onclick=()=>{ try{localStorage.setItem('recTab',bt.dataset.rt);}catch(e){} loadPicks(); });
       const rt=el.querySelector('#replayToggle'); if(rt) rt.onchange=()=>{ try{localStorage.setItem('showReplay',rt.checked?'1':'0');}catch(e){} loadPicks(); };
       el.hidden=false;
@@ -444,12 +453,12 @@ async function renderSteady(d, RP, lg){
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },10000); // 10s: steady picks and cash-outs are time-sensitive
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-05.11';
+const BUILD='2026-10-05.12';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.11'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.12'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

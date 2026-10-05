@@ -159,6 +159,22 @@ wins 90.2%), so the problem was the inputs, not the math.
 Logged bets whose price fell (the bet is losing so far) show "now 40¢ · was 86¢" in neutral grey, not green, and
 "Still a bet now: how to buy it" only appears when that exact contract qualifies on the current play.
 
+## Cleanup and learning from bad bets
+
+On the first start after this change, every saved bet is checked against the current rules and voided if the rules
+would never have made it, whether it won or lost (removing only losers would flatter the record):
+- model more than 10 points off the market; order book couldn't fill $10; price check over 30 seconds old;
+- extra rungs: several lines on the same side of one game logged on the same play keep only the strongest;
+- conflicting sides in one game: the later bet goes.
+Autopilot paper trades get the same gap and conflicting-side checks (real-money trades are left alone). Voided bets
+keep their result (`voidedStatus`), so the learning still counts them.
+
+Learning: every settled bet is grouped by model-vs-market gap, time in the game, bet type and price. A group with 25+
+results, a return worse than -15%, and at least 15 points worse than the rest of that feature (also 25+) is blocked for
+new tier and small-edge bets, re-learned every 30 minutes, so blocks lift if the group recovers. Steady picks follow
+their own rule. `/api/picks/audit` returns the voided counts by reason, the record by feature and the current blocks;
+the home page shows it under "What the model learned".
+
 ## Small edges (more lines)
 
 Bets where the model and the market agree on the side but the fair price beats what you'd pay by only 1+ point (under

@@ -105,7 +105,7 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
   const log = (msg) => { if (!db.autopilot) return; db.autopilot.log.unshift({ at: new Date().toISOString(), msg }); db.autopilot.log = db.autopilot.log.slice(0, 120); };
   const runTrades = () => db.autopilot ? db.trades.filter(t => t.run === db.autopilot.id) : [];
   function stats() {
-    const T = runTrades().filter(t => t.qty > 0), spent = T.reduce((a, t) => a + t.cost, 0);
+    const T = runTrades().filter(t => t.qty > 0 && t.status !== 'void'), spent = T.reduce((a, t) => a + t.cost, 0);
     const settled = T.filter(t => t.status === 'won' || t.status === 'lost' || t.status === 'push' || t.status === 'cashed'), pl = settled.reduce((a, t) => a + (t.pl || 0), 0);
     const openCost = T.filter(t => t.status === 'open').reduce((a, t) => a + t.cost, 0);
     return { bets: T.length, spent: +spent.toFixed(2), realized: +pl.toFixed(2), openCost: +openCost.toFixed(2), won: settled.filter(t => t.status === 'won' || (t.status === 'cashed' && t.pl > 0)).length, cashed: settled.filter(t => t.status === 'cashed').length, lost: settled.filter(t => t.status === 'lost').length };

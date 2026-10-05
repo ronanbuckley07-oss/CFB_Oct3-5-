@@ -31,6 +31,19 @@ export function createTrading({ api, dir, leading, picks }) {
   let db = { trades: [], killed: false };
   try { db = Object.assign(db, JSON.parse(readFileSync(file, 'utf8'))); } catch {}
   const save = () => { try { mkdirSync(dir, { recursive: true }); writeFileSync(file + '.tmp', JSON.stringify(db)); renameSync(file + '.tmp', file); } catch (e) { console.error('trade: save failed', e.message); } };
+  // One-time cleanup of autopilot paper trades the current rules would never make (real-money trades are left alone:
+  // they happened). Voided whatever their result, which is kept in voidedStatus.
+  if ((db.cleanupV || 0) < 2) {
+    const sideOf = t => t.type === 'total' ? `total:${t.over ? 'over' : 'under'}` : `team:${t.teamId}`, kept = {};
+    let n = 0;
+    for (const t of db.trades.filter(t => t.mode === 'paper' && t.qty > 0 && t.status !== 'void').sort((a, b) => (a.at < b.at ? -1 : 1))) {
+      const w = t.trust, mid = w != null && w < 1 && t.fair != null && t.model != null ? (t.fair - w * t.model) / (1 - w) : null;
+      const g = kept[`${t.run}|${t.event}`] ||= [], clash = g.find(q => (q.type === 'total') === (t.type === 'total') && sideOf(q) !== sideOf(t));
+      const why = mid != null && t.model - mid > 0.10 ? 'model was more than 10 points off the market' : clash ? `other side of ${clash.sel} in the same game` : null;
+      if (why) { t.voidedStatus = t.status; t.status = 'void'; t.voidReason = why; n++; } else g.push(t);
+    }
+    db.cleanupV = 2; if (n) console.log(`trade: cleanup voided ${n} paper trades`); save();
+  }
 
   // ---------- auth: one password, an HMAC-signed session cookie, strict same-site ----------
   const sign = s => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');

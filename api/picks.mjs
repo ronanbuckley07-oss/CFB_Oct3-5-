@@ -95,6 +95,7 @@ export function createPicks({ api, dir }) {
   // their logged price. They're voided: off the game's list and out of every record. Graded ones stay as history.
   { let n = 0; for (const p of db.picks) if (p.status === 'open' && (!BUYABLE.has(p.venue) || !p.trade)) { p.status = 'void'; p.voidReason = 'logged before order-book price checks; never buyable at that price'; n++; }
     if (n) { console.log(`picks: voided ${n} unbuyable open bets`); try { mkdirSync(dir, { recursive: true }); writeFileSync(file + '.tmp', JSON.stringify(db)); renameSync(file + '.tmp', file); } catch {} } }
+
   let dirty = false;
   const save = () => {
     if (!dirty) return; dirty = false;
@@ -102,6 +103,78 @@ export function createPicks({ api, dir }) {
     catch (e) { console.error('picks: save failed', e.message); }
   };
   setInterval(save, 5000).unref();
+
+  // ---------- cleanup: void bets the current rules would never have made ----------
+  // Voided by rule, whatever they did: removing only the losers would make the record look better than it is.
+  // Each keeps its result in voidedStatus so the learning below still sees how that kind of bet turned out.
+  const sideOf = p => p.type === 'total' ? `total:${p.over ? 'over' : 'under'}` : `team:${p.teamId}`;
+  const voidIt = (p, why) => { p.voidedStatus = p.status; p.status = 'void'; p.voidReason = why; p.voidedAt = new Date().toISOString(); };
+  function cleanup() {
+    const live = () => db.picks.filter(p => p.status !== 'void'), n0 = live().length;
+    for (const p of live()) {
+      const mid = p.why && p.why.mid != null ? p.why.mid : null;
+      if (!p.steady && mid != null && p.model - mid > MAX_GAP) voidIt(p, 'model was more than 10 points off the market (something the market knew)');
+      else if (p.fill && (p.fill.qty === 0 || p.fill.full === false)) voidIt(p, "order book couldn't fill $10 at that price");
+      else if (p.quoteAge != null && p.quoteAge > QUOTE_MAX_AGE / 1000) voidIt(p, 'price check was over 30 seconds old');
+    }
+    // extra rungs: several lines on the same side of one game logged on the same play are one bet; keep the strongest
+    const groups = {};
+    for (const p of live()) if (!p.steady && (p.type === 'spread' || p.type === 'total')) (groups[`${p.league}|${p.event}|${p.type}|${sideOf(p)}|${p.clock}|${p.score}|${!!p.lean}`] ||= []).push(p);
+    for (const ps of Object.values(groups)) if (ps.length > 1) {
+      ps.sort((a, b) => (b.fairEdge ?? 0) - (a.fairEdge ?? 0));
+      for (const p of ps.slice(1)) voidIt(p, `extra rung of the same bet (kept ${ps[0].sel})`);
+    }
+    // conflicting sides: the later of two opposite bets in one game goes
+    const byGame = {};
+    for (const p of live().filter(p => !p.steady).sort((a, b) => (a.at < b.at ? -1 : 1))) {
+      const g = byGame[`${p.league}|${p.event}`] ||= [];
+      const clash = g.find(q => (q.type === 'total') === (p.type === 'total') && sideOf(q) !== sideOf(p));
+      if (clash) voidIt(p, `other side of an earlier bet in this game (${clash.sel})`); else g.push(p);
+    }
+    const n = n0 - live().length;
+    if (n) { console.log(`picks: cleanup voided ${n} bets`); dirty = true; }
+    return n;
+  }
+  if ((db.cleanupV || 0) < 2) { cleanup(); db.cleanupV = 2; dirty = true; }
+
+  // ---------- learning: which kinds of bets lose ----------
+  // Every settled bet (voided ones included, at their original result) is grouped by a few plain features. A kind of
+  // bet is blocked for new tier and small-edge bets when it has 25+ settled results, returns worse than -15%, and does
+  // at least 15 points worse than the other bets on the same feature (also 25+), so a bad night overall doesn't shut
+  // everything off; it only blocks what's worse than the rest. Exchange and list aren't blocked on. Blocks lift when the
+  // record recovers (re-learned every 30 minutes). Steady picks follow their own validated rule and aren't blocked.
+  const LEARN = { minN: 25, maxRoi: -0.15, worseBy: 0.15, features: ['gap', 'phase', 'type', 'price'] };
+  const band = c => c < 0.5 ? '35-50¢' : c < 0.65 ? '50-65¢' : c < 0.8 ? '65-80¢' : '80-95¢';
+  const gapB = g => g < 0.03 ? 'under 3 pts' : g < 0.06 ? '3-6 pts' : g < 0.1 ? '6-10 pts' : '10+ pts';
+  function featuresOf(x, phase) {
+    const mid = x.mid ?? (x.why && x.why.mid), cost = x.cost ?? x.price;
+    return { gap: mid != null ? gapB(x.model - mid) : null, phase: phase || x.phase || null, type: x.type, venue: x.venue, price: band(cost), kind: x.lean ? 'small edge' : 'main' };
+  }
+  const resultOf = p => { const st = p.status === 'void' ? p.voidedStatus : p.status; return st === 'won' || st === 'lost' ? st : null; };
+  function audit() {
+    const done = db.picks.filter(p => !p.steady && resultOf(p));
+    const by = {};
+    for (const p of done) { const f = featuresOf(p); for (const [k, v] of Object.entries(f)) { if (v == null) continue;
+      const r = ((by[k] ||= {})[v] ||= { n: 0, w: 0, cost: 0, pl: 0 }); const won = resultOf(p) === 'won'; r.n++; if (won) r.w++; r.cost += p.price; r.pl += won ? 1 - p.price : -p.price; } }
+    for (const k in by) for (const v in by[k]) { const r = by[k][v]; r.roi = r.cost ? +(r.pl / r.cost).toFixed(3) : null; r.pl = +r.pl.toFixed(2); r.cost = +r.cost.toFixed(2); }
+    const voided = {}; for (const p of db.picks) if (p.status === 'void') voided[p.voidReason] = (voided[p.voidReason] || 0) + 1;
+    return { features: by, voided, settled: done.length };
+  }
+  let learned = { blocks: [], at: null };
+  function learn() {
+    const a = audit(), blocks = [];
+    for (const k of LEARN.features) for (const [v, r] of Object.entries(a.features[k] || {})) {
+      if (!(r.n >= LEARN.minN && r.roi != null && r.roi <= LEARN.maxRoi)) continue;
+      const rest = Object.entries(a.features[k]).filter(([v2]) => v2 !== v).map(([, x]) => x), rn = rest.reduce((t, x) => t + x.n, 0), rc = rest.reduce((t, x) => t + x.cost, 0), rpl = rest.reduce((t, x) => t + x.pl, 0);
+      if (rn < LEARN.minN || !rc) continue; const restRoi = rpl / rc;
+      if (restRoi - r.roi >= LEARN.worseBy) blocks.push({ feature: k, value: v, n: r.n, w: r.w, roi: r.roi, restRoi: +restRoi.toFixed(3) });
+    }
+    learned = { blocks, at: new Date().toISOString() };
+    if (blocks.length) console.log('picks: learned blocks', blocks.map(b => `${b.feature}=${b.value} (${b.w}-${b.n - b.w}, ${Math.round(b.roi * 100)}%)`).join('; '));
+    return learned;
+  }
+  learn(); setInterval(learn, 30 * 60000).unref();
+  const blockedBy = (e, S) => { const f = featuresOf(e, S ? phaseOf(S) : null); return learned.blocks.find(b => f[b.feature] === b.value) || null; };
 
   // ---------- model probabilities from the sim aggregate (slot A = 'ND' in engine terms) ----------
   const marginP = (A, sideIsA, by) => { let n = 0, c = 0; A.marH.forEach((v, i) => { const m = (i - 60) * (sideIsA ? 1 : -1); if (m > by) c += v; if (m !== by) n += v; }); return n ? c / n : null; };
@@ -205,9 +278,9 @@ export function createPicks({ api, dir }) {
   // Bets are only Polymarket US and Kalshi contracts, the venues US residents can trade and whose order books the
   // server reads. International Polymarket prices stay on the page for comparison, never as bets.
   const passes = e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_GAP && e.fairEdge >= TIERS[e.tier].fairEdge;
-  const edges = (g, A, mk) => contracts(g, A, mk, true).filter(e => BUYABLE.has(e.venue) && e.trade && passes(e)).sort((a, b) => b.fairEdge - a.fairEdge);
+  const edges = (g, A, mk) => contracts(g, A, mk, true).filter(e => BUYABLE.has(e.venue) && e.trade && passes(e) && !blockedBy(e, g.S)).sort((a, b) => b.fairEdge - a.fairEdge);
   const leanOk = e => e.cost >= LEAN.min && e.cost <= LEAN.max && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_GAP && e.fairEdge >= LEAN.fairEdge && !passes(e);
-  const leanCands = (g, A, mk) => contracts(g, A, mk, true).filter(e => BUYABLE.has(e.venue) && e.trade && leanOk(e)).sort((a, b) => b.fairEdge - a.fairEdge);
+  const leanCands = (g, A, mk) => contracts(g, A, mk, true).filter(e => BUYABLE.has(e.venue) && e.trade && leanOk(e) && !blockedBy({ ...e, lean: true }, g.S)).sort((a, b) => b.fairEdge - a.fairEdge);
   // What PAPER_STAKE dollars buys on the live order book right now. The price becomes the average fill, fee included,
   // so a bet is shown and logged at a price you can actually get. Too thin to fill the stake: not a bet.
   const bookFill = async (league, venue, trade) => {
@@ -449,5 +522,5 @@ export function createPicks({ api, dir }) {
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event) && p.status !== 'void');
   const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, anchorAgg, contracts, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, audit: () => ({ ...audit(), learned, rules: LEARN }), relearn: learn, anchorAgg, contracts, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }
