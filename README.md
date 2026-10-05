@@ -226,6 +226,17 @@ It stops at the end of the window, when the budget is spent, when settled losses
 or after 3 order errors in a row. Paper mode records fills against the real order book without ordering. Live mode
 needs `TRADING_ENABLED=true` and `AUTOPILOT_LIVE=true`, and every live order still passes the manual-trading caps.
 
+Guard rails (October 2026), after a run bought CAR +1.5 and CAR −1.5 in the same game off a 14.6-point model gap:
+- one position per game per run, and never alongside an open position in that game: no both-sides, no ladder stacking;
+- model-minus-market gaps over 10 points are skipped, like the logged bets; the price check behind a bet must be under
+  30 seconds old; it trades Polymarket US only (Kalshi bets are for you to place);
+- steady picks are candidates first (bought within 2 minutes of being logged, only at 65-85¢, never above the logged
+  price, a flat stake of a tenth of the budget), and are cashed out at 90¢: sold at the bid in paper mode; in live mode
+  the log says "CASH OUT NOW" and the sale is left to you, since the sell path hasn't been tested against the exchange;
+- every bet that passes the filters gets at least $1 (quarter Kelly on a small budget otherwise rounds most to zero).
+It buys what the model's own bets buy; nothing here can promise the paper record's return, much of which came from
+prices that weren't actually available (see the holdout test above).
+
 The Portfolio chart records account value (cash plus open positions, from Polymarket US) every 5 minutes, and the
 autopilot's paper profit with open bets marked to the order book midpoint.
 

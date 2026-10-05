@@ -15,7 +15,7 @@
 // Stops: end of the window, budget used up, loss limit hit, kill switch, or repeated errors. Live mode also obeys
 // every manual-trading cap in Render (MAX_ORDER_USD, MAX_DAILY_USD, MAX_OPEN_BETS) and needs AUTOPILOT_LIVE=true.
 import { simulateFill, takerFee } from './pmus.mjs';
-import { tierActive } from './picks.mjs';
+import { tierActive, STEADY } from './picks.mjs';
 
 const RISK = {
   low:    { tiers: ['low'], kelly: 0.15, label: 'Low risk: favorites only, 15% of Kelly' },
@@ -24,6 +24,10 @@ const RISK = {
   high:   { tiers: ['low', 'medium'], kelly: 0.40, label: 'Aggressive: favorites and coin flips, 40% of Kelly (underdog tier paused)' },
 };
 const PRIOR_W = 0.5, PRIOR_STRENGTH = 40; // the prior counts like 40 settled bets at w = 0.5
+// Guard rails, the same ones the logged model bets use, plus one position per game:
+const MAX_GAP = 0.10;        // model minus market over 10 points is almost always something the market knows
+const MAX_PRICE_AGE = 30000; // the order-book check behind a bet must be under 30 seconds old
+const STEADY_FRESH = 120000; // a steady pick is bought within 2 minutes of being logged, never chased later
 
 // ---------- turning a sentence into settings ----------
 function ruleParse(text, now = new Date()) {
@@ -96,9 +100,26 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
   const runTrades = () => db.autopilot ? db.trades.filter(t => t.run === db.autopilot.id) : [];
   function stats() {
     const T = runTrades().filter(t => t.qty > 0), spent = T.reduce((a, t) => a + t.cost, 0);
-    const settled = T.filter(t => t.status === 'won' || t.status === 'lost' || t.status === 'push'), pl = settled.reduce((a, t) => a + (t.pl || 0), 0);
+    const settled = T.filter(t => t.status === 'won' || t.status === 'lost' || t.status === 'push' || t.status === 'cashed'), pl = settled.reduce((a, t) => a + (t.pl || 0), 0);
     const openCost = T.filter(t => t.status === 'open').reduce((a, t) => a + t.cost, 0);
-    return { bets: T.length, spent: +spent.toFixed(2), realized: +pl.toFixed(2), openCost: +openCost.toFixed(2), won: settled.filter(t => t.status === 'won').length, lost: settled.filter(t => t.status === 'lost').length };
+    return { bets: T.length, spent: +spent.toFixed(2), realized: +pl.toFixed(2), openCost: +openCost.toFixed(2), won: settled.filter(t => t.status === 'won' || (t.status === 'cashed' && t.pl > 0)).length, cashed: settled.filter(t => t.status === 'cashed').length, lost: settled.filter(t => t.status === 'lost').length };
+  }
+  // Steady positions are sold once that side's price reaches 90 cents, as the rule says. Paper mode sells at the bid
+  // (fee out). Live mode logs "cash out now" and leaves the sale to you: the sell path hasn't been tested against the
+  // exchange, and a wrong order type could open a new position instead of closing this one.
+  async function cashOuts(A) {
+    for (const t of db.trades.filter(t => t.run === A.id && t.steady && t.status === 'open' && t.qty > 0)) {
+      try {
+        const bk = await api.book(t.league, t.slug), bid = t.outcome === 'YES' ? bk.bids[0]?.px : bk.offers[0] ? 1 - bk.offers[0].px : null,
+          ask = t.outcome === 'YES' ? bk.offers[0]?.px : bk.bids[0] ? 1 - bk.bids[0].px : null;
+        if (bid == null || ask == null || (bid + ask) / 2 < STEADY.cashOut) continue;
+        if (t.mode === 'paper') {
+          const proceeds = t.qty * bid - takerFee(t.qty, bid);
+          Object.assign(t, { status: 'cashed', pl: +(proceeds - t.cost).toFixed(2), cashedAt: new Date().toISOString(), cashBid: bid });
+          log(`Cashed out ${t.sel} (${t.matchup}): sold ${t.qty} @ ${Math.round(bid * 100)}¢, ${t.pl >= 0 ? '+' : ''}$${t.pl.toFixed(2)}.`); save();
+        } else if (!t.cashFlagged) { t.cashFlagged = new Date().toISOString(); log(`CASH OUT NOW: ${t.sel} (${t.matchup}) is at ${Math.round(bid * 100)}¢. Sell your ${t.qty} shares on Polymarket US.`); save(); }
+      } catch {}
+    }
   }
   let busy = false, errors = 0;
   async function tick() {
@@ -114,24 +135,39 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
       if (c.mode === 'live' && !enabledLive()) return stop('live trading switched off in Render');
       const trust = learnTrust(api.picksAll());
       const tiers = RISK[c.risk].tiers;
-      const cands = leading('all').bets.filter(b => b.venue === 'Polymarket US' && b.trade && tiers.includes(b.tier) && tierActive(b.tier) && c.leagues.includes(b.league) && b.mid != null)
-        .filter(b => !db.trades.some(t => t.qty > 0 && t.status === 'open' && t.slug === b.trade.slug))
-        .filter(b => runTrades().filter(t => t.event === b.event && t.qty > 0).length < 2);
+      await cashOuts(A);
+      // Candidates: steady picks first (the rule that held up on the replay), then the model's tier bets
+      const steady = api.picksAll().filter(p => p.steady && p.status === 'open' && !p.cashOut && p.venue === 'Polymarket US' && p.trade && c.leagues.includes(p.league)
+          && Date.now() - Date.parse(p.at) < STEADY_FRESH)
+        .map(p => ({ src: 'steady', league: p.league, event: p.event, matchup: p.matchup, sel: p.sel, type: p.type, teamId: p.teamId, by: p.by, line: p.line, over: p.over,
+          tier: 'low', model: p.model, mid: p.why && p.why.mid != null ? p.why.mid : p.price, fair: p.fair, logged: p.price, trade: p.trade, book: { at: Date.now() } }));
+      const model = leading('all').bets.filter(b => tiers.includes(b.tier) && tierActive(b.tier)).map(b => ({ ...b, src: 'model' }));
+      const cands = [...steady, ...model]
+        .filter(b => b.venue !== 'Kalshi' && b.trade && b.trade.slug && c.leagues.includes(b.league) && b.mid != null) // it trades Polymarket US only
+        .filter(b => b.model - b.mid <= MAX_GAP)                                   // big gaps are information the model lacks
+        .filter(b => b.book && Date.now() - b.book.at < MAX_PRICE_AGE)              // price checked in the last 30 seconds
+        // one position per game: never both sides, never a second rung of the same opinion, never stacking on an open bet
+        .filter(b => !runTrades().some(t => t.event === b.event && t.qty > 0) && !db.trades.some(t => t.qty > 0 && t.status === 'open' && t.event === b.event));
       for (const b of cands) {
-        const w = trust[b.tier].w, p = w * b.model + (1 - w) * b.mid;
+        const w = b.src === 'steady' ? 0.5 : trust[b.tier].w, p = w * b.model + (1 - w) * b.mid;
         const bk = await api.book(b.league, b.trade.slug);
         const probe = simulateFill(bk, b.trade.outcome, Math.min(c.maxPerBet, room));
         if (!probe.qty) continue;
         const cost1 = probe.cost / probe.qty, edge = p - cost1;
-        if (edge < 0.02) continue; // after the learned trust, at least 2 points of value per contract
-        const kelly = Math.max(0, (p - cost1) / (1 - cost1)), stake = Math.min(c.maxPerBet, room, RISK[c.risk].kelly * kelly * c.budget);
+        if (b.src === 'steady') { // the steady rule itself: 65-85c, fair at or above the price, and don't chase the logged price
+          if (cost1 < STEADY.min || cost1 > STEADY.max || edge < 0 || cost1 > b.logged + 0.01) continue;
+        } else if (edge < 0.02) continue; // after the learned trust, at least 2 points of value per contract
+        const kelly = Math.max(0, (p - cost1) / (1 - cost1));
+        // steady picks: a flat small stake (the rule's own advice: same small amount every time), others fractional Kelly
+        // (a bet that passes every filter gets at least $1, so small budgets still follow the model's bets)
+        const stake = b.src === 'steady' ? Math.min(c.maxPerBet, room, Math.max(1, c.budget / 10)) : Math.min(c.maxPerBet, room, Math.max(1, RISK[c.risk].kelly * kelly * c.budget));
         if (stake < 1) continue;
         const f = simulateFill(bk, b.trade.outcome, stake); if (!f.qty) continue;
         const limitSide = Math.min(0.99, +(f.worst + limits.slip).toFixed(2));
         let qty = f.qty; while (qty > 1 && qty * limitSide + takerFee(qty, limitSide) > stake + 0.01) qty--;
         const plan = { slug: b.trade.slug, outcome: b.trade.outcome, qty, limitSide, limitYesPx: b.trade.outcome === 'YES' ? limitSide : +(1 - limitSide).toFixed(2),
           maxCost: +(qty * limitSide + takerFee(qty, limitSide)).toFixed(2), league: b.league, event: b.event, matchup: b.matchup, sel: b.sel, type: b.type,
-          teamId: b.teamId, by: b.by, line: b.line, over: b.over, model: b.model, fair: +p.toFixed(3), tier: b.tier, trust: w };
+          teamId: b.teamId, by: b.by, line: b.line, over: b.over, model: b.model, fair: +p.toFixed(3), tier: b.tier, trust: w, src: b.src, steady: b.src === 'steady' };
         let t;
         if (c.mode === 'paper') {
           t = { ...plan, at: new Date().toISOString(), day: new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }), mode: 'paper', run: A.id,
