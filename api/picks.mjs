@@ -20,6 +20,10 @@ const BUYABLE = new Set(['Polymarket US', 'Kalshi']);
 const THETA = { 'Polymarket US': TAKER_THETA, Kalshi: 0.07 };
 const quoteAge = g => (g.mkFetched ? Date.now() - g.mkFetched : Infinity);
 const MAX_EDGE = 0.20;
+// Tier and small-edge bets: a model-minus-price gap over 10 points is skipped. With the model and the price on the same
+// play, 95% of honest disagreements in the 2025-26 replay were under 6 points and 99% under 10; live gaps bigger than
+// that are almost always something the market knows and the model doesn't (a drive in progress, an injury).
+const MAX_GAP = 0.10;
 // The model's number and the market's number, averaged. In a replay of the 2025 NFL season with tables built only from
 // 2024 and earlier, a 50/50 average of the model and Vegas win probability beat both on their own (Brier 0.15785 vs.
 // 0.15816 Vegas, 0.15829 model; better than Vegas in 74% of game resamples). Season-fitted reweightings did worse out
@@ -104,8 +108,36 @@ export function createPicks({ api, dir }) {
   const overP = (A, line) => { let n = 0, c = 0; A.totH.forEach((v, i) => { if (i > line) c += v; if (i !== line) n += v; }); return n ? c / n : null; };
 
   // Every bet the model would make right now on this game, best edge first
-  function contracts(g, A, mk) {
-    if (!A || !mk) return [];
+  // Market-anchored strength. The model only knows each team's pregame strength; a live market also prices what it has
+  // watched (a team being outplayed, an injury). When the two disagree on who wins, that gap is mostly information the
+  // model doesn't have, and it would light up every spread rung on the same side at once (one opinion, many bets).
+  // So for tier and small-edge bets, the simulated final margins are shifted by however many points make the model's
+  // win probability equal the market's moneyline (averaged across venues). Spreads are then priced off the shifted
+  // distribution: a spread bet only qualifies when the model disagrees about the shape of the outcome (how likely a
+  // blowout or a close finish is), not about which team is better. Totals don't depend on it. Steady picks keep the raw
+  // model, which is what the replay validated.
+  function marketWin(g, mk) { // market's probability that slot ND wins, averaged over venues quoting the moneyline
+    const aIsAway = String(mk.awayId) === String(g.slotId.ND), ps = [];
+    for (const src of [mk.pmus, mk.kalshi, mk.poly]) { if (!src || !src.found) continue; const m = src[aIsAway ? 'away' : 'home'], o = src[aIsAway ? 'home' : 'away'];
+      if (m && m.p > 0 && m.p < 1) ps.push(m.p); else if (o && o.p > 0 && o.p < 1) ps.push(1 - o.p); }
+    return ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : null;
+  }
+  // Shift the margin histogram (index i = margin + 60) by d points, fractional d as a mix of two whole-point shifts
+  function shiftH(H, d) {
+    const d0 = Math.floor(d), f = d - d0, out = new Array(H.length).fill(0), last = H.length - 1;
+    H.forEach((v, i) => { if (!v) return; const a = Math.min(last, Math.max(0, i + d0)), b = Math.min(last, Math.max(0, i + d0 + 1)); out[a] += v * (1 - f); out[b] += v * f; });
+    return out;
+  }
+  const winOf = (H, n) => { let w = 0, t = 0; H.forEach((v, i) => { if (i > 60) w += v; else if (i === 60) t += v; }); return (w + 0.5 * t) / n; };
+  function anchorAgg(g, A, mk) {
+    const target = marketWin(g, mk); if (target == null || !A.marH) return { A, shift: 0, market: null };
+    let lo = -30, hi = 30; for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (winOf(shiftH(A.marH, mid), A.n) < target) lo = mid; else hi = mid; }
+    const d = (lo + hi) / 2, H = shiftH(A.marH, d), w = winOf(H, A.n);
+    return { A: { ...A, marH: H, win: w * A.n, tie: 0 }, shift: +d.toFixed(2), market: target };
+  }
+  function contracts(g, A0, mk, anchor = false) {
+    if (!A0 || !mk) return [];
+    const an = anchor ? anchorAgg(g, A0, mk) : { A: A0, shift: 0 }, A = an.A;
     const out = [], wA = A.win / A.n;
     const aIsAway = String(mk.awayId) === String(g.slotId.ND);
     const slotOf = side => (side === 'away') === aIsAway ? 'ND' : 'UNC';
@@ -167,15 +199,15 @@ export function createPicks({ api, dir }) {
         if (usable(askUnder, t.ask != null ? 1 - t.ask : null)) push({ type: 'total', sel: `Under ${t.line}`, over: false, line: t.line, model: 1 - p, ...kx(t, t.yesOver === false ? 'YES' : 'NO') }, askUnder, 1 - t.p);
       }
     }
-    for (const e of out) { const mkt = e.mid != null ? e.mid : e.cost; e.fair = (e.model + mkt) / 2; e.fairEdge = e.fair - e.cost; e.tier = tierOf(e.cost); }
+    for (const e of out) { const mkt = e.mid != null ? e.mid : e.cost; e.fair = (e.model + mkt) / 2; e.fairEdge = e.fair - e.cost; e.tier = tierOf(e.cost); if (anchor) e.anchorShift = an.shift; }
     return out;
   }
   // Bets are only Polymarket US and Kalshi contracts, the venues US residents can trade and whose order books the
   // server reads. International Polymarket prices stay on the page for comparison, never as bets.
-  const passes = e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= TIERS[e.tier].fairEdge;
-  const edges = (g, A, mk) => contracts(g, A, mk).filter(e => BUYABLE.has(e.venue) && e.trade && passes(e)).sort((a, b) => b.fairEdge - a.fairEdge);
-  const leanOk = e => e.cost >= LEAN.min && e.cost <= LEAN.max && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= LEAN.fairEdge && !passes(e);
-  const leanCands = (g, A, mk) => contracts(g, A, mk).filter(e => BUYABLE.has(e.venue) && e.trade && leanOk(e)).sort((a, b) => b.fairEdge - a.fairEdge);
+  const passes = e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_GAP && e.fairEdge >= TIERS[e.tier].fairEdge;
+  const edges = (g, A, mk) => contracts(g, A, mk, true).filter(e => BUYABLE.has(e.venue) && e.trade && passes(e)).sort((a, b) => b.fairEdge - a.fairEdge);
+  const leanOk = e => e.cost >= LEAN.min && e.cost <= LEAN.max && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_GAP && e.fairEdge >= LEAN.fairEdge && !passes(e);
+  const leanCands = (g, A, mk) => contracts(g, A, mk, true).filter(e => BUYABLE.has(e.venue) && e.trade && leanOk(e)).sort((a, b) => b.fairEdge - a.fairEdge);
   // What PAPER_STAKE dollars buys on the live order book right now. The price becomes the average fill, fee included,
   // so a bet is shown and logged at a price you can actually get. Too thin to fill the stake: not a bet.
   const bookFill = async (league, venue, trade) => {
@@ -417,5 +449,5 @@ export function createPicks({ api, dir }) {
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event) && p.status !== 'void');
   const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, anchorAgg, contracts, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

@@ -142,6 +142,23 @@ market has moved past it or the bet is on a venue that can't be traded. With not
 "No live bets right now". Only order-book-checked bets count toward the one-bet-per-type limit for a watched game,
 so bets logged earlier on other venues no longer block new ones.
 
+## Market-anchored strength (why a whole ladder can't light up any more)
+
+The model knows each team's pregame strength; a live exchange also prices what it has watched. When they disagree on
+who wins, every spread rung on one side looks like value at once (seen live: DET +6.5 through +9.5 all logged at Q3
+6:21, model ~9 points above the market on each, then Carolina scored). For tier and small-edge bets the simulated final
+margins are now shifted by however many points make the model's win probability equal the market's moneyline
+(averaged across venues), and spreads are priced off the shifted distribution. A spread bet then only qualifies when
+the model disagrees about the shape of the outcome (blowout vs close), not about which team is better; moneyline tier
+bets effectively stop (the replay found no honest moneyline edge anyway). Steady picks keep the raw model, which the
+replay validated. Tier and small-edge bets also skip any model-minus-price gap over 10 points (`MAX_GAP`): in the
+replay, 95% of honest disagreements were under 6 points and 99% under 10 (`tools/trading_holdout/gaps.mjs`). The
+replay also shows the model's spread probabilities themselves are calibrated (`tails.mjs`: at 90%+ it says 91.1%,
+wins 90.2%), so the problem was the inputs, not the math.
+
+Logged bets whose price fell (the bet is losing so far) show "now 40¢ · was 86¢" in neutral grey, not green, and
+"Still a bet now: how to buy it" only appears when that exact contract qualifies on the current play.
+
 ## Small edges (more lines)
 
 Bets where the model and the market agree on the side but the fair price beats what you'd pay by only 1+ point (under

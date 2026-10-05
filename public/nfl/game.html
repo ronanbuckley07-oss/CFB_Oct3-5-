@@ -2059,13 +2059,18 @@ function renderPicks(m){
   // Logged bets: still buyable at the logged price? Open ones get the current $10 buy price from the order book.
   const buyNow=p=>{ if(p.status!=='open') return ''; const n=nowOf[p.key]; if(!n) return ''; // older open bets aren't re-priced
     if(n.now==null) return `<span class="oldtag">OLD · ${hEsc(n&&n.why?n.why:'not buyable now')}</span>`;
-    return n.now>p.price+0.005?`<span class="oldtag">OLD · now ${bcC(n.now)}</span>`:`<span class="okbuy">buyable ${bcC(n.now)}</span> <span class="age" data-at="${n.at}"></span>`; };
-  const still=p=>p.status==='open'&&p.how&&nowOf[p.key]&&nowOf[p.key].now!=null&&nowOf[p.key].now<=p.price+0.005;
+    // Price above the logged one: gone (red). Well below it: the bet is losing so far, not a bargain (neutral).
+    if(n.now>p.price+0.005) return `<span class="oldtag">OLD · now ${bcC(n.now)}</span>`;
+    if(n.now<p.price-0.03) return `<span class="l-meta">now ${bcC(n.now)} · was ${bcC(p.price)}</span>`;
+    return `<span class="okbuy">still ${bcC(n.now)}</span> <span class="age" data-at="${n.at}"></span>`; };
+  // "How to buy it now" only for a contract that qualifies on this play, not just one that got cheaper
+  const live=new Set([...(m.stale?[]:m.edges||[]),...(m.stale?[]:m.leans||[])].map(e=>`${e.type}|${e.sel}|${e.venue}`));
+  const still=p=>p.status==='open'&&p.how&&live.has(`${p.type}|${p.sel}|${p.venue}`);
   const res=p=>p.status==='open'?(p.cashOut?`<span class="won">cashed +${Math.round(p.cashOut.pl*100)}¢</span>`:'open'):`<span class="${p.status}">${p.status}${p.pl!=null&&p.status!=='push'?` ${p.pl>0?'+':''}${Math.round(p.pl*100)}¢`:''}</span>`;
   const lg=(m.logged||[]).slice().reverse().map(p=>`<div class="lrow"><span class="l-sel">${hEsc(p.sel)}</span>${p.lean?bcTier(null,true):bcTier(p.tier)}${p.auto?' <span class="tagauto">game bet</span>':''}${p.steady?' <span class="bc-tag t-low">steady</span>':''}
       <span class="l-meta">${hEsc(p.type)} · ${hEsc(p.clock||'')} · ${hEsc(p.score||'')} · ${hEsc(p.venue)} · logged ${bcC(p.price)} · model ${bcP(p.model)}</span>
       <span>${buyNow(p)}</span><span class="l-res">${res(p)}</span>
-      ${still(p)?`<details class="l-how" style="flex-basis:100%"><summary>How to buy it now</summary>${betCard({...p,cost:p.price,book:null},{at:nowOf[p.key].at})}</details>`:''}</div>`).join('');
+      ${still(p)?`<details class="l-how" style="flex-basis:100%"><summary>Still a bet now: how to buy it</summary>${betCard({...p,cost:p.price,book:null},{at:(nowOf[p.key]||{}).at})}</details>`:''}</div>`).join('');
   el.innerHTML=`<h3 class="sh">Bets you can buy right now</h3>
     ${main.length&&m.stale?'<p class="small" style="margin:0 0 6px"><b>New play.</b> These were for the last play and can\'t be counted on; new numbers in a few seconds.</p>':''}
     ${main.length?`<div class="bcards">${main.map(e=>card(e,false)).join('')}</div>`:none}
@@ -2116,12 +2121,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-05.8';
+const BUILD='2026-10-05.9';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.8'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.9'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>
