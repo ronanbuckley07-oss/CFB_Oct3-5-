@@ -27,7 +27,13 @@ const PRIOR_W = 0.5, PRIOR_STRENGTH = 40; // the prior counts like 40 settled be
 // Guard rails, the same ones the logged model bets use, plus one position per game:
 const MAX_GAP = 0.10;        // model minus market over 10 points is almost always something the market knows
 const MAX_PRICE_AGE = 30000; // the order-book check behind a bet must be under 30 seconds old
-const STEADY_FRESH = 120000; // a steady pick is bought within 2 minutes of being logged, never chased later
+const PICK_FRESH = 120000;   // a logged pick is copied within 2 minutes of being logged, never chased later
+const GAME_SHARE = 0.25;     // at most a quarter of the budget in any one game
+const PER_TICK = 3;          // up to 3 buys per check (checks every 15 seconds)
+// A bet's "side" in a game: spreads and moneylines are on a team, totals are over or under. Two bets in one game
+// conflict when they're on different sides (CAR +1.5 with DET +1.5, or Over with Under); same-side bets don't.
+const sideOf = t => t.type === 'total' ? `total:${t.over ? 'over' : 'under'}` : `team:${t.teamId}`;
+const conflicts = (a, b) => (a.type === 'total') === (b.type === 'total') && sideOf(a) !== sideOf(b);
 
 // ---------- turning a sentence into settings ----------
 function ruleParse(text, now = new Date()) {
@@ -131,43 +137,50 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
       if (now < Date.parse(c.start)) return;
       if (db.killed) return stop('kill switch');
       if (-st.realized >= c.stopLoss) return stop(`loss limit hit (down $${(-st.realized).toFixed(2)})`);
-      const room = c.budget - st.spent; if (room < 1) return stop('budget used');
+      let room = c.budget - st.spent; if (room < 1) return stop('budget used');
       if (c.mode === 'live' && !enabledLive()) return stop('live trading switched off in Render');
       const trust = learnTrust(api.picksAll());
       const tiers = RISK[c.risk].tiers;
       await cashOuts(A);
       // Candidates: steady picks first (the rule that held up on the replay), then the model's tier bets
-      const steady = api.picksAll().filter(p => p.steady && p.status === 'open' && !p.cashOut && p.venue === 'Polymarket US' && p.trade && c.leagues.includes(p.league)
-          && Date.now() - Date.parse(p.at) < STEADY_FRESH)
-        .map(p => ({ src: 'steady', league: p.league, event: p.event, matchup: p.matchup, sel: p.sel, type: p.type, teamId: p.teamId, by: p.by, line: p.line, over: p.over,
-          tier: 'low', model: p.model, mid: p.why && p.why.mid != null ? p.why.mid : p.price, fair: p.fair, logged: p.price, trade: p.trade, book: { at: Date.now() } }));
-      const model = leading('all').bets.filter(b => tiers.includes(b.tier) && tierActive(b.tier)).map(b => ({ ...b, src: 'model' }));
-      const cands = [...steady, ...model]
-        .filter(b => b.venue !== 'Kalshi' && b.trade && b.trade.slug && c.leagues.includes(b.league) && b.mid != null) // it trades Polymarket US only
-        .filter(b => b.model - b.mid <= MAX_GAP)                                   // big gaps are information the model lacks
-        .filter(b => b.book && Date.now() - b.book.at < MAX_PRICE_AGE)              // price checked in the last 30 seconds
-        // one position per game: never both sides, never a second rung of the same opinion, never stacking on an open bet
-        .filter(b => !runTrades().some(t => t.event === b.event && t.qty > 0) && !db.trades.some(t => t.qty > 0 && t.status === 'open' && t.event === b.event));
+      // Candidates: every pick the model logs (steady picks, tier bets; small edges too on the High setting), copied
+      // within 2 minutes on Polymarket US at no more than the logged price
+      const kindOf = p => p.steady ? 'steady' : p.lean ? 'lean' : 'model';
+      const cands = api.picksAll().filter(p => p.status === 'open' && !p.cashOut && p.venue === 'Polymarket US' && p.trade && p.trade.slug && c.leagues.includes(p.league)
+          && Date.now() - Date.parse(p.at) < PICK_FRESH && (p.steady || (p.lean ? c.risk === 'high' : tiers.includes(p.tier) && tierActive(p.tier))))
+        .map(p => ({ src: kindOf(p), league: p.league, event: p.event, matchup: p.matchup, sel: p.sel, type: p.type, teamId: p.teamId, by: p.by, line: p.line, over: p.over,
+          tier: p.steady ? 'low' : p.tier, model: p.model, mid: p.why && p.why.mid != null ? p.why.mid : p.price, fair: p.fair, logged: p.price, trade: p.trade, key: p.key }))
+        .filter(b => b.model - b.mid <= MAX_GAP)                                     // big gaps are information the model lacks
+        .filter(b => !runTrades().some(t => t.pick === b.key || (t.qty > 0 && t.slug === b.trade.slug)))  // each pick and market once
+        .sort((a, b) => (a.src === 'steady' ? 0 : a.src === 'model' ? 1 : 2) - (b.src === 'steady' ? 0 : b.src === 'model' ? 1 : 2));
+      let bought = 0;
+      const inGame = ev => db.trades.filter(t => t.qty > 0 && t.event === ev && (t.status === 'open' || t.run === A.id));
       for (const b of cands) {
+        if (bought >= PER_TICK || room < 1) break;
+        const held = inGame(b.event);
+        if (held.some(t => t.status === 'open' && conflicts(t, b))) continue;           // never the other side of an open bet
+        const gameRoom = GAME_SHARE * c.budget - held.filter(t => t.status === 'open').reduce((a, t) => a + t.cost, 0);
+        if (gameRoom < 1) continue;                                                       // this game already has its share
         const w = b.src === 'steady' ? 0.5 : trust[b.tier].w, p = w * b.model + (1 - w) * b.mid;
         const bk = await api.book(b.league, b.trade.slug);
         const probe = simulateFill(bk, b.trade.outcome, Math.min(c.maxPerBet, room));
         if (!probe.qty) continue;
         const cost1 = probe.cost / probe.qty, edge = p - cost1;
-        if (b.src === 'steady') { // the steady rule itself: 65-85c, fair at or above the price, and don't chase the logged price
-          if (cost1 < STEADY.min || cost1 > STEADY.max || edge < 0 || cost1 > b.logged + 0.01) continue;
-        } else if (edge < 0.02) continue; // after the learned trust, at least 2 points of value per contract
+        if (cost1 > b.logged + 0.01) continue; // the price moved past what the pick was logged at: don't chase it
+        if (b.src === 'steady') { // the steady rule itself: 65-85c, fair at or above the price
+          if (cost1 < STEADY.min || cost1 > STEADY.max || edge < 0) continue;
+        } else if (edge < 0.01) continue; // after the learned trust, still at least 1 point of value per contract
         const kelly = Math.max(0, (p - cost1) / (1 - cost1));
         // steady picks: a flat small stake (the rule's own advice: same small amount every time), others fractional Kelly
         // (a bet that passes every filter gets at least $1, so small budgets still follow the model's bets)
-        const stake = b.src === 'steady' ? Math.min(c.maxPerBet, room, Math.max(1, c.budget / 10)) : Math.min(c.maxPerBet, room, Math.max(1, RISK[c.risk].kelly * kelly * c.budget));
+        const stake = Math.min(gameRoom, b.src === 'steady' ? Math.min(c.maxPerBet, room, Math.max(1, c.budget / 10)) : Math.min(c.maxPerBet, room, Math.max(1, RISK[c.risk].kelly * kelly * c.budget)));
         if (stake < 1) continue;
         const f = simulateFill(bk, b.trade.outcome, stake); if (!f.qty) continue;
         const limitSide = Math.min(0.99, +(f.worst + limits.slip).toFixed(2));
         let qty = f.qty; while (qty > 1 && qty * limitSide + takerFee(qty, limitSide) > stake + 0.01) qty--;
         const plan = { slug: b.trade.slug, outcome: b.trade.outcome, qty, limitSide, limitYesPx: b.trade.outcome === 'YES' ? limitSide : +(1 - limitSide).toFixed(2),
           maxCost: +(qty * limitSide + takerFee(qty, limitSide)).toFixed(2), league: b.league, event: b.event, matchup: b.matchup, sel: b.sel, type: b.type,
-          teamId: b.teamId, by: b.by, line: b.line, over: b.over, model: b.model, fair: +p.toFixed(3), tier: b.tier, trust: w, src: b.src, steady: b.src === 'steady' };
+          teamId: b.teamId, by: b.by, line: b.line, over: b.over, model: b.model, fair: +p.toFixed(3), tier: b.tier, trust: w, src: b.src, steady: b.src === 'steady', pick: b.key };
         let t;
         if (c.mode === 'paper') {
           t = { ...plan, at: new Date().toISOString(), day: new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }), mode: 'paper', run: A.id,
@@ -184,7 +197,7 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
         }
         db.trades.push(t);
         log(`${t.qty > 0 ? 'Bought' : 'Tried'} ${b.sel} (${b.matchup}): ${t.qty} @ ${t.avg != null ? Math.round(t.avg * 100) + '¢' : '–'}, $${t.cost} total. Model ${(b.model * 100).toFixed(1)}%, market ${(b.mid * 100).toFixed(1)}%, trust ${Math.round(w * 100)}% model, so ${(p * 100).toFixed(1)}% vs ${Math.round(cost1 * 100)}¢.`);
-        save(); break; // one bet per tick, so the next one sees fresh prices
+        save(); bought++; if (t.qty > 0) room -= t.cost; // up to PER_TICK buys per check; each walks its own fresh order book
       }
     } catch (e) { log(`Error: ${e.message || e}`); }
     finally { busy = false; }
@@ -207,7 +220,7 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
     for (const k of ['real', 'paper']) { const a = db.portfolio[k]; if (a.length > 6000) db.portfolio[k] = a.filter((_, i) => i % 2 === 0 || i > a.length - 2000); }
     save();
   }
-  setInterval(tick, 30000).unref(); setInterval(snapshot, +process.env.PORTFOLIO_MS || 5 * 60000).unref(); setTimeout(snapshot, 20000).unref();
+  setInterval(tick, 15000).unref(); setInterval(snapshot, +process.env.PORTFOLIO_MS || 5 * 60000).unref(); setTimeout(snapshot, 20000).unref();
 
   return {
     async parse(text) { const now = new Date(); const ai = await claudeParse(text, now); return { config: ai || ruleParse(text, now), source: ai ? 'claude' : 'rules' }; },
