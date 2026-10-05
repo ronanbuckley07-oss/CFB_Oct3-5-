@@ -117,9 +117,20 @@ counted in the tier records. `/api/picks/steady?league=` lists what qualifies no
 cash-out). The replayed bets are in `public/replay_bets.json`; "Past bets" can show them, tagged, without counting
 them in any record.
 
+## Only buyable bets
+
+Every bet the site shows or logs is a Polymarket US contract checked on its live order book: the price is the average
+a `PAPER_STAKE` ($10) order fills at, fee included, and a book too thin to fill it means no bet. Kalshi and
+international Polymarket prices stay in the market table for comparison but are never bets (international Polymarket
+can't be traded from the US, and Kalshi's order book isn't read). Shown bets are re-checked every 10 seconds and cleared
+on every new play until that play is simulated. Every price shows how long ago it was checked and turns into a red
+OLD tag after 30 seconds. Logged bets show the current buy price ("Now"): green while you can still get the logged
+price, red OLD once the market has moved past it or the bet isn't on Polymarket US. With nothing qualifying, the page
+says "No live bets right now".
+
 ## Update speed
 
-- Scanner: every 10 seconds (was 30). Prices for a game in the betting window, or with a steady pick possible or
+- Scanner: every 10 seconds (was 30), re-simulating a game on every new play (was at most every 2 minutes). Prices for a game in the betting window, or with a steady pick possible or
   open, refresh every 10 seconds (was 3 minutes, then 20 seconds).
 - Watched games: prices every 10 seconds (was 20). Game page: prices every 8 seconds, ESPN win probability every 10
   (both were 15). Home page bet sections: every 10 seconds (was 30).

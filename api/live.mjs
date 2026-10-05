@@ -54,7 +54,7 @@ export function createLive({ api, pages, dataDir }) {
   const scans = new Map(), scanning = {}, leading = { cfb: [], nfl: [] };
   const watched = (league, event) => [...games.values()].find(g => g.league === league && g.event === String(event) && g.viewers.size && g.last.edges);
   class ScanGame {
-    constructor(league, card) { Object.assign(this, { league, event: String(card.id), card, pk: null, lastScan: 0, mkAt: 0, noMk: false, edges: [] }); }
+    constructor(league, card) { Object.assign(this, { league, event: String(card.id), card, pk: null, lastScan: 0, mkAt: 0, noMk: false, edges: [], cands: [] }); }
     call(q) { return api[this.league](new Request(`http://local/api?${q}`)).then(r => r.json()); }
     async init() {
       const c = this.card; // away team takes slot A
@@ -93,15 +93,24 @@ export function createLive({ api, pages, dataDir }) {
       // Steady picks need the play settled on ESPN for 40s and a quote fetched after that, then one sim of that play
       const steadyDue = S.qtr >= 2 && S.qtr <= 4 && !picks.steadyDone(this.league, this.event) && this.steadyPk !== pk
         && now - this.pkAt >= 40000 && (this.mkFetched || 0) - this.pkAt >= 40000;
-      if (!(steadyDue || (autoDue && now - this.lastScan > 60000) || (pk !== this.pk && now - this.lastScan > 120000) || now - this.lastScan > 300000)) return;
+      // Bets are only good for the play they were simulated on: a new play clears them until the next run
+      if (this.edges.length && this.edgesPk !== pk) { this.edges = []; this.cands = []; picks.dropSteadyLive(this.league, this.event); }
+      // Same play, nothing new to simulate: re-check the order book for the bets we already have (every 10s tick)
+      if (this.cands && this.cands.length && this.edgesPk === pk && now - (this.verAt || 0) >= 10000) {
+        this.verAt = now; this.edges = this.tag(await picks.verifyList(this, this.cands, 3), S, now);
+      }
+      // Re-simulate on every new play (was: at most every 2 minutes), so the leading list keeps up with the game
+      if (!(steadyDue || (autoDue && now - this.lastScan > 60000) || (pk !== this.pk && now - this.lastScan > 20000) || now - this.lastScan > 300000)) return;
       if (steadyDue) this.steadyPk = pk;
       this.pk = pk; this.lastScan = now;
       const A = await pool.run(this.league, this.rosters, this.tk, prepS0(S, S.edge, S.total, LGS[this.league].cal), autoDue ? N_FULL : N_SCAN, { prio: autoDue ? 2 : 0 });
-      if (!A) return;
-      this.edges = picks.edges(this, A, this.mk).slice(0, 3).map(e => ({ ...e, at: now, clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}`, sims: A.n }));
-      picks.autoPick(this, A, this.mk, S);
-      if (playKey(o) === this.pkSeen) picks.steadyPick(this, A, this.mk, S, Date.now() - this.pkAt);
+      if (!A) return; this.lastSims = A.n;
+      this.cands = picks.edges(this, A, this.mk); this.edgesPk = pk; this.verAt = Date.now();
+      this.edges = this.tag(await picks.verifyList(this, this.cands, 3), S, Date.now(), A.n);
+      await picks.autoPick(this, A, this.mk, S);
+      if (playKey(o) === this.pkSeen) await picks.steadyPick(this, A, this.mk, S, Date.now() - this.pkAt);
     }
+    tag(list, S, at, sims) { return list.map(e => ({ ...e, at, clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}`, sims: sims || this.lastSims || null })); }
     finish() { if (!picks.autoDone(this.league, this.event)) picks.autoPick(this, null, null, { qtr: 5, secs: 0 }); }
   }
   async function scanLeague(league) {
@@ -122,7 +131,7 @@ export function createLive({ api, pages, dataDir }) {
       leading[league] = uniq.slice(0, 20).map(e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url,
         price: +(e.ask ?? e.cost).toFixed(3), cost: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims,
         fair: e.fair != null ? +e.fair.toFixed(3) : null, fairEdge: e.fairEdge != null ? +e.fairEdge.toFixed(3) : null, tier: e.tier || null,
-        trade: e.trade || null, teamId: e.teamId || null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null, team: e.team || null, mid: e.mid ?? null, ask: e.ask ?? null }));
+        book: e.book || null, trade: e.trade || null, teamId: e.teamId || null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null, team: e.team || null, mid: e.mid ?? null, ask: e.ask ?? null }));
     } catch {} finally { scanning[league] = false; }
   }
   // Every 10 seconds (was 30): the scanner is what logs game bets and steady picks, so it has to keep up with the game
@@ -219,12 +228,28 @@ export function createLive({ api, pages, dataDir }) {
         // Steady pick: the last full run must be of this same play, settled 40s+, with a quote fetched after that
         const R = this.last.result;
         if (this.mk && o.state === 'in') picks.cashOuts(this, this.mk);
+        this.recheck(pkNow);
         if (o.state === 'in' && this.mk && R && R.final && R.pk === pkNow && !picks.steadyDone(this.league, this.event))
-          picks.steadyPick(this, R.A, this.mk, this.S, Date.now() - this.pkAt);
+          picks.steadyPick(this, R.A, this.mk, this.S, Date.now() - this.pkAt).catch(() => {});
         if (o.state === 'post') { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), 30000); }
       } catch (e) {
         if (++this.fails % 5 === 0) this.broadcast('warn', { error: String(e.message || e) });
       } finally { this.polling = false; }
+    }
+
+    // Every 10s: re-check the shown bets on the order book while the play is unchanged; on a new play clear them
+    // (they were for the old play) until the next run. Logged bets get their current buy price either way.
+    async recheck(pkNow) {
+      const E = this.last.edges; if (!E || this.rechecking) return;
+      if (E.pk && E.pk !== pkNow && E.edges.length) { this.last.edges = { ...E, edges: [], pending: true, at: Date.now() }; this.broadcast('edges', this.last.edges); return; }
+      if (Date.now() - (E.at || 0) < 10000) return;
+      this.rechecking = true;
+      try {
+        const edges = E.pending ? [] : await picks.verifyList(this, this.cands || [], 8), logged = picks.forEvent(this.league, this.event);
+        if (this.last.edges !== E) return; // a new run replaced it meanwhile
+        this.last.edges = { ...E, edges, logged, now: await picks.nowPrices(this, logged), at: Date.now() };
+        this.broadcast('edges', this.last.edges);
+      } catch {} finally { this.rechecking = false; }
     }
 
     async simulate(key, S) {
@@ -242,8 +267,10 @@ export function createLive({ api, pages, dataDir }) {
         const at = this.hist.findIndex(h => h.k === pt.k); if (at >= 0) this.hist[at] = pt; else this.hist.push(pt);
         this.broadcast('hist', { pts: [pt] });
         if (this.mk && this.state !== 'post') {
-          const ed = picks.consider(this, A, this.mk, S); picks.autoPick(this, A, this.mk, S);
-          this.last.edges = { key, edges: ed, logged: picks.forEvent(this.league, this.event), at: Date.now(), clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}` };
+          const ed = await picks.consider(this, A, this.mk, S); await picks.autoPick(this, A, this.mk, S);
+          this.cands = picks.edges(this, A, this.mk);
+          const logged = picks.forEvent(this.league, this.event);
+          this.last.edges = { key, pk: playKey(S), edges: ed, logged, now: await picks.nowPrices(this, logged), at: Date.now(), clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}` };
           this.broadcast('edges', this.last.edges);
         }
         if (S.down === 4) { // the 4th-down decision bot: each option simulated separately

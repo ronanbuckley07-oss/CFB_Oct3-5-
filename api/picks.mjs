@@ -15,6 +15,7 @@ const MAX_OPEN_PER_GAME = 4;
 // latest play and the price doesn't yet, so the "edge" is the play, the logged price is one nobody can still get, and
 // the paper record looks better than real trading would.
 const QUOTE_MAX_AGE = +process.env.QUOTE_MAX_AGE_MS || 30000;
+const BUYABLE = 'Polymarket US';
 const quoteAge = g => (g.mkFetched ? Date.now() - g.mkFetched : Infinity);
 const MAX_EDGE = 0.20;
 // The model's number and the market's number, averaged. In a replay of the 2025 NFL season with tables built only from
@@ -152,9 +153,33 @@ export function createPicks({ api, dir }) {
     for (const e of out) { const mkt = e.mid != null ? e.mid : e.cost; e.fair = (e.model + mkt) / 2; e.fairEdge = e.fair - e.cost; e.tier = tierOf(e.cost); }
     return out;
   }
-  const edges = (g, A, mk) => contracts(g, A, mk)
-    .filter(e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= TIERS[e.tier].fairEdge)
-    .sort((a, b) => b.fairEdge - a.fairEdge);
+  // Bets are only ever Polymarket US contracts: it's the venue US residents can trade and the only one whose order
+  // book the server reads. Kalshi and international Polymarket prices stay on the page for comparison, never as bets.
+  const passes = e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= TIERS[e.tier].fairEdge;
+  const edges = (g, A, mk) => contracts(g, A, mk).filter(e => e.venue === BUYABLE && e.trade && passes(e)).sort((a, b) => b.fairEdge - a.fairEdge);
+  // What PAPER_STAKE dollars buys on the live order book right now. The price becomes the average fill, fee included,
+  // so a bet is shown and logged at a price you can actually get. Too thin to fill the stake: not a bet.
+  async function verify(g, e) {
+    if (!e || e.venue !== BUYABLE || !e.trade) return null;
+    const bk = await api[g.league].pmusBook(e.trade.slug), f = simulateFill(bk, e.trade.outcome, PAPER_STAKE);
+    if (!f.qty || !f.full) return null;
+    const cost = f.cost / f.qty;
+    return { ...e, cost, ask: f.avg, edge: e.model - cost, fairEdge: e.fair - cost, tier: tierOf(cost),
+      book: { avg: +f.avg.toFixed(4), qty: f.qty, cost: f.cost, stake: PAPER_STAKE, at: Date.now() } };
+  }
+  async function verifyList(g, list, n = 6, ok = passes) {
+    const out = await Promise.all(list.slice(0, n).map(e => verify(g, e).catch(() => null)));
+    return out.filter(e => e && ok(e)).sort((a, b) => b.fairEdge - a.fairEdge);
+  }
+  // Current buy price (per contract, fee in) for open picks, so the page can say whether a logged price is still there
+  async function nowPrices(g, ps) {
+    return Promise.all(ps.map(async p => {
+      if (p.status !== 'open' || p.venue !== BUYABLE || !p.trade) return { key: p.key, now: null, why: p.venue !== BUYABLE ? 'not on Polymarket US' : null };
+      try { const f = simulateFill(await api[g.league].pmusBook(p.trade.slug), p.trade.outcome, PAPER_STAKE);
+        return { key: p.key, now: f.qty && f.full ? +(f.cost / f.qty).toFixed(4) : null, why: f.qty && f.full ? null : 'no depth', at: Date.now() }; }
+      catch { return { key: p.key, now: null, why: 'book unavailable' }; }
+    }));
+  }
 
   // Log the qualifying bets once each (best venue at that moment), at most a few per game
   const why = (g, A, S, e) => {
@@ -171,7 +196,7 @@ export function createPicks({ api, dir }) {
     const pick = Object.assign({ key, league: g.league, event: g.event, matchup: g.title, venue: e.venue, url: e.url, type: e.type, sel: e.sel, team: e.team || null,
       teamId: e.slot ? g.slotId[e.slot] : null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null,
       price: +e.cost.toFixed(3), ask: e.ask != null ? +e.ask.toFixed(3) : null, model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier, clock, score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`,
-      phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), quoteAge: Math.round(quoteAge(g) / 1000), status: 'open' }, extra || {});
+      phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), quoteAge: Math.round(quoteAge(g) / 1000), book: e.book || null, trade: e.trade || null, status: 'open' }, extra || {});
     db.picks.push(pick); dirty = true;
     if (e.trade) fillPaper(pick, e.trade);
     return pick;
@@ -187,33 +212,41 @@ export function createPicks({ api, dir }) {
   }
   // The one automatic bet per game: the best qualifying edge once the game is inside the window
   // Game bets: inside the window, the best qualifying bet in each risk tier, at most one per tier per game
-  function autoPick(g, A, mk, S) {
+  // Async: candidates are checked on the order book first. busy guards stop a second call logging the same bet meanwhile.
+  const busy = new Set();
+  async function autoPick(g, A, mk, S) {
     const active = Object.keys(TIERS).filter(tierActive), done = t => db.auto[`${g.league}:${g.event}:${t}`];
     if (active.every(done)) return null;
     if (pastWindow(S)) { for (const t of active) if (!done(t)) db.auto[`${g.league}:${g.event}:${t}`] = { status: 'pass', at: new Date().toISOString(), matchup: g.title }; dirty = true; return null; }
     if (!inWindow(S) || !A || !mk || quoteAge(g) > QUOTE_MAX_AGE) return null; // stale quote: keep looking
-    const list = edges(g, A, mk), picked = [];
-    for (const t of active) {
-      if (done(t)) continue;
-      const inT = list.filter(e => e.tier === t), best = inT.find(e => e.venue === 'Polymarket US') || inT[0];
-      if (!best) continue; // keep looking until the window closes
-      const pick = logPick(g, A, S, best, { auto: true });
-      db.auto[`${g.league}:${g.event}:${t}`] = { status: 'bet', at: new Date().toISOString(), key: pick && pick.key, matchup: g.title }; dirty = true; picked.push(pick);
-    }
-    return picked;
+    const id = `auto:${g.league}:${g.event}`; if (busy.has(id)) return null; busy.add(id);
+    try {
+      const list = await verifyList(g, edges(g, A, mk), 10), picked = [];
+      for (const t of active) {
+        if (done(t)) continue;
+        const best = list.find(e => e.tier === t); if (!best) continue; // keep looking until the window closes
+        const pick = logPick(g, A, S, best, { auto: true });
+        db.auto[`${g.league}:${g.event}:${t}`] = { status: 'bet', at: new Date().toISOString(), key: pick && pick.key, matchup: g.title }; dirty = true; picked.push(pick);
+      }
+      return picked;
+    } finally { busy.delete(id); }
   }
-  function consider(g, A, mk, S) {
-    const list = edges(g, A, mk);
-    if (quoteAge(g) > QUOTE_MAX_AGE) return list.slice(0, 8); // shown, not logged
-    const open = db.picks.filter(p => p.event === g.event && p.league === g.league && !p.auto);
-    for (const e of list) {
-      if (open.length >= MAX_OPEN_PER_GAME) break;
-      // One bet per market type per game. Four spread lines on the same team are one opinion, not four, and
-      // counting them separately would make the record look far more certain than it is.
-      if (open.some(p => p.type === e.type)) continue;
-      const pick = logPick(g, A, S, e); if (pick) open.push(pick);
-    }
-    return list.slice(0, 8);
+  // Returns the bets that are buyable right now (checked on the book); logs the new ones
+  async function consider(g, A, mk, S) {
+    const list = await verifyList(g, edges(g, A, mk), 8);
+    if (quoteAge(g) > QUOTE_MAX_AGE) return list; // shown, not logged
+    const id = `watch:${g.league}:${g.event}`; if (busy.has(id)) return list; busy.add(id);
+    try {
+      const open = db.picks.filter(p => p.event === g.event && p.league === g.league && !p.auto && !p.steady);
+      for (const e of list) {
+        if (open.length >= MAX_OPEN_PER_GAME) break;
+        // One bet per market type per game. Four spread lines on the same team are one opinion, not four, and
+        // counting them separately would make the record look far more certain than it is.
+        if (open.some(p => p.type === e.type)) continue;
+        const pick = logPick(g, A, S, e); if (pick) open.push(pick);
+      }
+    } finally { busy.delete(id); }
+    return list;
   }
 
   // ---------- steady picks ----------
@@ -222,23 +255,29 @@ export function createPicks({ api, dir }) {
   function steadyList(g, A, mk, S) {
     if (!A || !mk || !(S.qtr >= STEADY.fromQtr && S.qtr <= 4)) return [];
     const lead = slot => slot === 'ND' ? S.nd - S.unc : S.unc - S.nd;
-    return contracts(g, A, mk).filter(e => e.type === 'moneyline' && e.venue !== 'Polymarket' // international Polymarket can't be traded from the US
-        && e.cost >= STEADY.min && e.cost <= STEADY.max && e.fairEdge >= 0 && e.edge <= MAX_EDGE && e.model < 0.97 && lead(e.slot) >= STEADY.lead)
-      .sort((a, b) => (b.venue === 'Polymarket US') - (a.venue === 'Polymarket US') || b.fairEdge - a.fairEdge);
+    return contracts(g, A, mk).filter(e => e.type === 'moneyline' && e.venue === BUYABLE && e.trade && steadyOk(e) && lead(e.slot) >= STEADY.lead).sort((a, b) => b.fairEdge - a.fairEdge);
   }
+  const steadyOk = e => e.cost >= STEADY.min && e.cost <= STEADY.max && e.fairEdge >= 0 && e.edge <= MAX_EDGE && e.model < 0.97;
   const steadyDone = (league, event) => !!db.steady[`${league}:${event}`];
   // settled: ms the current play has been on ESPN. Logged once per game, only on a settled play with a quote fetched after it.
-  function steadyPick(g, A, mk, S, settled) {
-    const id = `${g.league}:${g.event}`, list = steadyList(g, A, mk, S);
-    if (list.length) steadyLive.set(id, { at: Date.now(), league: g.league, event: g.event, matchup: g.title, clock: `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`,
-      score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`, logged: steadyDone(g.league, g.event), bets: list.slice(0, 2).map(e => ({ sel: e.sel, venue: e.venue, url: e.url, price: +e.cost.toFixed(3),
-        model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), team: e.team })) });
-    else steadyLive.delete(id);
-    if (steadyDone(g.league, g.event) || !list.length || !(settled >= STEADY.settleMs) || quoteAge(g) > Math.min(QUOTE_MAX_AGE, settled - STEADY.settleMs)) return null;
-    const pick = logPick(g, A, S, list[0], { steady: true });
-    db.steady[id] = { key: pick && pick.key, at: new Date().toISOString(), matchup: g.title }; dirty = true;
-    return pick;
+  const steadyChecked = new Map(); // league:event -> last book check, so watched games don't hit the book every second
+  async function steadyPick(g, A, mk, S, settled) {
+    const id = `${g.league}:${g.event}`, now = Date.now();
+    if (now - (steadyChecked.get(id) || 0) < 5000 || busy.has('steady:' + id)) return null;
+    steadyChecked.set(id, now); busy.add('steady:' + id);
+    try {
+      const list = await verifyList(g, steadyList(g, A, mk, S), 2, steadyOk);
+      if (list.length) steadyLive.set(id, { at: Date.now(), league: g.league, event: g.event, matchup: g.title, clock: `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`,
+        score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`, logged: steadyDone(g.league, g.event), bets: list.map(e => ({ sel: e.sel, venue: e.venue, url: e.url, price: +e.cost.toFixed(3),
+          model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), team: e.team, book: e.book })) });
+      else steadyLive.delete(id);
+      if (steadyDone(g.league, g.event) || !list.length || !(settled >= STEADY.settleMs) || quoteAge(g) > Math.min(QUOTE_MAX_AGE, settled - STEADY.settleMs)) return null;
+      const pick = logPick(g, A, S, list[0], { steady: true });
+      db.steady[id] = { key: pick && pick.key, at: new Date().toISOString(), matchup: g.title }; dirty = true;
+      return pick;
+    } finally { busy.delete('steady:' + id); }
   }
+  const dropSteadyLive = (league, event) => steadyLive.delete(`${league}:${event}`);
   // Cash out: an open steady pick whose team's price (midpoint) has reached 90 cents is sold at the bid, fees out.
   // The pick keeps its final result too, but the steady record counts the cash-out, which is what the rule says to do.
   const sellFee = { 'Polymarket US': p => TAKER_THETA * p * (1 - p), Kalshi: p => 0.07 * p * (1 - p) };
@@ -271,7 +310,7 @@ export function createPicks({ api, dir }) {
   }
 
   const steadyNow = league => { const now = Date.now(), out = [];
-    for (const [k, v] of steadyLive) { if (now - v.at > 120000) { steadyLive.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); }
+    for (const [k, v] of steadyLive) { if (now - v.at > 60000) { steadyLive.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); }
     // open steady picks, with a cash-out flag once the price has reached 90 cents
     const held = db.picks.filter(p => p.steady && p.status === 'open' && (league === 'all' || p.league === league)).map(p => ({ event: p.event, league: p.league, matchup: p.matchup, sel: p.sel,
       venue: p.venue, url: p.url, price: p.price, clock: p.clock, cashOut: p.cashOut || null }));
@@ -337,5 +376,5 @@ export function createPicks({ api, dir }) {
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event));
   const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, edges, consider, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, edges, verifyList, nowPrices, consider, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

@@ -241,7 +241,8 @@ header.top{align-items:center}
 .picks tr.whyrow td{padding:0 8px 8px;border-bottom:1px solid var(--line)}
 .picks details summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:600}
 .picks .why{font-size:13.5px;line-height:1.5;max-width:80ch;text-align:left;padding:4px 0 2px}.picks .why p{margin:6px 0}
-.tagtier{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:4px;border:1px solid currentColor}.t-low{color:#2E9E5B}.t-medium{color:var(--gold)}.t-high{color:var(--bad)}
+.tagtier{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:4px;border:1px solid currentColor}
+.age{font-size:11.5px;color:var(--muted);white-space:nowrap}.age.old,.oldtag{color:var(--bad);font-weight:800}.oldtag{font-size:12px;white-space:nowrap}.okbuy{color:#2E9E5B;font-weight:700;white-space:nowrap}.t-low{color:#2E9E5B}.t-medium{color:var(--gold)}.t-high{color:var(--bad)}
 .tagauto{font-size:11px;font-weight:700;color:#0C2340;background:var(--gold);border-radius:999px;padding:1px 7px;margin-left:4px}
 .picks{width:100%;font-size:14px}.picks td,.picks th{padding:6px 8px;text-align:right}.picks td:first-child,.picks th:first-child{text-align:left}
 .picks .edge{color:var(--good);font-weight:700}.picks td a{color:inherit}.picks .won{color:var(--good);font-weight:700}.picks .lost{color:var(--bad);font-weight:700}
@@ -1993,17 +1994,30 @@ function liveCtx(){
   let start=null; if(PRE&&PRE.sources&&PRE.homeMargin!=null){ const sg=TM.ND.id===PRE.homeId?1:-1; start={edge:sg*PRE.homeMargin,sources:PRE.sources.map(x=>({name:x.name,edge:sg*x.homeMargin}))}; }
   return {state:{qtr:S.qtr,secs:S.secs,nd:S.nd,unc:S.unc,poss:TA(S.poss),down:S.down,dist:S.dist,pos:S.pos},abbr:{ND:TA('ND'),UNC:TA('UNC')},sims:A.n,avgMargin:A.marSum/A.n,avgTotal:t/A.n,median:[med(A.ndH),med(A.ucH)],start};
 }
+// A bet's price is only good for a short time. Ages tick every second; past 30s the price check is OLD (red).
+const OLD_MS=30000;
+function ageText(at){ if(!at) return ['',false]; const s=Math.max(0,Math.round((Date.now()-at)/1000)), old=s*1000>OLD_MS; return [old?`OLD · checked ${s<120?s+'s':Math.round(s/60)+' min'} ago`:`checked ${s}s ago`,old]; }
+function tickAges(){ document.querySelectorAll('.age[data-at]').forEach(el=>{ const [t,old]=ageText(+el.dataset.at); el.textContent=t; el.classList.toggle('old',old); }); }
+setInterval(()=>{ if(!document.hidden) tickAges(); },1000);
 function renderPicks(m){
   const el=$('pickBox'); if(!el||!m) return;
-  const pc=v=>(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢', ctx=liveCtx();
+  const pc=v=>(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢', ctx=liveCtx(), age=at=>at?`<span class="age" data-at="${at}"></span>`:'';
   const why=(html)=>`<tr class="whyrow"><td colspan="6"><details><summary>Why the model likes this</summary><div class="why">${html}</div></details></td></tr>`;
   const tg=t=>t?` <span class="tagtier t-${t}">${t==='low'?'low risk':t==='high'?'high risk':'medium'}</span>`:'';
-  const now=(m.edges||[]).map(e=>`<tr><td><b>${e.sel}</b>${tg(e.tier)} <span class="small">${e.type}</span></td><td>${e.url?`<a href="${e.url}" target="_blank" rel="noopener">${e.venue}</a>`:e.venue}</td><td>${c(e.ask??e.cost)}</td><td>${pc(e.model)}</td><td>${e.fair!=null?pc(e.fair):'–'}</td><td class="edge">+${((e.fairEdge??e.edge)*100).toFixed(1)}</td></tr>`+(ctx?why(explainBet(e,Object.assign({},ctx,{trend:trendFor(e)}))):'')).join('');
-  const lg=(m.logged||[]).map(p=>`<tr><td><b>${p.sel}</b>${p.auto?' <span class="tagauto">game bet</span>':''}${tg(p.tier)} <span class="small">${p.type}, ${p.clock}, ${p.score}</span></td><td>${p.venue}</td><td>${c(p.ask??p.price)}</td><td>${pc(p.model)}</td><td>${p.fair!=null?pc(p.fair):'–'}</td><td class="${p.status==='won'?'won':p.status==='lost'?'lost':''}">${p.status==='open'?'open':p.status}</td></tr>`+(p.why?why(explainBet({...p,cost:p.price,mid:p.why.mid},{...p.why,trend:null})):'')).join('');
-  el.innerHTML=`<h3 class="sh">Bets the model likes right now</h3>
-    ${now?`<div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th></tr></thead><tbody>${now}</tbody></table></div>`:'<p class="small" style="margin:0">No bet clears the bar on this play. A bet qualifies when the fair price, halfway between the model and the market, beats what you would pay by 2.5 points for favorites, 3 near coin flips and 4 on underdogs. Contracts under 10¢ and gaps over 20 points are skipped.</p>'}
-    ${lg?`<h3 class="sh" style="margin-top:14px">Logged for this game</h3><div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Result</th></tr></thead><tbody>${lg}</tbody></table></div>`:''}
-    <p class="small" style="margin:8px 0 0">Each game gets up to three game bets, the best one in each risk tier once the game reaches ${WIN_LABEL}. Other bets are logged while someone watches. All are paper picks graded at the final, not betting advice.</p>`;
+  const nowOf=Object.fromEntries((m.now||[]).map(x=>[x.key,x]));
+  const now=(m.edges||[]).map(e=>`<tr><td><b>${e.sel}</b>${tg(e.tier)} <span class="small">${e.type}</span> ${age((e.book&&e.book.at)||m.at)}</td><td>${e.url?`<a href="${e.url}" target="_blank" rel="noopener">${e.venue}</a>`:e.venue}</td><td>${c(e.cost)}${e.book?`<div class="small">$${e.book.stake} buys ${e.book.qty}</div>`:''}</td><td>${pc(e.model)}</td><td>${e.fair!=null?pc(e.fair):'–'}</td><td class="edge">+${((e.fairEdge??e.edge)*100).toFixed(1)}</td></tr>`+(ctx?why(explainBet(e,Object.assign({},ctx,{trend:trendFor(e)}))):'')).join('');
+  // Logged bets: is the logged price still there? Open bets get the current $-stake buy price from the order book.
+  const buyNow=p=>{ if(p.status!=='open') return '<span class="small">–</span>'; const n=nowOf[p.key];
+    if(!n||n.now==null) return `<span class="oldtag">OLD · ${n&&n.why?n.why:'not buyable now'}</span>`;
+    return n.now>p.price+0.005?`<span class="oldtag">OLD · now ${c(n.now)}</span>`:`<span class="okbuy">buyable ${c(n.now)}</span> ${age(n.at)}`; };
+  const lg=(m.logged||[]).map(p=>`<tr><td><b>${p.sel}</b>${p.auto?' <span class="tagauto">game bet</span>':''}${p.steady?' <span class="tagtier t-low">steady</span>':''}${tg(p.tier)} <span class="small">${p.type}, ${p.clock}, ${p.score}</span></td><td>${p.venue}</td><td>${c(p.price)}</td><td>${buyNow(p)}</td><td>${pc(p.model)}</td><td class="${p.status==='won'?'won':p.status==='lost'?'lost':''}">${p.status==='open'?'open':p.status}</td></tr>`+(p.why?why(explainBet({...p,cost:p.price,mid:p.why.mid},{...p.why,trend:null})):'')).join('');
+  const none=m.pending?'<p class="small" style="margin:0"><b>New play.</b> Re-checking bets for it; anything shown for the last play is gone.</p>'
+    :'<p style="margin:0"><b>No live bets right now.</b> <span class="small">No moneyline, spread or total on Polymarket US clears the bar at a price $10 can actually buy on the order book. A bet qualifies when the fair price, halfway between the model and the market, beats that price by 2.5 points for favorites and 3 near coin flips (underdogs are paused).</span></p>';
+  el.innerHTML=`<h3 class="sh">Bets you can buy right now</h3>
+    ${now?`<div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th></tr></thead><tbody>${now}</tbody></table></div>`:none}
+    ${lg?`<h3 class="sh" style="margin-top:14px">Logged for this game</h3><div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Logged at</th><th>Now</th><th>Model</th><th>Result</th></tr></thead><tbody>${lg}</tbody></table></div>`:''}
+    <p class="small" style="margin:8px 0 0">Only Polymarket US bets are listed: price is the average a $10 order fills at on the live order book, fee included, re-checked every 10 seconds and cleared on every new play. Red <b style="color:var(--bad)">OLD</b> means that price can't be counted on anymore. Each game also gets up to one game bet per active tier once it reaches ${WIN_LABEL}. All are paper picks graded at the final, not betting advice.</p>`;
+  tickAges();
 }
 // ===== Box score =====
 let BOX=null, boxAt=0;
@@ -2045,12 +2059,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-05.2';
+const BUILD='2026-10-05.3';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.2'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.3'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>
