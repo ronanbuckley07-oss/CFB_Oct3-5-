@@ -11,10 +11,10 @@ const PAPER_STAKE = +process.env.PAPER_STAKE || 10; // dollars per bet in the re
 const MIN_EDGE_ML = 0.05;    // moneyline: model probability at least 5 points above the ask
 const MIN_EDGE_LINE = 0.06;  // spread/total ladders only give a midpoint, so ask for a little more
 const MAX_OPEN_PER_GAME = 4;
-// A bet is only logged against a quote fetched in the last 45 seconds. Older quotes trail the game: the model sees the
+// A bet is only logged against a quote fetched in the last 30 seconds. Older quotes trail the game: the model sees the
 // latest play and the price doesn't yet, so the "edge" is the play, the logged price is one nobody can still get, and
 // the paper record looks better than real trading would.
-const QUOTE_MAX_AGE = +process.env.QUOTE_MAX_AGE_MS || 45000;
+const QUOTE_MAX_AGE = +process.env.QUOTE_MAX_AGE_MS || 30000;
 const quoteAge = g => (g.mkFetched ? Date.now() - g.mkFetched : Infinity);
 const MAX_EDGE = 0.20;
 // The model's number and the market's number, averaged. In a replay of the 2025 NFL season with tables built only from
@@ -35,15 +35,19 @@ export const TIERS = {
 export const tierActive = t => !!TIERS[t] && !TIERS[t].paused;
 
 // Steady picks: a narrow low-risk rule, the one that held up when replayed on games the model never saw.
-// Moneyline only, Q2 through Q4, on a team priced 60 to 85 cents (fees in) that already leads by 4+, and only when the
-// model at least agrees: the fair price (model and market averaged) is at or above what you pay.
-// Replay, 2025 + 2026 weeks 1-4 NFL, one per game: 78 bets, 83% hit at 73 cents, +14% (90% range +1% to +25%).
-// The same spots without the model's agreement: 271 bets, -5%. Chosen out of 400 rules tried on 2025, so the real edge is
-// likely smaller than the replay says. It only works when the price and the game state describe the same play: one play
-// apart, the same rule lost 4-6%. So a steady pick is logged only after the play has been settled on ESPN for 40 seconds
-// and with a quote fetched after that (in practice: after scores, timeouts, reviews and quarter breaks).
-export const STEADY = { label: 'Steady picks', min: 0.60, max: 0.85, lead: 4, fromQtr: 2, settleMs: 40000,
-  desc: 'favorites priced 60¢ to 85¢ that already lead by 4+, from the 2nd quarter on, when the model agrees with the price' };
+// Moneyline only, Q2 through Q4, on a team priced 65 to 85 cents (fees in) that already leads by 4+, and only when the
+// model at least agrees: the fair price (model and market averaged) is at or above what you pay. Then cash out (sell)
+// once that team's price reaches 90 cents, instead of riding every bet to the final whistle.
+// Replay, 2025 + 2026 weeks 1-4 NFL, one per game (tools/trading_holdout/strat.mjs): 64 bets, 86% won or cashed out,
+// +12.9% (90% range +3% to +21%), +13% in 2025 and +12% in 2026, and a third less swing per bet than holding to the end.
+// 61% reached the cash-out price. Ideas that did worse: a second or third bet per game, stop-losses, selling at the
+// two-minute warning, a 7-point lead minimum. The same spots without the model's agreement lost 5%. These rules were
+// picked on this same replay, so the real edge is likely smaller. It only works when the price and the game state
+// describe the same play: one play apart, the rule lost 4-6%. So a steady pick is logged only after the play has been
+// settled on ESPN for 40 seconds and with a quote fetched after that (after scores, timeouts, reviews, quarter breaks).
+export const STEADY = { label: 'Steady picks', min: 0.65, max: 0.85, lead: 4, fromQtr: 2, settleMs: 40000, cashOut: 0.90,
+  replay: { n: 64, hitOrCash: 0.861, avgPrice: 0.762, roi: 0.129, roiLo: 0.03, roiHi: 0.21, cashedShare: 0.61 },
+  desc: 'favorites priced 65¢ to 85¢ that already lead by 4+, from the 2nd quarter on, when the model agrees with the price; cash out at 90¢' };
 export const tierOf = cost => cost >= TIERS.low.min ? 'low' : cost >= TIERS.medium.min ? 'medium' : cost >= TIERS.high.min ? 'high' : null;       // a bigger gap than this is almost always a stale or mismatched market price, not an edge
 
 // When in a game to take the one automatic bet. From replaying 2023-25 NFL games against Vegas win probability
@@ -99,7 +103,7 @@ export function createPicks({ api, dir }) {
       for (const side of ['away', 'home']) {
         const m = us[side]; if (!m || m.ask == null) continue;
         const slot = slotOf(side), p = slot === 'ND' ? wA : 1 - wA, cost = m.ask + usFee(m.ask);
-        out.push({ venue: V, url, type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], cost, model: p, edge: p - cost, mid: m.p, ask: m.ask, trade: m.trade });
+        out.push({ venue: V, url, type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], cost, model: p, edge: p - cost, mid: m.p, ask: m.ask, bid: m.bid ?? null, trade: m.trade });
       }
       for (const sp of us.spreads || []) {
         const slot = slotOf(sp.side), p = marginP(A, slot === 'ND', sp.by); if (p == null) continue;
@@ -129,7 +133,7 @@ export function createPicks({ api, dir }) {
       for (const side of ['away', 'home']) {
         const m = src[side]; if (!m || m.implied || !usable(m.ask, m.bid)) continue;
         const slot = slotOf(side), p = slot === 'ND' ? wA : 1 - wA;
-        push({ type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], model: p }, m.ask, m.p);
+        push({ type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], model: p, bid: m.bid ?? null }, m.ask, m.p);
       }
       for (const s of src.spreads || []) {
         const slot = slotOf(s.side), p = marginP(A, slot === 'ND', s.by); if (p == null) continue;
@@ -235,9 +239,43 @@ export function createPicks({ api, dir }) {
     db.steady[id] = { key: pick && pick.key, at: new Date().toISOString(), matchup: g.title }; dirty = true;
     return pick;
   }
+  // Cash out: an open steady pick whose team's price (midpoint) has reached 90 cents is sold at the bid, fees out.
+  // The pick keeps its final result too, but the steady record counts the cash-out, which is what the rule says to do.
+  const sellFee = { 'Polymarket US': p => TAKER_THETA * p * (1 - p), Kalshi: p => 0.07 * p * (1 - p) };
+  function cashOuts(g, mk) {
+    if (!mk || quoteAge(g) > QUOTE_MAX_AGE) return [];
+    const open = db.picks.filter(p => p.steady && p.status === 'open' && !p.cashOut && p.league === g.league && p.event === g.event);
+    if (!open.length) return [];
+    const aIsAway = String(mk.awayId) === String(g.slotId.ND), done = [];
+    for (const p of open) {
+      const slot = String(p.teamId) === String(g.slotId.ND) ? 'ND' : 'UNC', side = (slot === 'ND') === aIsAway ? 'away' : 'home';
+      const src = p.venue === 'Kalshi' ? mk.kalshi : mk.pmus, q = src && src.found && src[side];
+      if (!q || q.bid == null || q.p == null || q.p < STEADY.cashOut) continue;
+      const fee = (sellFee[p.venue] || sellFee['Polymarket US'])(q.bid), proceeds = +(q.bid - fee).toFixed(4);
+      p.cashOut = { at: new Date().toISOString(), bid: q.bid, mid: q.p, proceeds, pl: +(proceeds - p.price).toFixed(3) };
+      if (p.fill && p.fill.qty > 0) p.fill.cashPl = +(p.fill.qty * proceeds - p.fill.cost).toFixed(2);
+      dirty = true; done.push(p);
+    }
+    return done;
+  }
+  const steadyHeld = (league, event) => db.picks.some(p => p.steady && p.status === 'open' && !p.cashOut && p.league === league && p.event === event);
+  // Steady record: a cashed-out pick counts as a win at its cash-out profit, whatever happened after
+  function steadySummary(sp) {
+    const done = sp.filter(p => p.cashOut || p.status === 'won' || p.status === 'lost');
+    const pl = x => x.cashOut ? x.cashOut.pl : x.pl || 0, w = done.filter(x => pl(x) > 0).length, cost = done.reduce((a, x) => a + x.price, 0), tot = done.reduce((a, x) => a + pl(x), 0);
+    const real = sp.filter(x => x.fill && x.fill.qty > 0 && (x.cashOut || x.status === 'won' || x.status === 'lost')), rpl = x => x.fill.cashPl ?? x.fill.pl ?? 0;
+    const rs = real.reduce((a, x) => a + x.fill.cost, 0), rp = real.reduce((a, x) => a + rpl(x), 0);
+    return { w, l: done.length - w, cashed: done.filter(x => x.cashOut).length, heldWouldHave: { w: done.filter(x => x.status === 'won').length, l: done.filter(x => x.status === 'lost').length },
+      pct: done.length ? w / done.length : null, pl: +tot.toFixed(2), roi: cost ? tot / cost : null,
+      realistic: { n: real.length, w: real.filter(x => rpl(x) > 0).length, l: real.filter(x => rpl(x) <= 0).length, staked: +rs.toFixed(2), pl: +rp.toFixed(2), roi: rs ? rp / rs : null } };
+  }
+
   const steadyNow = league => { const now = Date.now(), out = [];
-    for (const [k, v] of steadyLive) { if (now - v.at > 300000) { steadyLive.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); }
-    return { updated: new Date().toISOString(), rule: STEADY, games: out.sort((a, b) => b.bets[0].fairEdge - a.bets[0].fairEdge) }; };
+    for (const [k, v] of steadyLive) { if (now - v.at > 120000) { steadyLive.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); }
+    // open steady picks, with a cash-out flag once the price has reached 90 cents
+    const held = db.picks.filter(p => p.steady && p.status === 'open' && (league === 'all' || p.league === league)).map(p => ({ event: p.event, league: p.league, matchup: p.matchup, sel: p.sel,
+      venue: p.venue, url: p.url, price: p.price, clock: p.clock, cashOut: p.cashOut || null }));
+    return { updated: new Date().toISOString(), rule: STEADY, games: out.sort((a, b) => b.bets[0].fairEdge - a.bets[0].fairEdge), held }; };
 
   // Settle open picks whose games are final
   async function settle() {
@@ -295,9 +333,9 @@ export function createPicks({ api, dir }) {
     return { ...extra, record: { w, l, push: ps.filter(p => p.status === 'push').length, pct: done.length ? w / done.length : null, pl: +pl.toFixed(2), roi: cost ? pl / cost : null,
         expected: done.length ? +(done.reduce((a, p) => a + p.model, 0) / done.length).toFixed(3) : null, avgPrice: done.length ? +(cost / done.length).toFixed(3) : null }, byType,
       open: ps.filter(p => p.status === 'open').reverse(), settled: ps.filter(p => p.status !== 'open').reverse(),
-      steady: { rule: STEADY, paper: summarize(sp), realistic: realOf(sp), open: sp.filter(p => p.status === 'open').reverse(), settled: sp.filter(p => p.status !== 'open').reverse() } };
+      steady: { rule: STEADY, paper: steadySummary(sp), realistic: steadySummary(sp).realistic, open: sp.filter(p => p.status === 'open').reverse(), settled: sp.filter(p => p.status !== 'open').reverse() } };
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event));
   const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, edges, consider, autoPick, autoDone, steadyPick, steadyDone, steadyNow, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, edges, consider, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

@@ -74,14 +74,15 @@ export function createLive({ api, pages, dataDir }) {
       if (watched(this.league, this.event)) { this.edges = []; return; } // the watched tracker has better numbers
       // Prices every 3 minutes is enough to know a game has markets, but a game bet must be judged against the price
       // right now: a 3-minute-old quote is several plays old, and the model would "find" edges that are just plays the
-      // quote hasn't caught up with. Inside the betting window, refresh whenever the quote is older than 20 seconds.
-      const steadyOpen = this.S.qtr >= 2 && this.S.qtr <= 4 && !picks.steadyDone(this.league, this.event);
-      const mkEvery = this.noMk ? 900000 : (inWindow(this.S) && !picks.autoDone(this.league, this.event)) || steadyOpen ? 20000 : 180000;
+      // quote hasn't caught up with. Inside the betting window, or with a steady pick possible or open, refresh every 10s.
+      const steadyOpen = this.S.qtr >= 2 && this.S.qtr <= 4 && (!picks.steadyDone(this.league, this.event) || picks.steadyHeld(this.league, this.event));
+      const mkEvery = this.noMk ? 900000 : (inWindow(this.S) && !picks.autoDone(this.league, this.event)) || steadyOpen ? 10000 : 180000;
       if (Date.now() - this.mkAt > mkEvery) {
         this.mkAt = Date.now();
         try { const m = await this.call(`kind=markets&event=${this.event}&nohist=1`); this.mk = m; this.mkFetched = Date.now(); this.noMk = !((m.kalshi && m.kalshi.found) || (m.poly && m.poly.found)); } catch { this.noMk = true; }
       }
       if (this.noMk) { this.edges = []; return; }
+      picks.cashOuts(this, this.mk); // open steady picks that have reached the cash-out price
       const ev = await this.call(`event=${this.event}&date=${this.date}`); if (!ev || !ev.competitions) return;
       const o = parseEspn(ev, this.teams, this.abbr);
       for (const k of ['qtr', 'secs', 'nd', 'unc', 'poss', 'down', 'dist', 'pos', 'toND', 'toUNC']) if (o[k] != null) this.S[k] = o[k];
@@ -124,7 +125,8 @@ export function createLive({ api, pages, dataDir }) {
         trade: e.trade || null, teamId: e.teamId || null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null, team: e.team || null, mid: e.mid ?? null, ask: e.ask ?? null }));
     } catch {} finally { scanning[league] = false; }
   }
-  if (pool) { setInterval(() => { scanLeague('cfb'); scanLeague('nfl'); }, 30000).unref(); setTimeout(() => { scanLeague('cfb'); scanLeague('nfl'); }, 20000).unref(); }
+  // Every 10 seconds (was 30): the scanner is what logs game bets and steady picks, so it has to keep up with the game
+  if (pool) { setInterval(() => { scanLeague('cfb'); scanLeague('nfl'); }, 10000).unref(); setTimeout(() => { scanLeague('cfb'); scanLeague('nfl'); }, 20000).unref(); }
   const leadingFor = league => ({ updated: new Date().toISOString(), window: WINDOW.label, bets: league === 'all' ? [...leading.cfb, ...leading.nfl].sort((a, b) => (b.fairEdge ?? b.edge) - (a.fairEdge ?? a.edge)) : leading[league] || [] });
 
   function status() {
@@ -195,7 +197,7 @@ export function createLive({ api, pages, dataDir }) {
     async poll() {
       if (this.polling) return; this.polling = true;
       try {
-        if (Date.now() - (this.mkAt || 0) > 20000) { this.mkAt = Date.now(); this.call(`kind=markets&event=${this.event}`).then(m => { if (m && !m.error) { this.mk = m; this.mkFetched = Date.now(); } }).catch(() => {}); }
+        if (Date.now() - (this.mkAt || 0) > 10000) { this.mkAt = Date.now(); this.call(`kind=markets&event=${this.event}`).then(m => { if (m && !m.error) { this.mk = m; this.mkFetched = Date.now(); } }).catch(() => {}); }
         const ev = await this.call(`event=${this.event}&date=${this.date}`);
         if (!ev || !ev.competitions) throw new Error(ev && ev.error || 'not in feed');
         this.fails = 0;
@@ -216,6 +218,7 @@ export function createLive({ api, pages, dataDir }) {
         if (sj !== this.lastEv) { this.lastEv = sj; this.last.ev = slim; this.last.skey = this.key; this.broadcast('ev', { ev: slim, skey: this.key }); }
         // Steady pick: the last full run must be of this same play, settled 40s+, with a quote fetched after that
         const R = this.last.result;
+        if (this.mk && o.state === 'in') picks.cashOuts(this, this.mk);
         if (o.state === 'in' && this.mk && R && R.final && R.pk === pkNow && !picks.steadyDone(this.league, this.event))
           picks.steadyPick(this, R.A, this.mk, this.S, Date.now() - this.pkAt);
         if (o.state === 'post') { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), 30000); }

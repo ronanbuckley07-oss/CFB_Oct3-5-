@@ -32,7 +32,7 @@ export function createPmusData(get) {
   async function events(league) {
     const slug = await leagueSlug(league), out = [];
     for (let off = 0; off < 400; off += 100) {
-      const d = await get(`${GATEWAY}/v2/leagues/${slug}/events?limit=100&offset=${off}`, 15000);
+      const d = await get(`${GATEWAY}/v2/leagues/${slug}/events?limit=100&offset=${off}`, 8000); // carries best bid/ask
       out.push(...(d.events || [])); if ((d.events || []).length < 100) break;
     }
     return out;

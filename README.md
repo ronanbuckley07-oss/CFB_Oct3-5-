@@ -101,14 +101,30 @@ the Polymarket US order book really charged (`slip`).
 ## Steady picks
 
 A separate section at the top of the home page, written for people who don't want the model details. One rule:
-moneyline, Q2 through Q4, a team priced 60-85¢ (fees in) that already leads by 4+, and the fair price is at least what
-you pay. Replay: 78 bets, 83% hit at 73¢, +14% (90% range +1% to +25%); the same spots without the model's agreement
-lost 5%. It was the best of 400 rules tried on 2025, so the real edge is probably smaller, and college was not tested.
+moneyline, Q2 through Q4, a team priced 65-85¢ (fees in) that already leads by 4+, and the fair price is at least what
+you pay. Then **cash out at 90¢**: once that team's price reaches 90¢ the pick is sold at the bid (fees out) and listed
+under "Cash out now"; the steady record counts the cash-out.
+
+Replay (`tools/trading_holdout/strat.mjs`): 64 bets at 76¢ on average, +12.9% (90% range +3% to +21%), +13% in 2025
+and +12% in 2026, 61% reached 90¢, and a third less swing per bet than holding every bet to the final. Variations that
+did worse: a second or third bet per game, stop-losses, selling at the two-minute warning, a 7-point lead minimum,
+only betting right after scores. The same spots without the model's agreement lost 5%. The band and cash-out were
+picked on this same replay, so the real edge is probably smaller; college was not tested.
+
 The rule failed (-4 to -6%) when the model and the price were a play apart, so a steady pick is logged only after a
 play has been settled on ESPN for 40 seconds, against a quote fetched after that. One per game, own record, not
-counted in the tier records. `/api/picks/steady?league=` lists what qualifies right now. The 82 replayed bets are in
-`public/replay_bets.json`; the "Past bets" list can show them, tagged, without counting them in any record. Past bets
-now lists every bet instead of the last 500.
+counted in the tier records. `/api/picks/steady?league=` lists what qualifies now and the open picks (with any
+cash-out). The replayed bets are in `public/replay_bets.json`; "Past bets" can show them, tagged, without counting
+them in any record.
+
+## Update speed
+
+- Scanner: every 10 seconds (was 30). Prices for a game in the betting window, or with a steady pick possible or
+  open, refresh every 10 seconds (was 3 minutes, then 20 seconds).
+- Watched games: prices every 10 seconds (was 20). Game page: prices every 8 seconds, ESPN win probability every 10
+  (both were 15). Home page bet sections: every 10 seconds (was 30).
+- Upstream caches for live prices (Kalshi event lists, Polymarket US events): 8 seconds (were 20 and 15).
+- No bet is logged against a quote older than 30 seconds (`QUOTE_MAX_AGE_MS`, was 45).
 
 ## Trading (Polymarket US)
 

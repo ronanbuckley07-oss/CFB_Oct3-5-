@@ -62,7 +62,7 @@ const handler = async (req) => {
     }
     if (kind === 'markets') {
       if (!event) return json({ error: 'missing event' }, 400);
-      return json(await markets(event, u.searchParams.get('kalshi'), u.searchParams.get('poly'), u.searchParams.has('debug'), u.searchParams.has('nohist')), 200, 15);
+      return json(await markets(event, u.searchParams.get('kalshi'), u.searchParams.get('poly'), u.searchParams.has('debug'), u.searchParams.has('nohist')), 200, 5);
     }
     if (kind === 'summary') {
       if (!event) return json({ error: 'missing event' }, 400);
@@ -280,7 +280,7 @@ async function kalshiEvents(kind = 'GAME') {
   const out = []; let cursor = '';
   for (let page = 0; page < 6; page++) {
     const q = `/events?series_ticker=${LG.kx}${kind}&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-    const d = await getAny(KALSHI.map(b => b + q), 20000);
+    const d = await getAny(KALSHI.map(b => b + q), 8000); // live prices ride on this list, so keep it fresh
     out.push(...(d.events || [])); cursor = d.cursor; if (!cursor || !(d.events || []).length) break;
   }
   return out;
@@ -289,7 +289,7 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   let events;
   if (pin) {
     const evT = pin.toUpperCase().split('-').slice(0, 2).join('-').replace(new RegExp(`^${LG.kx}(SPREAD|TOTAL)`), `${LG.kx}GAME`);
-    const d = await getAny(KALSHI.map(b => `${b}/events/${evT}?with_nested_markets=true`), 20000);
+    const d = await getAny(KALSHI.map(b => `${b}/events/${evT}?with_nested_markets=true`), 8000);
     events = [d.event ? { ...d.event, markets: d.markets || d.event.markets } : d];
   } else events = await kalshiEvents();
   let best = null;

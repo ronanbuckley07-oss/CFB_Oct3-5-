@@ -1368,8 +1368,8 @@ let pollFails=0, lastWPPull=0, lastMkPull=0, lastBoxPull=0;
 // ESPN's win-probability line, market prices and the box score don't need 3-second freshness
 function pullExtras(force){
   const t=Date.now(), boxOpen=!$('tab-box').hidden;
-  if(force||t-lastWPPull>15000){ lastWPPull=t; pullEspnWP(); }
-  if(force||t-lastMkPull>15000){ lastMkPull=t; pullMarkets(); }
+  if(force||t-lastWPPull>10000){ lastWPPull=t; pullEspnWP(); }
+  if(force||t-lastMkPull>8000){ lastMkPull=t; pullMarkets(); }
   if(force||t-lastBoxPull>(boxOpen?6000:30000)){ lastBoxPull=t; pullBox(); }
 }
 // Updates wait in a queue for the stream delay, then apply in order, so the sim lines up with what's on screen
@@ -2045,12 +2045,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-05.1';
+const BUILD='2026-10-05.2';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.1'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.2'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>
