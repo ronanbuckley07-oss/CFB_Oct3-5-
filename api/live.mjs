@@ -241,7 +241,9 @@ export function createLive({ api, pages, dataDir }) {
     // (they were for the old play) until the next run. Logged bets get their current buy price either way.
     async recheck(pkNow) {
       const E = this.last.edges; if (!E || this.rechecking) return;
-      if (E.pk && E.pk !== pkNow && E.edges.length) { this.last.edges = { ...E, edges: [], pending: true, at: Date.now() }; this.broadcast('edges', this.last.edges); return; }
+      // New play: keep the last play's bets on screen, flagged stale (red OLD on the page), until the new run replaces them
+      if (E.pk && E.pk !== pkNow && !E.stale) { this.last.edges = { ...E, stale: true }; this.broadcast('edges', this.last.edges); return; }
+      if (E.stale) return;
       if (Date.now() - (E.at || 0) < 10000) return;
       this.rechecking = true;
       try {

@@ -2005,18 +2005,19 @@ function renderPicks(m){
   const why=(html)=>`<tr class="whyrow"><td colspan="6"><details><summary>Why the model likes this</summary><div class="why">${html}</div></details></td></tr>`;
   const tg=t=>t?` <span class="tagtier t-${t}">${t==='low'?'low risk':t==='high'?'high risk':'medium'}</span>`:'';
   const nowOf=Object.fromEntries((m.now||[]).map(x=>[x.key,x]));
-  const now=(m.edges||[]).map(e=>`<tr><td><b>${e.sel}</b>${tg(e.tier)} <span class="small">${e.type}</span> ${age((e.book&&e.book.at)||m.at)}</td><td>${e.url?`<a href="${e.url}" target="_blank" rel="noopener">${e.venue}</a>`:e.venue}</td><td>${c(e.cost)}${e.book?`<div class="small">$${e.book.stake} buys ${e.book.qty}</div>`:''}</td><td>${pc(e.model)}</td><td>${e.fair!=null?pc(e.fair):'–'}</td><td class="edge">+${((e.fairEdge??e.edge)*100).toFixed(1)}</td></tr>`+(ctx?why(explainBet(e,Object.assign({},ctx,{trend:trendFor(e)}))):'')).join('');
+  const now=(m.edges||[]).map(e=>`<tr><td><b>${e.sel}</b>${tg(e.tier)} <span class="small">${e.type}</span> ${m.stale?'<span class="oldtag">OLD · previous play</span>':age((e.book&&e.book.at)||m.at)}</td><td>${e.url?`<a href="${e.url}" target="_blank" rel="noopener">${e.venue}</a>`:e.venue}</td><td>${c(e.cost)}${e.book?`<div class="small">$${e.book.stake} buys ${e.book.qty}</div>`:''}</td><td>${pc(e.model)}</td><td>${e.fair!=null?pc(e.fair):'–'}</td><td class="edge">+${((e.fairEdge??e.edge)*100).toFixed(1)}</td></tr>`+(ctx?why(explainBet(e,Object.assign({},ctx,{trend:trendFor(e)}))):'')).join('');
   // Logged bets: is the logged price still there? Open bets get the current $-stake buy price from the order book.
   const buyNow=p=>{ if(p.status!=='open') return '<span class="small">–</span>'; const n=nowOf[p.key];
     if(!n||n.now==null) return `<span class="oldtag">OLD · ${n&&n.why?n.why:'not buyable now'}</span>`;
     return n.now>p.price+0.005?`<span class="oldtag">OLD · now ${c(n.now)}</span>`:`<span class="okbuy">buyable ${c(n.now)}</span> ${age(n.at)}`; };
   const lg=(m.logged||[]).map(p=>`<tr><td><b>${p.sel}</b>${p.auto?' <span class="tagauto">game bet</span>':''}${p.steady?' <span class="tagtier t-low">steady</span>':''}${tg(p.tier)} <span class="small">${p.type}, ${p.clock}, ${p.score}</span></td><td>${p.venue}</td><td>${c(p.price)}</td><td>${buyNow(p)}</td><td>${pc(p.model)}</td><td class="${p.status==='won'?'won':p.status==='lost'?'lost':''}">${p.status==='open'?'open':p.status}</td></tr>`+(p.why?why(explainBet({...p,cost:p.price,mid:p.why.mid},{...p.why,trend:null})):'')).join('');
-  const none=m.pending?'<p class="small" style="margin:0"><b>New play.</b> Re-checking bets for it; anything shown for the last play is gone.</p>'
-    :'<p style="margin:0"><b>No live bets right now.</b> <span class="small">No moneyline, spread or total on Polymarket US clears the bar at a price $10 can actually buy on the order book. A bet qualifies when the fair price, halfway between the model and the market, beats that price by 2.5 points for favorites and 3 near coin flips (underdogs are paused).</span></p>';
+  const none=m.stale?'<p style="margin:0"><b>No live bets right now.</b> <span class="small">New play: simulating it now; bets that qualify will show here in a few seconds.</span></p>'
+    :'<p style="margin:0"><b>No live bets right now.</b> <span class="small">No moneyline, spread or total on Polymarket US or Kalshi clears the bar at a price $10 can actually buy on the order book. A bet qualifies when the fair price, halfway between the model and the market, beats that price by 2.5 points for favorites and 3 near coin flips (underdogs are paused).</span></p>';
   el.innerHTML=`<h3 class="sh">Bets you can buy right now</h3>
+    ${now&&m.stale?'<p class="small" style="margin:0 0 6px"><b>New play.</b> These were for the last play and can\'t be counted on; new numbers in a few seconds.</p>':''}
     ${now?`<div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th></tr></thead><tbody>${now}</tbody></table></div>`:none}
     ${lg?`<h3 class="sh" style="margin-top:14px">Logged for this game</h3><div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Logged at</th><th>Now</th><th>Model</th><th>Result</th></tr></thead><tbody>${lg}</tbody></table></div>`:''}
-    <p class="small" style="margin:8px 0 0">Only Polymarket US bets are listed: price is the average a $10 order fills at on the live order book, fee included, re-checked every 10 seconds and cleared on every new play. Red <b style="color:var(--bad)">OLD</b> means that price can't be counted on anymore. Each game also gets up to one game bet per active tier once it reaches ${WIN_LABEL}. All are paper picks graded at the final, not betting advice.</p>`;
+    <p class="small" style="margin:8px 0 0">Only Polymarket US and Kalshi bets are listed (international Polymarket can't be traded from the US): price is the average a $10 order fills at on that venue's live order book, fee included, re-checked every 10 seconds and marked OLD on every new play until it is simulated. Red <b style="color:var(--bad)">OLD</b> means that price can't be counted on anymore. Each game also gets up to one game bet per active tier once it reaches ${WIN_LABEL}. All are paper picks graded at the final, not betting advice.</p>`;
   tickAges();
 }
 // ===== Box score =====
@@ -2059,12 +2060,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-05.3';
+const BUILD='2026-10-05.4';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.3'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.4'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>

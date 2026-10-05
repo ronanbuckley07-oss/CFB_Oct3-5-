@@ -15,7 +15,10 @@ const MAX_OPEN_PER_GAME = 4;
 // latest play and the price doesn't yet, so the "edge" is the play, the logged price is one nobody can still get, and
 // the paper record looks better than real trading would.
 const QUOTE_MAX_AGE = +process.env.QUOTE_MAX_AGE_MS || 30000;
-const BUYABLE = 'Polymarket US';
+// Venues whose order books the server reads, so a bet's price can be checked before it's shown or logged.
+// International Polymarket isn't one: it can't be traded from the US, so its prices are comparison only.
+const BUYABLE = new Set(['Polymarket US', 'Kalshi']);
+const THETA = { 'Polymarket US': TAKER_THETA, Kalshi: 0.07 };
 const quoteAge = g => (g.mkFetched ? Date.now() - g.mkFetched : Infinity);
 const MAX_EDGE = 0.20;
 // The model's number and the market's number, averaged. In a replay of the 2025 NFL season with tables built only from
@@ -130,38 +133,44 @@ export function createPicks({ api, dir }) {
     const usable = (ask, bid) => ask != null && ask > 0 && ask < 1 && (bid == null || ask - bid <= 0.08);
     for (const [venue, src] of [['Kalshi', mk.kalshi], ['Polymarket', mk.poly]]) {
       if (!src || !src.found) continue;
-      const fee = FEE[venue], push = (o, ask, mid) => { const cost = ask + fee(ask); out.push({ venue, url: src.url, ...o, ask, cost, edge: o.model - cost, mid }); };
+      const fee = FEE[venue], kx = (ticker, outcome) => venue === 'Kalshi' && ticker ? { trade: { ticker, outcome } } : {};
+      const push = (o, ask, mid) => { const cost = ask + fee(ask); out.push({ venue, url: src.url, ...o, ask, cost, edge: o.model - cost, mid }); };
       for (const side of ['away', 'home']) {
         const m = src[side]; if (!m || m.implied || !usable(m.ask, m.bid)) continue;
         const slot = slotOf(side), p = slot === 'ND' ? wA : 1 - wA;
-        push({ type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], model: p, bid: m.bid ?? null }, m.ask, m.p);
+        push({ type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], model: p, bid: m.bid ?? null, ...kx(m.ticker, 'YES') }, m.ask, m.p);
       }
       for (const s of src.spreads || []) {
         const slot = slotOf(s.side), p = marginP(A, slot === 'ND', s.by); if (p == null) continue;
         const other = slot === 'ND' ? 'UNC' : 'ND', lbl = (t, by) => `${name(t)} ${by > 0 ? '−' + by : '+' + (-by)}`;
         const askOther = s.askOther ?? (s.bid != null ? 1 - s.bid : null);
-        if (usable(s.ask, s.bid)) push({ type: 'spread', sel: lbl(slot, s.by), slot, team: name(slot), teamId: g.slotId[slot], by: s.by, model: p }, s.ask, s.p);
-        if (usable(askOther, s.ask != null ? 1 - s.ask : null)) push({ type: 'spread', sel: lbl(other, -s.by), slot: other, team: name(other), teamId: g.slotId[other], by: -s.by, model: 1 - p }, askOther, 1 - s.p);
+        if (usable(s.ask, s.bid)) push({ type: 'spread', sel: lbl(slot, s.by), slot, team: name(slot), teamId: g.slotId[slot], by: s.by, model: p, ...kx(s.ticker, 'YES') }, s.ask, s.p);
+        if (usable(askOther, s.ask != null ? 1 - s.ask : null)) push({ type: 'spread', sel: lbl(other, -s.by), slot: other, team: name(other), teamId: g.slotId[other], by: -s.by, model: 1 - p, ...kx(s.ticker, 'NO') }, askOther, 1 - s.p);
       }
       for (const t of src.totals || []) {
         const p = overP(A, t.line); if (p == null) continue;
         const askUnder = t.askOther ?? (t.bid != null ? 1 - t.bid : null);
-        if (usable(t.ask, t.bid)) push({ type: 'total', sel: `Over ${t.line}`, over: true, line: t.line, model: p }, t.ask, t.p);
-        if (usable(askUnder, t.ask != null ? 1 - t.ask : null)) push({ type: 'total', sel: `Under ${t.line}`, over: false, line: t.line, model: 1 - p }, askUnder, 1 - t.p);
+        // Kalshi lists some totals as "Under N" markets: buying the Over is then the NO side
+        if (usable(t.ask, t.bid)) push({ type: 'total', sel: `Over ${t.line}`, over: true, line: t.line, model: p, ...kx(t.ticker, t.yesOver === false ? 'NO' : 'YES') }, t.ask, t.p);
+        if (usable(askUnder, t.ask != null ? 1 - t.ask : null)) push({ type: 'total', sel: `Under ${t.line}`, over: false, line: t.line, model: 1 - p, ...kx(t.ticker, t.yesOver === false ? 'YES' : 'NO') }, askUnder, 1 - t.p);
       }
     }
     for (const e of out) { const mkt = e.mid != null ? e.mid : e.cost; e.fair = (e.model + mkt) / 2; e.fairEdge = e.fair - e.cost; e.tier = tierOf(e.cost); }
     return out;
   }
-  // Bets are only ever Polymarket US contracts: it's the venue US residents can trade and the only one whose order
-  // book the server reads. Kalshi and international Polymarket prices stay on the page for comparison, never as bets.
+  // Bets are only Polymarket US and Kalshi contracts, the venues US residents can trade and whose order books the
+  // server reads. International Polymarket prices stay on the page for comparison, never as bets.
   const passes = e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= TIERS[e.tier].fairEdge;
-  const edges = (g, A, mk) => contracts(g, A, mk).filter(e => e.venue === BUYABLE && e.trade && passes(e)).sort((a, b) => b.fairEdge - a.fairEdge);
+  const edges = (g, A, mk) => contracts(g, A, mk).filter(e => BUYABLE.has(e.venue) && e.trade && passes(e)).sort((a, b) => b.fairEdge - a.fairEdge);
   // What PAPER_STAKE dollars buys on the live order book right now. The price becomes the average fill, fee included,
   // so a bet is shown and logged at a price you can actually get. Too thin to fill the stake: not a bet.
+  const bookFill = async (league, venue, trade) => {
+    const bk = venue === 'Kalshi' ? await api[league].kalshiBook(trade.ticker) : await api[league].pmusBook(trade.slug);
+    return simulateFill(bk, trade.outcome, PAPER_STAKE, 0.97, THETA[venue]);
+  };
   async function verify(g, e) {
-    if (!e || e.venue !== BUYABLE || !e.trade) return null;
-    const bk = await api[g.league].pmusBook(e.trade.slug), f = simulateFill(bk, e.trade.outcome, PAPER_STAKE);
+    if (!e || !BUYABLE.has(e.venue) || !e.trade) return null;
+    const f = await bookFill(g.league, e.venue, e.trade);
     if (!f.qty || !f.full) return null;
     const cost = f.cost / f.qty;
     return { ...e, cost, ask: f.avg, edge: e.model - cost, fairEdge: e.fair - cost, tier: tierOf(cost),
@@ -174,8 +183,10 @@ export function createPicks({ api, dir }) {
   // Current buy price (per contract, fee in) for open picks, so the page can say whether a logged price is still there
   async function nowPrices(g, ps) {
     return Promise.all(ps.map(async p => {
-      if (p.status !== 'open' || p.venue !== BUYABLE || !p.trade) return { key: p.key, now: null, why: p.venue !== BUYABLE ? 'not on Polymarket US' : null };
-      try { const f = simulateFill(await api[g.league].pmusBook(p.trade.slug), p.trade.outcome, PAPER_STAKE);
+      if (p.status !== 'open') return { key: p.key, now: null, why: null };
+      if (!BUYABLE.has(p.venue)) return { key: p.key, now: null, why: `${p.venue} can't be traded from the US` };
+      if (!p.trade) return { key: p.key, now: null, why: 'logged before price checks' };
+      try { const f = await bookFill(g.league, p.venue, p.trade);
         return { key: p.key, now: f.qty && f.full ? +(f.cost / f.qty).toFixed(4) : null, why: f.qty && f.full ? null : 'no depth', at: Date.now() }; }
       catch { return { key: p.key, now: null, why: 'book unavailable' }; }
     }));
@@ -204,8 +215,7 @@ export function createPicks({ api, dir }) {
   // What $PAPER_STAKE would actually have bought on the Polymarket US order book at that moment, fees included
   async function fillPaper(pick, trade) {
     try {
-      const bk = await api[pick.league].pmusBook(trade.slug);
-      const f = simulateFill(bk, trade.outcome, PAPER_STAKE);
+      const f = await bookFill(pick.league, pick.venue, trade);
       pick.trade = trade; pick.fill = { stake: PAPER_STAKE, qty: f.qty, avg: f.avg && +f.avg.toFixed(4), fee: f.fee, cost: f.cost, full: f.full, at: new Date().toISOString() };
     } catch (e) { pick.fill = { error: String(e.message || e) }; }
     dirty = true;
@@ -237,7 +247,9 @@ export function createPicks({ api, dir }) {
     if (quoteAge(g) > QUOTE_MAX_AGE) return list; // shown, not logged
     const id = `watch:${g.league}:${g.event}`; if (busy.has(id)) return list; busy.add(id);
     try {
-      const open = db.picks.filter(p => p.event === g.event && p.league === g.league && !p.auto && !p.steady);
+      // Only order-book-checked (Polymarket US, Kalshi) bets count toward the one-per-type limit. Bets logged on other venues before they
+      // were dropped can't be bought, so they must not block a real bet of the same type later in the game.
+      const open = db.picks.filter(p => p.event === g.event && p.league === g.league && !p.auto && !p.steady && BUYABLE.has(p.venue) && p.trade);
       for (const e of list) {
         if (open.length >= MAX_OPEN_PER_GAME) break;
         // One bet per market type per game. Four spread lines on the same team are one opinion, not four, and
@@ -255,7 +267,7 @@ export function createPicks({ api, dir }) {
   function steadyList(g, A, mk, S) {
     if (!A || !mk || !(S.qtr >= STEADY.fromQtr && S.qtr <= 4)) return [];
     const lead = slot => slot === 'ND' ? S.nd - S.unc : S.unc - S.nd;
-    return contracts(g, A, mk).filter(e => e.type === 'moneyline' && e.venue === BUYABLE && e.trade && steadyOk(e) && lead(e.slot) >= STEADY.lead).sort((a, b) => b.fairEdge - a.fairEdge);
+    return contracts(g, A, mk).filter(e => e.type === 'moneyline' && BUYABLE.has(e.venue) && e.trade && steadyOk(e) && lead(e.slot) >= STEADY.lead).sort((a, b) => b.fairEdge - a.fairEdge);
   }
   const steadyOk = e => e.cost >= STEADY.min && e.cost <= STEADY.max && e.fairEdge >= 0 && e.edge <= MAX_EDGE && e.model < 0.97;
   const steadyDone = (league, event) => !!db.steady[`${league}:${event}`];

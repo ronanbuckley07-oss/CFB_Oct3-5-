@@ -94,15 +94,15 @@ export function createPmusData(get) {
 
 // Walk the book the way a taker order would. Buying YES eats offers; buying NO sells YES into bids (cost 1 - bid each).
 // Returns what $stake would really get: contracts, average price per contract, taker fees, total cost.
-export function simulateFill(bk, outcome, stake, maxPrice = 0.97) {
+export function simulateFill(bk, outcome, stake, maxPrice = 0.97, theta = TAKER_THETA) {
   const levels = outcome === 'YES' ? bk.offers.map(l => ({ px: l.px, qty: l.qty })) : bk.bids.map(l => ({ px: 1 - l.px, qty: l.qty }));
   let qty = 0, spend = 0, fee = 0, worst = null;
   for (const l of levels) {
     if (l.px > maxPrice) break;
     const room = stake - spend - fee; if (room <= 0.005) break;
-    const perC = l.px + TAKER_THETA * l.px * (1 - l.px);
+    const perC = l.px + theta * l.px * (1 - l.px);
     const take = Math.min(l.qty, Math.floor(room / perC)); if (take <= 0) break;
-    qty += take; spend += take * l.px; fee += TAKER_THETA * take * l.px * (1 - l.px); worst = l.px;
+    qty += take; spend += take * l.px; fee += theta * take * l.px * (1 - l.px); worst = l.px;
     if (take < l.qty) break;
   }
   fee = Math.round(fee * 100) / 100;

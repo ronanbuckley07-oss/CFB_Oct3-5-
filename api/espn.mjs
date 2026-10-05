@@ -312,7 +312,7 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
     const pr = px(m); if (!pr) continue;
     const label = `${m.yes_sub_title || ''} ${m.subtitle || ''} ${String(m.ticker || '').split('-').pop()}`;
     const sd = side(label); if (!sd) continue;
-    res[sd] = { ...pr, label: m.yes_sub_title || m.ticker, vol: +(m.volume_fp ?? m.volume) || null }; tickers[sd] = m.ticker;
+    res[sd] = { ...pr, label: m.yes_sub_title || m.ticker, vol: +(m.volume_fp ?? m.volume) || null, ticker: m.ticker }; tickers[sd] = m.ticker;
   }
   if (res.A && !res.B) res.B = { p: 1 - res.A.p, implied: true }; if (res.B && !res.A) res.A = { p: 1 - res.B.p, implied: true };
   // Spread and total ladders live in sibling series with the same game code: "X wins by over 14.5 points", "Over 46.5 points scored"
@@ -335,14 +335,14 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   for (const m of sp) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const by = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
-    const sd = side(m.yes_sub_title || txt); if (sd && isFinite(by)) res.spreads.push({ side: sd, by, p: pr.p, bid: pr.bid ?? null, ask: pr.ask ?? null });
+    const sd = side(m.yes_sub_title || txt); if (sd && isFinite(by)) res.spreads.push({ side: sd, by, p: pr.p, bid: pr.bid ?? null, ask: pr.ask ?? null, ticker: m.ticker });
   }
   for (const m of to) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const line = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
     if (isFinite(line)) { const under = /under|below/i.test(m.yes_sub_title || '');
       // stored as the Over: ask = cost of Over, askOther = cost of Under
-      res.totals.push(under ? { line, p: 1 - pr.p, ask: pr.bid != null ? 1 - pr.bid : null, askOther: pr.ask ?? null } : { line, p: pr.p, ask: pr.ask ?? null, askOther: pr.bid != null ? 1 - pr.bid : null }); }
+      res.totals.push(under ? { line, p: 1 - pr.p, ask: pr.bid != null ? 1 - pr.bid : null, askOther: pr.ask ?? null, ticker: m.ticker, yesOver: false } : { line, p: pr.p, ask: pr.ask ?? null, askOther: pr.bid != null ? 1 - pr.bid : null, ticker: m.ticker, yesOver: true }); }
   }
   // Minute-by-minute price history for the game-winner market, so the chart has Kalshi's line from kickoff
   const hk = tickers.A || tickers.B;
@@ -671,6 +671,16 @@ function json(body, status = 200, maxAge = 0) {
 }
 
 handler.pmusBook = slug => (PMUS = PMUS || createPmusData(get)).book(slug);
+// Kalshi order book (public, no key), in the same shape as Polymarket US: YES bids and YES offers, prices 0-1.
+// Kalshi lists resting bids only, for YES and for NO; a NO bid at x is someone selling YES at 1 - x.
+// Newer responses carry dollar strings (yes_dollars: [["0.4500", 120]]), older ones cents (yes: [[45, 120]]).
+handler.kalshiBook = async ticker => {
+  const d = await getAny(KALSHI.map(b => `${b}/markets/${encodeURIComponent(ticker)}/orderbook`), 1500);
+  const ob = d.orderbook_fp || d.orderbook || {};
+  const lv = (dollars, cents) => (dollars || cents || []).map(l => ({ px: dollars ? +l[0] : +l[0] / 100, qty: +l[1] || 0 })).filter(l => l.px > 0 && l.px < 1 && l.qty > 0);
+  const yes = lv(ob.yes_dollars, ob.yes), no = lv(ob.no_dollars, ob.no);
+  return { bids: yes.sort((a, b) => b.px - a.px), offers: no.map(l => ({ px: +(1 - l.px).toFixed(4), qty: l.qty })).sort((a, b) => a.px - b.px) };
+};
 return handler;
 }
 

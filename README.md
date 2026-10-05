@@ -119,14 +119,19 @@ them in any record.
 
 ## Only buyable bets
 
-Every bet the site shows or logs is a Polymarket US contract checked on its live order book: the price is the average
-a `PAPER_STAKE` ($10) order fills at, fee included, and a book too thin to fill it means no bet. Kalshi and
-international Polymarket prices stay in the market table for comparison but are never bets (international Polymarket
-can't be traded from the US, and Kalshi's order book isn't read). Shown bets are re-checked every 10 seconds and cleared
-on every new play until that play is simulated. Every price shows how long ago it was checked and turns into a red
-OLD tag after 30 seconds. Logged bets show the current buy price ("Now"): green while you can still get the logged
-price, red OLD once the market has moved past it or the bet isn't on Polymarket US. With nothing qualifying, the page
-says "No live bets right now".
+Every bet the site shows or logs is a Polymarket US or Kalshi contract checked on that venue's live order book: the
+price is the average a `PAPER_STAKE` ($10) order fills at, fee included (Polymarket US 6.95%, Kalshi 7%, x p x (1-p)),
+and a book too thin to fill it means no bet. Kalshi's book is read from its public `/markets/{ticker}/orderbook`
+(it lists bids only; a NO bid at x is a YES offer at 1 - x). International Polymarket stays in the market table for
+comparison but is never a bet: it can't be traded from the US. The trade desk and autopilot still trade Polymarket US
+only (the keys are for that exchange); Kalshi bets are paper picks you can place yourself.
+
+Shown bets are re-checked every 10 seconds. On a new play they stay on screen tagged red "OLD · previous play" until
+that play is simulated. Every price shows how long ago it was checked and turns into a red OLD tag after 30 seconds.
+Logged bets show the current buy price ("Now"): green while you can still get the logged price, red OLD once the
+market has moved past it or the bet is on a venue that can't be traded. With nothing qualifying, the page says
+"No live bets right now". Only order-book-checked bets count toward the one-bet-per-type limit for a watched game,
+so bets logged earlier on other venues no longer block new ones.
 
 ## Update speed
 
