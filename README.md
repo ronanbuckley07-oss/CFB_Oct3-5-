@@ -77,6 +77,39 @@ Bets are sorted by price: low risk 60¢ and up (fair edge 2.5+ points), medium 3
 Each game gets up to one game bet per tier between Q3 7:30 and Q4 8:00. The home page and the trading desk have a tab
 per tier with its own record.
 
+**High risk is paused** (`paused: true` in `TIERS`, `api/picks.mjs`): no new bets are logged, listed on the desk, or bought by
+the autopilot. Its past record stays on the page. See the holdout test below for why.
+
+## Holdout test (October 2026)
+
+`tools/trading_holdout/` replays the bet rules on 343 NFL games the model never saw (tables from 1999-2024, tested on
+2025 and 2026 weeks 1-4), against nflfastR's Vegas win probability as the price, plus 1 cent and the taker fee.
+- With the price and the game state in sync, the tier rules almost never fire on moneylines: 4 bets in 343 games.
+- With the quote one play stale (the scanner used to refresh prices every 3 minutes), they fire in about half of all
+  games: 174 bets, +18% at the logged price, but -4.6% at the price an order placed then would pay. A paper record built
+  on stale quotes looks profitable and isn't.
+- With ESPN's feed one play behind the exchange, underdog bets hit 20% at 24-cent prices (-18%). Fit to results, the
+  best weight on the model for underdog moneylines is 0% in both 2025 and 2026: the model adds nothing there.
+- Spread-ladder results against a modeled market looked good but depend on that model of the market; they can't be
+  trusted without real historical ladder prices.
+
+Fixes: inside the betting window (and while a steady pick is possible) the scanner refreshes prices every 20 seconds
+instead of every 3 minutes, and no bet is logged against a quote older than 45 seconds (`QUOTE_MAX_AGE_MS`). Each
+pick records its quote age, and each tier's realistic record shows the average gap between the logged price and what
+the Polymarket US order book really charged (`slip`).
+
+## Steady picks
+
+A separate section at the top of the home page, written for people who don't want the model details. One rule:
+moneyline, Q2 through Q4, a team priced 60-85¢ (fees in) that already leads by 4+, and the fair price is at least what
+you pay. Replay: 78 bets, 83% hit at 73¢, +14% (90% range +1% to +25%); the same spots without the model's agreement
+lost 5%. It was the best of 400 rules tried on 2025, so the real edge is probably smaller, and college was not tested.
+The rule failed (-4 to -6%) when the model and the price were a play apart, so a steady pick is logged only after a
+play has been settled on ESPN for 40 seconds, against a quote fetched after that. One per game, own record, not
+counted in the tier records. `/api/picks/steady?league=` lists what qualifies right now. The 82 replayed bets are in
+`public/replay_bets.json`; the "Past bets" list can show them, tagged, without counting them in any record. Past bets
+now lists every bet instead of the last 500.
+
 ## Trading (Polymarket US)
 
 Two layers, both built on Polymarket US, the CFTC-regulated exchange US residents can legally trade

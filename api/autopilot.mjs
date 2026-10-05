@@ -15,11 +15,13 @@
 // Stops: end of the window, budget used up, loss limit hit, kill switch, or repeated errors. Live mode also obeys
 // every manual-trading cap in Render (MAX_ORDER_USD, MAX_DAILY_USD, MAX_OPEN_BETS) and needs AUTOPILOT_LIVE=true.
 import { simulateFill, takerFee } from './pmus.mjs';
+import { tierActive } from './picks.mjs';
 
 const RISK = {
   low:    { tiers: ['low'], kelly: 0.15, label: 'Low risk: favorites only, 15% of Kelly' },
   medium: { tiers: ['low', 'medium'], kelly: 0.25, label: 'Medium: favorites and coin flips, 25% of Kelly' },
-  high:   { tiers: ['low', 'medium', 'high'], kelly: 0.40, label: 'High risk: all tiers including underdogs, 40% of Kelly' },
+  // The underdog tier is paused (see TIERS in picks.mjs), so the most aggressive setting sizes up favorites and coin flips only
+  high:   { tiers: ['low', 'medium'], kelly: 0.40, label: 'Aggressive: favorites and coin flips, 40% of Kelly (underdog tier paused)' },
 };
 const PRIOR_W = 0.5, PRIOR_STRENGTH = 40; // the prior counts like 40 settled bets at w = 0.5
 
@@ -112,7 +114,7 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
       if (c.mode === 'live' && !enabledLive()) return stop('live trading switched off in Render');
       const trust = learnTrust(api.picksAll());
       const tiers = RISK[c.risk].tiers;
-      const cands = leading('all').bets.filter(b => b.venue === 'Polymarket US' && b.trade && tiers.includes(b.tier) && c.leagues.includes(b.league) && b.mid != null)
+      const cands = leading('all').bets.filter(b => b.venue === 'Polymarket US' && b.trade && tiers.includes(b.tier) && tierActive(b.tier) && c.leagues.includes(b.league) && b.mid != null)
         .filter(b => !db.trades.some(t => t.qty > 0 && t.status === 'open' && t.slug === b.trade.slug))
         .filter(b => runTrades().filter(t => t.event === b.event && t.qty > 0).length < 2);
       for (const b of cands) {

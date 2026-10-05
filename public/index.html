@@ -107,6 +107,11 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .rtabs button[aria-selected="true"]{background:var(--ink);color:var(--card);border-color:var(--ink)}
 .tagtier{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:4px;border:1px solid currentColor}
 .t-low{color:#2E9E5B}.t-medium{color:var(--gold)}.t-high{color:var(--bad)}
+.rec.steady{border-left-color:#2E9E5B}
+.steady .how{margin:2px 0 10px;padding-left:18px;font-size:14px}.steady .how li{margin:2px 0}
+.steady .warn{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;margin-top:10px}
+.tagreplay{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:4px;border:1px dashed var(--muted);color:var(--muted)}
+.replaytoggle{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center;margin:6px 0}
 .rec details{margin-top:8px}.rec summary{cursor:pointer;color:var(--muted);font-weight:600;font-size:14px}
 .find{display:flex;gap:8px;flex-wrap:wrap;margin-top:30px;padding-top:16px;border-top:1px solid var(--line);align-items:center}
 .find input{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:min(320px,100%)}
@@ -133,6 +138,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
   </div>
 </header>
 
+<section class="rec steady" id="steady" hidden></section>
 <section class="rec" id="rec" hidden></section>
 <section class="rec lead" id="lead" hidden></section>
 <main id="board">
@@ -288,17 +294,20 @@ $('find').addEventListener('submit',async e=>{
 setScope(scope);
 
 // ===== Model bets: record, past bets, timing, leading bets =====
+let REPLAY=null; // replayed 2025-26 NFL bets (public/replay_bets.json), loaded once
+async function loadReplay(){ if(REPLAY) return REPLAY; try{ const r=await fetch('/replay_bets.json'); if(r.ok) REPLAY=await r.json(); }catch(e){} return REPLAY||{bets:[]}; }
 async function loadPicks(){
   const pc=v=>v==null?'–':(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢', money=v=>`${v>0?'+':v<0?'−':''}$${Math.abs(v).toFixed(2)}`;
   const lg=NFL?'nfl':'cfb';
   try{
     const r=await fetch(`/api/picks?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json();
     const A=d.auto||{w:0,l:0,push:0}, R=d.record, el=$('rec');
-    const all=[...d.open,...d.settled];
+    const all=[...d.open,...d.settled], RP=await loadReplay();
+    let showReplay=false; try{showReplay=localStorage.getItem('showReplay')==='1';}catch(e){}
     if(!all.length&&!d.passes){ el.hidden=true; }
     else {
       const tierTag=t=>t?`<span class="tagtier t-${t}">${t==='low'?'low risk':t==='high'?'high risk':'medium'}</span>`:'';
-      const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.auto?'<span class="tagauto">game bet</span>':''}${tierTag(p.tier)} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.venue)}</td><td>${c(p.ask??p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
+      const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.replay?`<span class="tagreplay">replay ${p.season} wk ${p.week}</span>`:''}${p.steady?'<span class="tagtier t-low">steady</span>':''}${p.auto?'<span class="tagauto">game bet</span>':''}${tierTag(p.tier)} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.replay?'Replay':p.venue)}</td><td>${c(p.replay?p.price:(p.ask??p.price))}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
       const head='<thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Result</th></tr></thead>';
       const n=R.w+R.l, phases=Object.entries(d.byPhase||{});
       const order=['Q1 early','Q1 late','Q2 early','Q2 late','Q3 early','Q3 late','Q4 15:00-8:00','Q4 8:00-3:00','Q4 last 3:00'];
@@ -307,10 +316,12 @@ async function loadPicks(){
       let tab='all'; try{tab=localStorage.getItem('recTab')||'all';}catch(e){} if(tab!=='all'&&!T[tab]) tab='all';
       const V=tab==='all'?{rec:R,real:d.realistic,auto:A,list:all,label:'All bets'}:{rec:T[tab].paper,real:T[tab].realistic,auto:T[tab].auto,list:all.filter(p=>p.tier===tab),label:T[tab].label,desc:T[tab].desc,passes:T[tab].passes};
       const rr=V.rec, nn=rr.w+rr.l;
-      const tabs=`<div class="rtabs" role="tablist">${[['all','All bets'],...Object.entries(T).map(([k,v])=>[k,v.label])].map(([k,l])=>`<button role="tab" data-rt="${k}" aria-selected="${k===tab}">${esc(l)}${k!=='all'?` <span>${T[k].paper.w}–${T[k].paper.l}</span>`:''}</button>`).join('')}</div>`;
+      const tabs=`<div class="rtabs" role="tablist">${[['all','All bets'],...Object.entries(T).map(([k,v])=>[k,v.label])].map(([k,l])=>`<button role="tab" data-rt="${k}" aria-selected="${k===tab}">${esc(l)}${k!=='all'?` <span>${T[k].paper.w}–${T[k].paper.l}${T[k].paused?', paused':''}</span>`:''}</button>`).join('')}</div>`;
+      // replayed bets join the list only when asked, and never the record above
+      const rp=(RP.bets||[]).filter(p=>lg==='nfl'&&(tab==='all'||p.tier===tab)), past=showReplay?[...V.list,...rp]:V.list;
       el.innerHTML=`<h2>Model bets <small>Paper bets, judged on a fair price halfway between the model and the market. Not betting advice.</small></h2>
         ${tabs}
-        ${V.desc?`<p class="sub">${esc(V.label)}: ${esc(V.desc)}. One game bet per game in this tier, taken from ${esc(d.window||'Q3 7:30 to Q4 8:00')}.</p>`:''}
+        ${V.desc?`<p class="sub">${esc(V.label)}: ${esc(V.desc)}. ${tab!=='all'&&T[tab].paused?'<b>Paused:</b> no new bets in this tier. Replaying the 2025-26 NFL seasons, underdog bets only showed up when the model and the price were a play apart, and those lost money. The record below is history.':`One game bet per game in this tier, taken from ${esc(d.window||'Q3 7:30 to Q4 8:00')}.`}</p>`:''}
         <div class="recnums">
           <div><b>${rr.w}–${rr.l}${rr.push?`–${rr.push}`:''}</b><span>record</span></div>
           <div><b>${pc(rr.pct)}</b><span>win rate${rr.expected!=null?` (model said ${pc(rr.expected)})`:''}</span></div>
@@ -318,12 +329,16 @@ async function loadPicks(){
           <div><b>${rr.roi==null?'–':(rr.roi>0?'+':'')+(rr.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
         </div>
         <p class="sub">${V.list.filter(p=>p.status==='open').length?`${V.list.filter(p=>p.status==='open').length} waiting on a final. `:''}${V.real&&(V.real.n)?`Realistic, Polymarket US order book with fees: ${V.real.w}–${V.real.l}, ${money(V.real.pl)}${V.real.roi!=null?` (${V.real.roi>0?'+':''}${(V.real.roi*100).toFixed(1)}%)`:''}. `:''}${V.auto?`Game bets: ${V.auto.w}–${V.auto.l}, ${money(V.auto.pl||0)}. `:''}${V.passes?`${V.passes} game${V.passes>1?'s':''} had no bet in this tier. `:''}${nn&&nn<50?`${nn} settled so far, still noise; it takes a few hundred to mean much.`:''}</p>
-        <details><summary>Past bets (${V.list.length})</summary><table>${head}<tbody>${V.list.map(row).join('')}</tbody></table></details>
+        <details ${showReplay?'open':''}><summary>Past bets (${V.list.length}${showReplay&&rp.length?` + ${rp.length} replayed`:''})</summary>
+          ${rp.length?`<label class="replaytoggle"><input type="checkbox" id="replayToggle" ${showReplay?'checked':''}> Add ${rp.length} replayed bets from the 2025-26 NFL seasons (model built only from earlier seasons; not counted in the record)</label>`:''}
+          <table>${head}<tbody>${past.map(row).join('')}</tbody></table></details>
         ${phases.length?`<details><summary>When our bets hit</summary><table><thead><tr><th>When the bet was taken</th><th>Record</th><th>Win rate</th><th>Model said</th><th>Return</th></tr></thead><tbody>${phases.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.w}–${v.l}</td><td>${pc(v.pct)}</td><td>${pc(v.expected)}</td><td>${v.roi==null?'–':(v.roi>0?'+':'')+(v.roi*100).toFixed(1)+'%'}</td></tr>`).join('')}</tbody></table>
           <p class="sub" style="margin-top:8px">The window comes from replaying 2023 to 2025 NFL games against Vegas win probability: between Q3 7:30 and Q4 8:00 the model's disagreements hit 57.5% of the time when it said 58.2%, a +9% return over 269 bets. This table shows whether our own bets agree.</p></details>`:''}`;
       el.querySelectorAll('[data-rt]').forEach(bt=>bt.onclick=()=>{ try{localStorage.setItem('recTab',bt.dataset.rt);}catch(e){} loadPicks(); });
+      const rt=el.querySelector('#replayToggle'); if(rt) rt.onchange=()=>{ try{localStorage.setItem('showReplay',rt.checked?'1':'0');}catch(e){} loadPicks(); };
       el.hidden=false;
     }
+    renderSteady(d, RP, lg);
   }catch(e){}
   try{
     const r=await fetch(`/api/picks/leading?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json(), el=$('lead');
@@ -336,15 +351,44 @@ async function loadPicks(){
     el.hidden=false;
   }catch(e){}
 }
+// ===== Steady picks: one narrow low-risk rule, explained for people who don't want the model details =====
+async function renderSteady(d, RP, lg){
+  const el=$('steady'), pc=v=>v==null?'–':(v*100).toFixed(0)+'%', c=v=>Math.round(v*100)+'¢', money=v=>`${v>0?'+':v<0?'−':''}$${Math.abs(v).toFixed(2)}`;
+  const st=d&&d.steady; if(!st){ el.hidden=true; return; }
+  let now={games:[]}; try{ const r=await fetch(`/api/picks/steady?league=${lg}`,{cache:'no-store'}); if(r.ok) now=await r.json(); }catch(e){}
+  const R=st.paper, n=R.w+R.l, rp=lg==='nfl'&&RP&&RP.steady, list=[...st.open,...st.settled];
+  const live=now.games.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Pay at most</th><th>Model</th><th></th></tr></thead><tbody>${now.games.map(g=>{const b=g.bets[0];
+      return `<tr><td><b>${esc(b.sel)}</b>${g.logged?' <span class="tagtier t-low">logged</span>':''} <span style="color:var(--muted)">${esc(g.matchup||'')}, ${esc(g.clock||'')}, ${esc(g.score||'')}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td><a class="go" href="${GAME}?event=${g.event}">Open game ›</a></td></tr>`;}).join('')}</tbody></table>`
+    :'<p class="sub">Nothing qualifies right now. Picks show up here during live games, usually right after a score, a timeout or a quarter break.</p>';
+  const row=p=>`<tr><td><b>${esc(p.sel)}</b> <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.clock||'')}</span></td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.status}">${p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
+  el.innerHTML=`<h2>Steady picks <small>Low-risk favorites, from the one rule that held up on games the model had never seen. Not a sure thing.</small></h2>
+    <ol class="how">
+      <li>When a live game qualifies, the bet shows up below: a team <b>already leading by 4 or more</b>, from the 2nd quarter on, priced <b>60¢ to 85¢</b>, and the model agrees it's worth that price.</li>
+      <li>Buy that team to win, and don't pay more than the price shown. If the price has moved past it, skip it.</li>
+      <li>One bet per game, the same small amount every time. Never chase a loss with a bigger bet.</li>
+      <li>Expect about 1 in 6 to lose. A losing day is normal; judge it over 50+ bets, not a weekend.</li>
+    </ol>
+    <h3 style="margin:10px 0 4px;font-size:17px">Right now</h3>${live}
+    <div class="recnums" style="margin-top:12px">
+      <div><b>${R.w}–${R.l}</b><span>live record</span></div>
+      <div><b>${n?pc(R.pct):'–'}</b><span>win rate</span></div>
+      <div><b>${R.roi==null?'–':(R.roi>0?'+':'')+(R.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
+      ${rp?`<div><b>${rp.w}–${rp.l}</b><span>replay, 2025-26 NFL (${pc(rp.pct)}, ${rp.roi>0?'+':''}${(rp.roi*100).toFixed(0)}%)</span></div>`:''}
+    </div>
+    <p class="sub">${st.realistic&&st.realistic.n?`Realistic, what the Polymarket US order book really charged: ${st.realistic.w}–${st.realistic.l}, ${money(st.realistic.pl)}. `:''}${n&&n<50?`${n} settled live so far, still mostly luck. `:''}${rp?`Replay: ${rp.n} bets, ${pc(rp.pct)} hit at an average ${c(rp.avgPrice)}, ${rp.roi>0?'+':''}${(rp.roi*100).toFixed(0)}% (plausible range ${(rp.roiLo*100).toFixed(0)}% to +${(rp.roiHi*100).toFixed(0)}%). The same spots without the model's agreement lost ${Math.abs(rp.baselineNoModel.roi*100).toFixed(0)}%.`:lg==='cfb'?'This rule was tested on NFL games only. College games haven\'t been replayed yet, so treat college steady picks as untested.':''}</p>
+    ${list.length?`<details><summary>Steady bets so far (${list.length})</summary><table><thead><tr><th>Bet</th><th>Price</th><th>Model</th><th>Result</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></details>`:''}
+    <p class="warn">Why it's not foolproof: the rule was the best of 400 tried on past games, so some of its replay record is luck, and 2026 has only a few weeks of games in it. It only works when the price and the game are in sync, which is why a pick appears only once a play has settled. Prices move fast; if yours is worse than the one shown, the edge is gone. Only bet money you can afford to lose.</p>`;
+  el.hidden=false;
+}
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },30000);
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-04.15';
+const BUILD='2026-10-05.1';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-04.15'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.1'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

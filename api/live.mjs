@@ -72,9 +72,14 @@ export function createLive({ api, pages, dataDir }) {
     async tick() {
       if (!this.ready) this.ready = this.init(); await this.ready;
       if (watched(this.league, this.event)) { this.edges = []; return; } // the watched tracker has better numbers
-      if (Date.now() - this.mkAt > (this.noMk ? 900000 : 180000)) {
+      // Prices every 3 minutes is enough to know a game has markets, but a game bet must be judged against the price
+      // right now: a 3-minute-old quote is several plays old, and the model would "find" edges that are just plays the
+      // quote hasn't caught up with. Inside the betting window, refresh whenever the quote is older than 20 seconds.
+      const steadyOpen = this.S.qtr >= 2 && this.S.qtr <= 4 && !picks.steadyDone(this.league, this.event);
+      const mkEvery = this.noMk ? 900000 : (inWindow(this.S) && !picks.autoDone(this.league, this.event)) || steadyOpen ? 20000 : 180000;
+      if (Date.now() - this.mkAt > mkEvery) {
         this.mkAt = Date.now();
-        try { const m = await this.call(`kind=markets&event=${this.event}&nohist=1`); this.mk = m; this.noMk = !((m.kalshi && m.kalshi.found) || (m.poly && m.poly.found)); } catch { this.noMk = true; }
+        try { const m = await this.call(`kind=markets&event=${this.event}&nohist=1`); this.mk = m; this.mkFetched = Date.now(); this.noMk = !((m.kalshi && m.kalshi.found) || (m.poly && m.poly.found)); } catch { this.noMk = true; }
       }
       if (this.noMk) { this.edges = []; return; }
       const ev = await this.call(`event=${this.event}&date=${this.date}`); if (!ev || !ev.competitions) return;
@@ -82,13 +87,19 @@ export function createLive({ api, pages, dataDir }) {
       for (const k of ['qtr', 'secs', 'nd', 'unc', 'poss', 'down', 'dist', 'pos', 'toND', 'toUNC']) if (o[k] != null) this.S[k] = o[k];
       if (this.S.pos != null) this.S.dist = Math.min(this.S.dist, 100 - this.S.pos);
       const S = Object.assign({}, this.S), pk = playKey(o), now = Date.now();
+      if (pk !== this.pkSeen) { this.pkSeen = pk; this.pkAt = now; }
       const autoDue = inWindow(S) && !picks.autoDone(this.league, this.event);
-      if (!((autoDue && now - this.lastScan > 60000) || (pk !== this.pk && now - this.lastScan > 120000) || now - this.lastScan > 300000)) return;
+      // Steady picks need the play settled on ESPN for 40s and a quote fetched after that, then one sim of that play
+      const steadyDue = S.qtr >= 2 && S.qtr <= 4 && !picks.steadyDone(this.league, this.event) && this.steadyPk !== pk
+        && now - this.pkAt >= 40000 && (this.mkFetched || 0) - this.pkAt >= 40000;
+      if (!(steadyDue || (autoDue && now - this.lastScan > 60000) || (pk !== this.pk && now - this.lastScan > 120000) || now - this.lastScan > 300000)) return;
+      if (steadyDue) this.steadyPk = pk;
       this.pk = pk; this.lastScan = now;
       const A = await pool.run(this.league, this.rosters, this.tk, prepS0(S, S.edge, S.total, LGS[this.league].cal), autoDue ? N_FULL : N_SCAN, { prio: autoDue ? 2 : 0 });
       if (!A) return;
       this.edges = picks.edges(this, A, this.mk).slice(0, 3).map(e => ({ ...e, at: now, clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}`, sims: A.n }));
       picks.autoPick(this, A, this.mk, S);
+      if (playKey(o) === this.pkSeen) picks.steadyPick(this, A, this.mk, S, Date.now() - this.pkAt);
     }
     finish() { if (!picks.autoDone(this.league, this.event)) picks.autoPick(this, null, null, { qtr: 5, secs: 0 }); }
   }
@@ -184,7 +195,7 @@ export function createLive({ api, pages, dataDir }) {
     async poll() {
       if (this.polling) return; this.polling = true;
       try {
-        if (Date.now() - (this.mkAt || 0) > 20000) { this.mkAt = Date.now(); this.call(`kind=markets&event=${this.event}`).then(m => { if (m && !m.error) this.mk = m; }).catch(() => {}); }
+        if (Date.now() - (this.mkAt || 0) > 20000) { this.mkAt = Date.now(); this.call(`kind=markets&event=${this.event}`).then(m => { if (m && !m.error) { this.mk = m; this.mkFetched = Date.now(); } }).catch(() => {}); }
         const ev = await this.call(`event=${this.event}&date=${this.date}`);
         if (!ev || !ev.competitions) throw new Error(ev && ev.error || 'not in feed');
         this.fails = 0;
@@ -194,6 +205,7 @@ export function createLive({ api, pages, dataDir }) {
         for (const k of ['qtr', 'secs', 'nd', 'unc', 'poss', 'down', 'dist', 'pos', 'toND', 'toUNC']) if (o[k] != null) this.S[k] = o[k];
         if (this.S.pos != null) this.S.dist = Math.min(this.S.dist, 100 - this.S.pos);
         if (o.state === 'in' && !this.half2Known) this.refreshHalf2();
+        const pkNow = playKey(o); if (pkNow !== this.pkSeen) { this.pkSeen = pkNow; this.pkAt = Date.now(); }
         // Re-simulate after every play (new down, spot, possession, score or play text), not every clock tick
         if (simDue(o, this.lastSim)) {
           this.lastSim = { pk: playKey(o), secs: o.secs, lp: o.lastPlay };
@@ -202,6 +214,10 @@ export function createLive({ api, pages, dataDir }) {
         }
         const slim = trimEv(ev), sj = JSON.stringify(slim);
         if (sj !== this.lastEv) { this.lastEv = sj; this.last.ev = slim; this.last.skey = this.key; this.broadcast('ev', { ev: slim, skey: this.key }); }
+        // Steady pick: the last full run must be of this same play, settled 40s+, with a quote fetched after that
+        const R = this.last.result;
+        if (o.state === 'in' && this.mk && R && R.final && R.pk === pkNow && !picks.steadyDone(this.league, this.event))
+          picks.steadyPick(this, R.A, this.mk, this.S, Date.now() - this.pkAt);
         if (o.state === 'post') { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), 30000); }
       } catch (e) {
         if (++this.fails % 5 === 0) this.broadcast('warn', { error: String(e.message || e) });
@@ -218,7 +234,7 @@ export function createLive({ api, pages, dataDir }) {
         this.last.result = { key, A: a1, final: false, S: fields }; this.broadcast('result', this.last.result);
         const a2 = await sim(N_FULL - N_QUICK, 3); if (!a2 || !alive()) return;
         const A = pool.mergeAgg(a1, a2);
-        this.last.result = { key, A, final: true, S: fields }; this.last.fourth = null; this.broadcast('result', this.last.result);
+        this.last.result = { key, A, final: true, S: fields, pk: playKey(S) }; this.last.fourth = null; this.broadcast('result', this.last.result);
         const pt = { k: JSON.stringify([S.poss, S.pos, S.down, S.dist, S.qtr, S.secs, S.nd, S.unc, S.edge]), wp: A.win / A.n, t: elapsed(S) };
         const at = this.hist.findIndex(h => h.k === pt.k); if (at >= 0) this.hist[at] = pt; else this.hist.push(pt);
         this.broadcast('hist', { pts: [pt] });

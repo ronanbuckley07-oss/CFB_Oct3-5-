@@ -74,6 +74,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/nfl') return await serveApi(req, res, u, 'nfl');
     if (u.pathname === '/api/version') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ build: BUILD, live: LIVE.leagues })); return; }
     if (u.pathname === '/api/picks/leading') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.leadingFor(u.searchParams.get('league') || 'all'))); return; }
+    if (u.pathname === '/api/picks/steady') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.steadyNow(u.searchParams.get('league') || 'all'))); return; }
     if (u.pathname === '/api/picks') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.report(u.searchParams.get('league') || 'all'))); return; }
     if (u.pathname.startsWith('/api/trade')) return await TRADE.handle(req, res, u);
     if (u.pathname === '/api/live') return LIVE.handle(req, res, u);

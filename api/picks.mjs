@@ -11,6 +11,11 @@ const PAPER_STAKE = +process.env.PAPER_STAKE || 10; // dollars per bet in the re
 const MIN_EDGE_ML = 0.05;    // moneyline: model probability at least 5 points above the ask
 const MIN_EDGE_LINE = 0.06;  // spread/total ladders only give a midpoint, so ask for a little more
 const MAX_OPEN_PER_GAME = 4;
+// A bet is only logged against a quote fetched in the last 45 seconds. Older quotes trail the game: the model sees the
+// latest play and the price doesn't yet, so the "edge" is the play, the logged price is one nobody can still get, and
+// the paper record looks better than real trading would.
+const QUOTE_MAX_AGE = +process.env.QUOTE_MAX_AGE_MS || 45000;
+const quoteAge = g => (g.mkFetched ? Date.now() - g.mkFetched : Infinity);
 const MAX_EDGE = 0.20;
 // The model's number and the market's number, averaged. In a replay of the 2025 NFL season with tables built only from
 // 2024 and earlier, a 50/50 average of the model and Vegas win probability beat both on their own (Brier 0.15785 vs.
@@ -20,8 +25,25 @@ const MAX_EDGE = 0.20;
 export const TIERS = {
   low:    { label: 'Low risk',  desc: 'favorites, 60¢ and up: small payouts, hit most of the time', min: 0.60, max: 0.95, fairEdge: 0.025 },
   medium: { label: 'Medium',    desc: 'near coin flips, 35¢ to 60¢', min: 0.35, max: 0.60, fairEdge: 0.03 },
-  high:   { label: 'High risk', desc: 'underdogs, 10¢ to 35¢: lose more often, pay 2x to 9x', min: 0.10, max: 0.35, fairEdge: 0.04 },
+  high:   { label: 'High risk', desc: 'underdogs, 10¢ to 35¢: lose more often, pay 2x to 9x', min: 0.10, max: 0.35, fairEdge: 0.04, paused: true },
 };
+// High risk is paused: no new bets are logged, shown on the trade desk, or bought by the autopilot. Past bets stay in the
+// record. Replaying the 2025-26 NFL seasons (tables built from 1999-2024 only, tools/trading_holdout): against an honest
+// in-game price the model almost never finds an underdog worth buying (0 bets in 343 games), the best trust in the model
+// for underdog moneylines fit to results is 0% in both seasons, and the underdog bets that do appear come from the model
+// and the price being a play apart (ESPN's feed one play behind the exchange: 20% hit at 24-cent prices, -18%).
+export const tierActive = t => !!TIERS[t] && !TIERS[t].paused;
+
+// Steady picks: a narrow low-risk rule, the one that held up when replayed on games the model never saw.
+// Moneyline only, Q2 through Q4, on a team priced 60 to 85 cents (fees in) that already leads by 4+, and only when the
+// model at least agrees: the fair price (model and market averaged) is at or above what you pay.
+// Replay, 2025 + 2026 weeks 1-4 NFL, one per game: 78 bets, 83% hit at 73 cents, +14% (90% range +1% to +25%).
+// The same spots without the model's agreement: 271 bets, -5%. Chosen out of 400 rules tried on 2025, so the real edge is
+// likely smaller than the replay says. It only works when the price and the game state describe the same play: one play
+// apart, the same rule lost 4-6%. So a steady pick is logged only after the play has been settled on ESPN for 40 seconds
+// and with a quote fetched after that (in practice: after scores, timeouts, reviews and quarter breaks).
+export const STEADY = { label: 'Steady picks', min: 0.60, max: 0.85, lead: 4, fromQtr: 2, settleMs: 40000,
+  desc: 'favorites priced 60¢ to 85¢ that already lead by 4+, from the 2nd quarter on, when the model agrees with the price' };
 export const tierOf = cost => cost >= TIERS.low.min ? 'low' : cost >= TIERS.medium.min ? 'medium' : cost >= TIERS.high.min ? 'high' : null;       // a bigger gap than this is almost always a stale or mismatched market price, not an edge
 
 // When in a game to take the one automatic bet. From replaying 2023-25 NFL games against Vegas win probability
@@ -64,7 +86,7 @@ export function createPicks({ api, dir }) {
   const overP = (A, line) => { let n = 0, c = 0; A.totH.forEach((v, i) => { if (i > line) c += v; if (i !== line) n += v; }); return n ? c / n : null; };
 
   // Every bet the model would make right now on this game, best edge first
-  function edges(g, A, mk) {
+  function contracts(g, A, mk) {
     if (!A || !mk) return [];
     const out = [], wA = A.win / A.n;
     const aIsAway = String(mk.awayId) === String(g.slotId.ND);
@@ -124,9 +146,11 @@ export function createPicks({ api, dir }) {
       }
     }
     for (const e of out) { const mkt = e.mid != null ? e.mid : e.cost; e.fair = (e.model + mkt) / 2; e.fairEdge = e.fair - e.cost; e.tier = tierOf(e.cost); }
-    return out.filter(e => e.tier && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= TIERS[e.tier].fairEdge)
-      .sort((a, b) => b.fairEdge - a.fairEdge);
+    return out;
   }
+  const edges = (g, A, mk) => contracts(g, A, mk)
+    .filter(e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && e.edge <= MAX_EDGE && e.fairEdge >= TIERS[e.tier].fairEdge)
+    .sort((a, b) => b.fairEdge - a.fairEdge);
 
   // Log the qualifying bets once each (best venue at that moment), at most a few per game
   const why = (g, A, S, e) => {
@@ -137,13 +161,13 @@ export function createPicks({ api, dir }) {
       median: [med(A.ndH), med(A.ucH)], start: g.pregame || null, mid: e.mid ?? null };
   };
   const logPick = (g, A, S, e, extra) => {
-    const key = `${g.league}:${g.event}:${e.type}:${e.sel}${extra && extra.auto ? ':auto:' + e.tier : ''}`;
+    const key = `${g.league}:${g.event}:${e.type}:${e.sel}${extra && extra.auto ? ':auto:' + e.tier : ''}${extra && extra.steady ? ':steady' : ''}`;
     if (db.picks.some(p => p.key === key)) return null;
     const clock = `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`;
     const pick = Object.assign({ key, league: g.league, event: g.event, matchup: g.title, venue: e.venue, url: e.url, type: e.type, sel: e.sel, team: e.team || null,
       teamId: e.slot ? g.slotId[e.slot] : null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null,
       price: +e.cost.toFixed(3), ask: e.ask != null ? +e.ask.toFixed(3) : null, model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier, clock, score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`,
-      phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), status: 'open' }, extra || {});
+      phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), quoteAge: Math.round(quoteAge(g) / 1000), status: 'open' }, extra || {});
     db.picks.push(pick); dirty = true;
     if (e.trade) fillPaper(pick, e.trade);
     return pick;
@@ -160,12 +184,12 @@ export function createPicks({ api, dir }) {
   // The one automatic bet per game: the best qualifying edge once the game is inside the window
   // Game bets: inside the window, the best qualifying bet in each risk tier, at most one per tier per game
   function autoPick(g, A, mk, S) {
-    const done = t => db.auto[`${g.league}:${g.event}:${t}`];
-    if (Object.keys(TIERS).every(done)) return null;
-    if (pastWindow(S)) { for (const t of Object.keys(TIERS)) if (!done(t)) db.auto[`${g.league}:${g.event}:${t}`] = { status: 'pass', at: new Date().toISOString(), matchup: g.title }; dirty = true; return null; }
-    if (!inWindow(S) || !A || !mk) return null;
+    const active = Object.keys(TIERS).filter(tierActive), done = t => db.auto[`${g.league}:${g.event}:${t}`];
+    if (active.every(done)) return null;
+    if (pastWindow(S)) { for (const t of active) if (!done(t)) db.auto[`${g.league}:${g.event}:${t}`] = { status: 'pass', at: new Date().toISOString(), matchup: g.title }; dirty = true; return null; }
+    if (!inWindow(S) || !A || !mk || quoteAge(g) > QUOTE_MAX_AGE) return null; // stale quote: keep looking
     const list = edges(g, A, mk), picked = [];
-    for (const t of Object.keys(TIERS)) {
+    for (const t of active) {
       if (done(t)) continue;
       const inT = list.filter(e => e.tier === t), best = inT.find(e => e.venue === 'Polymarket US') || inT[0];
       if (!best) continue; // keep looking until the window closes
@@ -176,6 +200,7 @@ export function createPicks({ api, dir }) {
   }
   function consider(g, A, mk, S) {
     const list = edges(g, A, mk);
+    if (quoteAge(g) > QUOTE_MAX_AGE) return list.slice(0, 8); // shown, not logged
     const open = db.picks.filter(p => p.event === g.event && p.league === g.league && !p.auto);
     for (const e of list) {
       if (open.length >= MAX_OPEN_PER_GAME) break;
@@ -186,6 +211,33 @@ export function createPicks({ api, dir }) {
     }
     return list.slice(0, 8);
   }
+
+  // ---------- steady picks ----------
+  if (!db.steady || typeof db.steady !== 'object') db.steady = {}; // league:event -> { key, at }
+  const steadyLive = new Map(); // league:event -> what qualifies right now, for the live list
+  function steadyList(g, A, mk, S) {
+    if (!A || !mk || !(S.qtr >= STEADY.fromQtr && S.qtr <= 4)) return [];
+    const lead = slot => slot === 'ND' ? S.nd - S.unc : S.unc - S.nd;
+    return contracts(g, A, mk).filter(e => e.type === 'moneyline' && e.venue !== 'Polymarket' // international Polymarket can't be traded from the US
+        && e.cost >= STEADY.min && e.cost <= STEADY.max && e.fairEdge >= 0 && e.edge <= MAX_EDGE && e.model < 0.97 && lead(e.slot) >= STEADY.lead)
+      .sort((a, b) => (b.venue === 'Polymarket US') - (a.venue === 'Polymarket US') || b.fairEdge - a.fairEdge);
+  }
+  const steadyDone = (league, event) => !!db.steady[`${league}:${event}`];
+  // settled: ms the current play has been on ESPN. Logged once per game, only on a settled play with a quote fetched after it.
+  function steadyPick(g, A, mk, S, settled) {
+    const id = `${g.league}:${g.event}`, list = steadyList(g, A, mk, S);
+    if (list.length) steadyLive.set(id, { at: Date.now(), league: g.league, event: g.event, matchup: g.title, clock: `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`,
+      score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`, logged: steadyDone(g.league, g.event), bets: list.slice(0, 2).map(e => ({ sel: e.sel, venue: e.venue, url: e.url, price: +e.cost.toFixed(3),
+        model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), team: e.team })) });
+    else steadyLive.delete(id);
+    if (steadyDone(g.league, g.event) || !list.length || !(settled >= STEADY.settleMs) || quoteAge(g) > Math.min(QUOTE_MAX_AGE, settled - STEADY.settleMs)) return null;
+    const pick = logPick(g, A, S, list[0], { steady: true });
+    db.steady[id] = { key: pick && pick.key, at: new Date().toISOString(), matchup: g.title }; dirty = true;
+    return pick;
+  }
+  const steadyNow = league => { const now = Date.now(), out = [];
+    for (const [k, v] of steadyLive) { if (now - v.at > 300000) { steadyLive.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); }
+    return { updated: new Date().toISOString(), rule: STEADY, games: out.sort((a, b) => b.bets[0].fairEdge - a.bets[0].fairEdge) }; };
 
   // Settle open picks whose games are final
   async function settle() {
@@ -219,16 +271,19 @@ export function createPicks({ api, dir }) {
       expected: done.length ? +(done.reduce((a, p) => a + p.model, 0) / done.length).toFixed(3) : null };
   }
   function report(league) {
-    const ps = db.picks.filter(p => !league || league === 'all' || p.league === league);
+    const mine = db.picks.filter(p => !league || league === 'all' || p.league === league), ps = mine.filter(p => !p.steady), sp = mine.filter(p => p.steady);
     const phases = {}; for (const p of ps) if (p.phase) (phases[p.phase] = phases[p.phase] || []).push(p);
     const passes = Object.entries(db.auto).filter(([k, v]) => v.status === 'pass' && (!league || league === 'all' || k.startsWith(league + ':'))).length;
     const real = ps.filter(p => p.fill && p.fill.qty > 0 && p.status !== 'open' && p.status !== 'push');
     const rStake = real.reduce((a, p) => a + p.fill.cost, 0), rPl = real.reduce((a, p) => a + (p.fill.pl || 0), 0), rW = real.filter(p => p.status === 'won').length;
     const realOf = list => { const r = list.filter(p => p.fill && p.fill.qty > 0 && p.status !== 'open' && p.status !== 'push');
       const st = r.reduce((a, p) => a + p.fill.cost, 0), pl = r.reduce((a, p) => a + (p.fill.pl || 0), 0);
-      return { n: r.length, w: r.filter(p => p.status === 'won').length, l: r.filter(p => p.status === 'lost').length, staked: +st.toFixed(2), pl: +pl.toFixed(2), roi: st ? pl / st : null }; };
+      // how much more each contract really cost on the order book than the price the paper record logged
+      const f = list.filter(p => p.fill && p.fill.qty > 0), slip = f.length ? f.reduce((a, p) => a + p.fill.cost / p.fill.qty - p.price, 0) / f.length : null;
+      return { n: r.length, w: r.filter(p => p.status === 'won').length, l: r.filter(p => p.status === 'lost').length, staked: +st.toFixed(2), pl: +pl.toFixed(2), roi: st ? pl / st : null,
+        slip: slip == null ? null : +slip.toFixed(4) }; };
     const tiers = Object.fromEntries(Object.entries(TIERS).map(([k, t]) => { const tp = ps.filter(p => p.tier === k);
-      return [k, { label: t.label, desc: t.desc, minFairEdge: t.fairEdge, paper: summarize(tp), auto: summarize(tp.filter(p => p.auto)), realistic: realOf(tp), open: tp.filter(p => p.status === 'open').length,
+      return [k, { label: t.label, desc: t.desc, minFairEdge: t.fairEdge, paused: !!t.paused, paper: summarize(tp), auto: summarize(tp.filter(p => p.auto)), realistic: realOf(tp), open: tp.filter(p => p.status === 'open').length,
         passes: Object.entries(db.auto).filter(([id, v]) => v.status === 'pass' && id.endsWith(':' + k) && (!league || league === 'all' || id.startsWith(league + ':'))).length }]; }));
     const extra = { tiers, realistic: { n: real.length, w: rW, l: real.length - rW, staked: +rStake.toFixed(2), pl: +rPl.toFixed(2), roi: rStake ? rPl / rStake : null, stake: PAPER_STAKE,
         open: ps.filter(p => p.fill && p.fill.qty > 0 && p.status === 'open').length, unfillable: ps.filter(p => p.fill && p.fill.qty === 0).length }, auto: summarize(ps.filter(p => p.auto)), autoOpen: ps.filter(p => p.auto && p.status === 'open').length, passes, window: WINDOW.label,
@@ -239,9 +294,10 @@ export function createPicks({ api, dir }) {
     const byType = {}; for (const p of done) { const t = byType[p.type] || (byType[p.type] = { w: 0, l: 0, pl: 0 }); t[p.status === 'won' ? 'w' : 'l']++; t.pl += p.pl || 0; }
     return { ...extra, record: { w, l, push: ps.filter(p => p.status === 'push').length, pct: done.length ? w / done.length : null, pl: +pl.toFixed(2), roi: cost ? pl / cost : null,
         expected: done.length ? +(done.reduce((a, p) => a + p.model, 0) / done.length).toFixed(3) : null, avgPrice: done.length ? +(cost / done.length).toFixed(3) : null }, byType,
-      open: ps.filter(p => p.status === 'open').slice(-500).reverse(), settled: ps.filter(p => p.status !== 'open').slice(-500).reverse() };
+      open: ps.filter(p => p.status === 'open').reverse(), settled: ps.filter(p => p.status !== 'open').reverse(),
+      steady: { rule: STEADY, paper: summarize(sp), realistic: realOf(sp), open: sp.filter(p => p.status === 'open').reverse(), settled: sp.filter(p => p.status !== 'open').reverse() } };
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event));
-  const autoDone = (league, event) => Object.keys(TIERS).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, edges, consider, autoPick, autoDone, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
+  return { all: () => db.picks, edges, consider, autoPick, autoDone, steadyPick, steadyDone, steadyNow, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

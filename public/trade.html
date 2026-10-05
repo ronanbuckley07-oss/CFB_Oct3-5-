@@ -105,7 +105,7 @@ async function load(){
 function render(){
   const L=S.limits, a=S.account;
   document.querySelectorAll('.lim').forEach(e=>e.textContent=L.maxOrder);
-  const TD={all:['All',''],low:['Low risk','Favorites, 60¢ and up. Small payouts that hit most of the time.'],medium:['Medium','Near coin flips, 35¢ to 60¢.'],high:['High risk','Underdogs, 10¢ to 35¢. Lose more often, pay 2x to 9x when they hit.']};
+  const TD={all:['All',''],low:['Low risk','Favorites, 60¢ and up. Small payouts that hit most of the time.'],medium:['Medium','Near coin flips, 35¢ to 60¢.'],high:['High risk','Paused. Underdog bets lost money when replayed on the 2025-26 NFL seasons, so the desk no longer lists them.']};
   let tier='all'; try{tier=localStorage.getItem('deskTier')||'all';}catch(e){}
   const allO=S.opportunities||[];
   $('tierTabs').innerHTML=Object.entries(TD).map(([k,[l]])=>`<button data-t="${k}" aria-selected="${k===tier}">${l} <span>${k==='all'?allO.length:allO.filter(o=>o.tier===k).length}</span></button>`).join('');
