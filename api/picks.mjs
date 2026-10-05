@@ -100,29 +100,31 @@ export function createPicks({ api, dir }) {
     const slotOf = side => (side === 'away') === aIsAway ? 'ND' : 'UNC';
     const name = slot => g.abbr[slot];
     const usFee = p => TAKER_THETA * p * (1 - p);
+    // The market exactly as the exchange names it, so the page can say which one to open and which side to buy
+    const info = (x, src) => ({ event: src.title || null, name: x.name || null, yes: x.yesLabel || null, no: x.noLabel || null });
     const us = mk.pmus;
     if (us && us.found) {
       const V = 'Polymarket US', url = us.url;
       for (const side of ['away', 'home']) {
         const m = us[side]; if (!m || m.ask == null) continue;
         const slot = slotOf(side), p = slot === 'ND' ? wA : 1 - wA, cost = m.ask + usFee(m.ask);
-        out.push({ venue: V, url, type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], cost, model: p, edge: p - cost, mid: m.p, ask: m.ask, bid: m.bid ?? null, trade: m.trade });
+        out.push({ venue: V, url, type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], cost, model: p, edge: p - cost, mid: m.p, ask: m.ask, bid: m.bid ?? null, trade: m.trade, mkt: info(m, us) });
       }
       for (const sp of us.spreads || []) {
         const slot = slotOf(sp.side), p = marginP(A, slot === 'ND', sp.by); if (p == null) continue;
         const other = slot === 'ND' ? 'UNC' : 'ND', lbl = (t, by) => `${name(t)} ${by > 0 ? '−' + by : '+' + (-by)}`;
         if (sp.ask != null) { const c = sp.ask + usFee(sp.ask);
-          out.push({ venue: V, url, type: 'spread', sel: lbl(slot, sp.by), slot, team: name(slot), teamId: g.slotId[slot], by: sp.by, cost: c, model: p, edge: p - c, mid: sp.p, ask: sp.ask, trade: { slug: sp.slug, outcome: 'YES' } }); }
+          out.push({ venue: V, url, type: 'spread', sel: lbl(slot, sp.by), slot, team: name(slot), teamId: g.slotId[slot], by: sp.by, cost: c, model: p, edge: p - c, mid: sp.p, ask: sp.ask, trade: { slug: sp.slug, outcome: 'YES' }, mkt: info(sp, us) }); }
         if (sp.bid != null) { const a = 1 - sp.bid, c = a + usFee(a);
-          out.push({ venue: V, url, type: 'spread', sel: lbl(other, -sp.by), slot: other, team: name(other), teamId: g.slotId[other], by: -sp.by, cost: c, model: 1 - p, edge: (1 - p) - c, mid: 1 - sp.p, ask: a, trade: { slug: sp.slug, outcome: 'NO' } }); }
+          out.push({ venue: V, url, type: 'spread', sel: lbl(other, -sp.by), slot: other, team: name(other), teamId: g.slotId[other], by: -sp.by, cost: c, model: 1 - p, edge: (1 - p) - c, mid: 1 - sp.p, ask: a, trade: { slug: sp.slug, outcome: 'NO' }, mkt: info(sp, us) }); }
       }
       for (const t of us.totals || []) {
         const pOver = overP(A, t.line); if (pOver == null) continue;
         const yesP = t.yesOver ? pOver : 1 - pOver;
         if (t.ask != null) { const c = t.ask + usFee(t.ask);
-          out.push({ venue: V, url, type: 'total', sel: `${t.yesOver ? 'Over' : 'Under'} ${t.line}`, over: t.yesOver, line: t.line, cost: c, model: yesP, edge: yesP - c, mid: t.yesOver ? t.p : 1 - t.p, ask: t.ask, trade: { slug: t.slug, outcome: 'YES' } }); }
+          out.push({ venue: V, url, type: 'total', sel: `${t.yesOver ? 'Over' : 'Under'} ${t.line}`, over: t.yesOver, line: t.line, cost: c, model: yesP, edge: yesP - c, mid: t.yesOver ? t.p : 1 - t.p, ask: t.ask, trade: { slug: t.slug, outcome: 'YES' }, mkt: info(t, us) }); }
         if (t.bid != null) { const a = 1 - t.bid, c = a + usFee(a);
-          out.push({ venue: V, url, type: 'total', sel: `${t.yesOver ? 'Under' : 'Over'} ${t.line}`, over: !t.yesOver, line: t.line, cost: c, model: 1 - yesP, edge: (1 - yesP) - c, mid: t.yesOver ? 1 - t.p : t.p, ask: a, trade: { slug: t.slug, outcome: 'NO' } }); }
+          out.push({ venue: V, url, type: 'total', sel: `${t.yesOver ? 'Under' : 'Over'} ${t.line}`, over: !t.yesOver, line: t.line, cost: c, model: 1 - yesP, edge: (1 - yesP) - c, mid: t.yesOver ? 1 - t.p : t.p, ask: a, trade: { slug: t.slug, outcome: 'NO' }, mkt: info(t, us) }); }
       }
     }
     // Every price is the ask you would actually pay right now, plus that venue's taker fee. No midpoint estimates:
@@ -132,26 +134,26 @@ export function createPicks({ api, dir }) {
     const usable = (ask, bid) => ask != null && ask > 0 && ask < 1 && (bid == null || ask - bid <= 0.08);
     for (const [venue, src] of [['Kalshi', mk.kalshi], ['Polymarket', mk.poly]]) {
       if (!src || !src.found) continue;
-      const fee = FEE[venue], kx = (ticker, outcome) => venue === 'Kalshi' && ticker ? { trade: { ticker, outcome } } : {};
+      const fee = FEE[venue], kx = (x, outcome) => venue === 'Kalshi' && x.ticker ? { trade: { ticker: x.ticker, outcome }, mkt: info(x, src) } : {};
       const push = (o, ask, mid) => { const cost = ask + fee(ask); out.push({ venue, url: src.url, ...o, ask, cost, edge: o.model - cost, mid }); };
       for (const side of ['away', 'home']) {
         const m = src[side]; if (!m || m.implied || !usable(m.ask, m.bid)) continue;
         const slot = slotOf(side), p = slot === 'ND' ? wA : 1 - wA;
-        push({ type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], model: p, bid: m.bid ?? null, ...kx(m.ticker, 'YES') }, m.ask, m.p);
+        push({ type: 'moneyline', sel: `${name(slot)} to win`, slot, team: name(slot), teamId: g.slotId[slot], model: p, bid: m.bid ?? null, ...kx(m, 'YES') }, m.ask, m.p);
       }
       for (const s of src.spreads || []) {
         const slot = slotOf(s.side), p = marginP(A, slot === 'ND', s.by); if (p == null) continue;
         const other = slot === 'ND' ? 'UNC' : 'ND', lbl = (t, by) => `${name(t)} ${by > 0 ? '−' + by : '+' + (-by)}`;
         const askOther = s.askOther ?? (s.bid != null ? 1 - s.bid : null);
-        if (usable(s.ask, s.bid)) push({ type: 'spread', sel: lbl(slot, s.by), slot, team: name(slot), teamId: g.slotId[slot], by: s.by, model: p, ...kx(s.ticker, 'YES') }, s.ask, s.p);
-        if (usable(askOther, s.ask != null ? 1 - s.ask : null)) push({ type: 'spread', sel: lbl(other, -s.by), slot: other, team: name(other), teamId: g.slotId[other], by: -s.by, model: 1 - p, ...kx(s.ticker, 'NO') }, askOther, 1 - s.p);
+        if (usable(s.ask, s.bid)) push({ type: 'spread', sel: lbl(slot, s.by), slot, team: name(slot), teamId: g.slotId[slot], by: s.by, model: p, ...kx(s, 'YES') }, s.ask, s.p);
+        if (usable(askOther, s.ask != null ? 1 - s.ask : null)) push({ type: 'spread', sel: lbl(other, -s.by), slot: other, team: name(other), teamId: g.slotId[other], by: -s.by, model: 1 - p, ...kx(s, 'NO') }, askOther, 1 - s.p);
       }
       for (const t of src.totals || []) {
         const p = overP(A, t.line); if (p == null) continue;
         const askUnder = t.askOther ?? (t.bid != null ? 1 - t.bid : null);
         // Kalshi lists some totals as "Under N" markets: buying the Over is then the NO side
-        if (usable(t.ask, t.bid)) push({ type: 'total', sel: `Over ${t.line}`, over: true, line: t.line, model: p, ...kx(t.ticker, t.yesOver === false ? 'NO' : 'YES') }, t.ask, t.p);
-        if (usable(askUnder, t.ask != null ? 1 - t.ask : null)) push({ type: 'total', sel: `Under ${t.line}`, over: false, line: t.line, model: 1 - p, ...kx(t.ticker, t.yesOver === false ? 'YES' : 'NO') }, askUnder, 1 - t.p);
+        if (usable(t.ask, t.bid)) push({ type: 'total', sel: `Over ${t.line}`, over: true, line: t.line, model: p, ...kx(t, t.yesOver === false ? 'NO' : 'YES') }, t.ask, t.p);
+        if (usable(askUnder, t.ask != null ? 1 - t.ask : null)) push({ type: 'total', sel: `Under ${t.line}`, over: false, line: t.line, model: 1 - p, ...kx(t, t.yesOver === false ? 'YES' : 'NO') }, askUnder, 1 - t.p);
       }
     }
     for (const e of out) { const mkt = e.mid != null ? e.mid : e.cost; e.fair = (e.model + mkt) / 2; e.fairEdge = e.fair - e.cost; e.tier = tierOf(e.cost); }
@@ -167,13 +169,24 @@ export function createPicks({ api, dir }) {
     const bk = venue === 'Kalshi' ? await api[league].kalshiBook(trade.ticker) : await api[league].pmusBook(trade.slug);
     return simulateFill(bk, trade.outcome, PAPER_STAKE, 0.97, THETA[venue]);
   };
+  // Exactly what to buy, in words: which exchange, which market (as the exchange titles it), Yes or No, the most to pay,
+  // and what has to happen for it to pay out
+  function howTo(e, f) {
+    const m = e.mkt || {}, buy = e.trade && e.trade.outcome === 'NO' ? 'No' : 'Yes';
+    const pays = e.type === 'moneyline' ? `${e.team} wins the game`
+      : e.type === 'spread' ? (e.by > 0 ? `${e.team} wins by ${Math.floor(e.by) + 1} or more points` : `${e.team} wins, or loses by ${Math.ceil(-e.by) - 1} or fewer points`)
+      : `the two teams score ${e.over ? `${Math.floor(e.line) + 1} or more` : `${Math.ceil(e.line) - 1} or fewer`} points combined`;
+    return { venue: e.venue, url: e.url || null, event: m.event || null, market: m.name || null, buy, side: buy === 'Yes' ? m.yes : m.no,
+      limit: f && f.worst != null ? Math.round(f.worst * 100) / 100 : null, perShare: +e.cost.toFixed(4), pays, id: e.trade && (e.trade.ticker || e.trade.slug) || null };
+  }
   async function verify(g, e) {
     if (!e || !BUYABLE.has(e.venue) || !e.trade) return null;
     const f = await bookFill(g.league, e.venue, e.trade);
     if (!f.qty || !f.full) return null;
     const cost = f.cost / f.qty;
-    return { ...e, cost, ask: f.avg, edge: e.model - cost, fairEdge: e.fair - cost, tier: tierOf(cost),
-      book: { avg: +f.avg.toFixed(4), qty: f.qty, cost: f.cost, stake: PAPER_STAKE, at: Date.now() } };
+    const v = { ...e, cost, ask: f.avg, edge: e.model - cost, fairEdge: e.fair - cost, tier: tierOf(cost),
+      book: { avg: +f.avg.toFixed(4), qty: f.qty, cost: f.cost, stake: PAPER_STAKE, worst: f.worst, at: Date.now() } };
+    v.how = howTo(v, f); return v;
   }
   async function verifyList(g, list, n = 6, ok = passes) {
     const out = await Promise.all(list.slice(0, n).map(e => verify(g, e).catch(() => null)));
@@ -206,7 +219,7 @@ export function createPicks({ api, dir }) {
     const pick = Object.assign({ key, league: g.league, event: g.event, matchup: g.title, venue: e.venue, url: e.url, type: e.type, sel: e.sel, team: e.team || null,
       teamId: e.slot ? g.slotId[e.slot] : null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null,
       price: +e.cost.toFixed(3), ask: e.ask != null ? +e.ask.toFixed(3) : null, model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier, clock, score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`,
-      phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), quoteAge: Math.round(quoteAge(g) / 1000), book: e.book || null, trade: e.trade || null, status: 'open' }, extra || {});
+      phase: phaseOf(S), why: why(g, A, S, e), at: new Date().toISOString(), quoteAge: Math.round(quoteAge(g) / 1000), book: e.book || null, trade: e.trade || null, how: e.how || null, status: 'open' }, extra || {});
     db.picks.push(pick); dirty = true;
     if (e.trade) fillPaper(pick, e.trade);
     return pick;
@@ -275,7 +288,7 @@ export function createPicks({ api, dir }) {
       const list = await verifyList(g, steadyList(g, A, mk, S), 2, steadyOk);
       if (list.length) steadyLive.set(id, { at: Date.now(), league: g.league, event: g.event, matchup: g.title, clock: `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`,
         score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`, logged: steadyDone(g.league, g.event), bets: list.map(e => ({ sel: e.sel, venue: e.venue, url: e.url, price: +e.cost.toFixed(3),
-          model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), team: e.team, book: e.book })) });
+          model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), team: e.team, book: e.book, how: e.how })) });
       else steadyLive.delete(id);
       if (steadyDone(g.league, g.event) || !list.length || !(settled >= STEADY.settleMs) || quoteAge(g) > Math.min(QUOTE_MAX_AGE, settled - STEADY.settleMs)) return null;
       const pick = logPick(g, A, S, list[0], { steady: true });
@@ -319,7 +332,7 @@ export function createPicks({ api, dir }) {
     for (const [k, v] of steadyLive) { if (now - v.at > 60000) { steadyLive.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); }
     // open steady picks, with a cash-out flag once the price has reached 90 cents
     const held = db.picks.filter(p => p.steady && p.status === 'open' && (league === 'all' || p.league === league)).map(p => ({ event: p.event, league: p.league, matchup: p.matchup, sel: p.sel,
-      venue: p.venue, url: p.url, price: p.price, clock: p.clock, cashOut: p.cashOut || null }));
+      venue: p.venue, url: p.url, price: p.price, clock: p.clock, cashOut: p.cashOut || null, how: p.how || null }));
     return { updated: new Date().toISOString(), rule: STEADY, games: out.sort((a, b) => b.bets[0].fairEdge - a.bets[0].fairEdge), held }; };
 
   // Settle open picks whose games are final

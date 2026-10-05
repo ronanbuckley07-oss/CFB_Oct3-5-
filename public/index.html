@@ -108,6 +108,10 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--gold);outline-offse
 .tagtier{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:4px;border:1px solid currentColor}
 .t-low{color:#2E9E5B}.t-medium{color:var(--gold)}.t-high{color:var(--bad)}
 .rec.steady{border-left-color:#2E9E5B}
+.howbuy{margin:2px 0 8px;padding:8px 10px;border-left:3px solid #2E9E5B;border-radius:6px;background:color-mix(in srgb,#2E9E5B 9%,transparent);font-size:13.5px;line-height:1.45}
+.howbuy .yn{display:inline-block;padding:0 7px;border-radius:999px;background:#2E9E5B;color:#fff;font-weight:800}.howbuy .yn.no{background:#B4472E}
+.howbuy .tid{font-size:11px;color:var(--muted);word-break:break-all}.howbuy.sell{border-left-color:var(--gold);background:color-mix(in srgb,var(--gold) 10%,transparent)}
+tr.howrow td{border-top:0;padding-top:0}
 .age{font-size:11.5px;color:var(--muted);white-space:nowrap;margin-left:6px}.age.old{color:var(--bad);font-weight:800}
 .steady .how{margin:2px 0 10px;padding-left:18px;font-size:14px}.steady .how li{margin:2px 0}
 .steady .warn{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;margin-top:10px}
@@ -300,6 +304,16 @@ const OLD_MS=30000, ageTag=at=>at?`<span class="age" data-at="${at}"></span>`:''
 function tickAges(){ document.querySelectorAll('.age[data-at]').forEach(el=>{ const s=Math.max(0,Math.round((Date.now()-+el.dataset.at)/1000)), old=s*1000>OLD_MS;
   el.textContent=old?`OLD · checked ${s<120?s+'s':Math.round(s/60)+' min'} ago`:`checked ${s}s ago`; el.classList.toggle('old',old); }); }
 setInterval(()=>{ if(!document.hidden) tickAges(); },1000);
+// "How to buy": the exact exchange, market (as the exchange titles it), Yes or No, the most to pay, and what it pays on
+const hEsc=s=>String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+function howBox(h, sell){
+  if(!h) return ''; const c=v=>Math.round(v*100)+'¢';
+  const venue=h.url?`<a href="${hEsc(h.url)}" target="_blank" rel="noopener">${hEsc(h.venue)} ›</a>`:hEsc(h.venue);
+  const where=[h.event?`the game “${hEsc(h.event)}”`:'',h.market&&h.market!==h.event?`the market “${hEsc(h.market)}”`:''].filter(Boolean).join(', then ');
+  const side=`<span class="yn ${h.buy==='No'?'no':''}">${hEsc(h.buy)}</span>${h.side?` (${hEsc(h.side)})`:''}`;
+  if(sell) return `<div class="howbuy sell"><b>How to sell:</b> on <b>${venue}</b>${where?`, open ${where}`:''}, and sell your ${side} shares at the best bid.${h.id?` <span class="tid">ID ${hEsc(h.id)}</span>`:''}</div>`;
+  return `<div class="howbuy"><b>How to buy:</b> on <b>${venue}</b>${where?`, open ${where}`:''}, and buy ${side}${h.limit!=null?` with a limit price of <b>${c(h.limit)}</b> or less (about ${c(h.perShare)} a share with the fee)`:''}. Each share pays $1 if <b>${hEsc(h.pays)}</b>.${h.id?` <span class="tid">ID ${hEsc(h.id)}</span>`:''}</div>`;
+}
 let REPLAY=null; // replayed 2025-26 NFL bets (public/replay_bets.json), loaded once
 async function loadReplay(){ if(REPLAY) return REPLAY; try{ const r=await fetch('/replay_bets.json'); if(r.ok) REPLAY=await r.json(); }catch(e){} return REPLAY||{bets:[]}; }
 async function loadPicks(){
@@ -351,7 +365,7 @@ async function loadPicks(){
     const anyLive=data&&(data.games||[]).some(g=>g.state==='in');
     if(!d.bets.length&&!anyLive){ el.hidden=true; return; }
     el.innerHTML=`<h2>Leading bets right now <small>Polymarket US and Kalshi bets where the fair price (halfway between model and market) still beats what you'd pay. Price is what a $10 order fills at on that venue's live order book, fee included, re-checked every 10 seconds and cleared on every new play. Red OLD means don't count on that price.</small></h2>
-      ${d.bets.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th><th></th></tr></thead><tbody>${d.bets.map(b=>`<tr><td><b>${esc(b.sel)}</b>${ageTag((b.book&&b.book.at)||b.at)}${b.tier?`<span class="tagtier t-${b.tier}">${b.tier==='low'?'low risk':b.tier==='high'?'high risk':'medium'}</span>`:''} <span style="color:var(--muted)">${esc(b.matchup||'')}, ${esc(b.type)}${b.clock?`, ${esc(b.clock)}`:''}${b.score?`, ${esc(b.score)}`:''}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td>${pc(b.fair)}</td><td class="edge">+${((b.fairEdge??b.edge)*100).toFixed(1)}</td><td><a class="go" href="${GAME}?event=${b.event}">Open game ›</a></td></tr>`).join('')}</tbody></table>
+      ${d.bets.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th><th></th></tr></thead><tbody>${d.bets.map(b=>`<tr><td><b>${esc(b.sel)}</b>${ageTag((b.book&&b.book.at)||b.at)}${b.tier?`<span class="tagtier t-${b.tier}">${b.tier==='low'?'low risk':b.tier==='high'?'high risk':'medium'}</span>`:''} <span style="color:var(--muted)">${esc(b.matchup||'')}, ${esc(b.type)}${b.clock?`, ${esc(b.clock)}`:''}${b.score?`, ${esc(b.score)}`:''}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td>${pc(b.fair)}</td><td class="edge">+${((b.fairEdge??b.edge)*100).toFixed(1)}</td><td><a class="go" href="${GAME}?event=${b.event}">Open game ›</a></td></tr>${b.how?`<tr class="howrow"><td colspan="7">${howBox(b.how)}</td></tr>`:''}`).join('')}</tbody></table>
         <p class="sub" style="margin-top:8px">Open a game and look under Betting for the reasoning behind each one. Gaps over 20 points are skipped as likely stale prices.</p>`
       :'<p><b>No live bets right now.</b> <span class="sub">No moneyline, spread or total on Polymarket US or Kalshi clears the bar at a price $10 can actually buy on the order book.</span></p>'}`;
     el.hidden=false; tickAges();
@@ -363,9 +377,9 @@ async function renderSteady(d, RP, lg){
   const st=d&&d.steady; if(!st){ el.hidden=true; return; }
   let now={games:[]}; try{ const r=await fetch(`/api/picks/steady?league=${lg}`,{cache:'no-store'}); if(r.ok) now=await r.json(); }catch(e){}
   const R=st.paper, n=R.w+R.l, rp=lg==='nfl'&&st.rule&&st.rule.replay, list=[...st.open,...st.settled];
-  const cash=(now.held||[]).filter(h=>h.cashOut), cashT=cash.length?`<h3 style="margin:10px 0 4px;font-size:17px;color:#2E9E5B">Cash out now</h3><table><thead><tr><th>Sell</th><th>Market</th><th>Bought at</th><th>Sell price now</th><th></th></tr></thead><tbody>${cash.map(h=>`<tr><td><b>${esc(h.sel)}</b> <span style="color:var(--muted)">${esc(h.matchup||'')}</span></td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.venue)}</a>`:esc(h.venue)}</td><td>${c(h.price)}</td><td>${c(h.cashOut.bid)}</td><td class="won">+${Math.round(h.cashOut.pl*100)}¢</td></tr>`).join('')}</tbody></table>`:'';
+  const cash=(now.held||[]).filter(h=>h.cashOut), cashT=cash.length?`<h3 style="margin:10px 0 4px;font-size:17px;color:#2E9E5B">Cash out now</h3><table><thead><tr><th>Sell</th><th>Market</th><th>Bought at</th><th>Sell price now</th><th></th></tr></thead><tbody>${cash.map(h=>`<tr><td><b>${esc(h.sel)}</b> <span style="color:var(--muted)">${esc(h.matchup||'')}</span></td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.venue)}</a>`:esc(h.venue)}</td><td>${c(h.price)}</td><td>${c(h.cashOut.bid)}</td><td class="won">+${Math.round(h.cashOut.pl*100)}¢</td></tr>${h.how?`<tr class="howrow"><td colspan="5">${howBox(h.how,true)}</td></tr>`:''}`).join('')}</tbody></table>`:'';
   const live=now.games.length?`<table><thead><tr><th>Bet</th><th>Market</th><th>Pay at most</th><th>Model</th><th></th></tr></thead><tbody>${now.games.map(g=>{const b=g.bets[0];
-      return `<tr><td><b>${esc(b.sel)}</b>${ageTag((b.book&&b.book.at)||g.at)}${g.logged?' <span class="tagtier t-low">logged</span>':''} <span style="color:var(--muted)">${esc(g.matchup||'')}, ${esc(g.clock||'')}, ${esc(g.score||'')}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td><a class="go" href="${GAME}?event=${g.event}">Open game ›</a></td></tr>`;}).join('')}</tbody></table>`
+      return `<tr><td><b>${esc(b.sel)}</b>${ageTag((b.book&&b.book.at)||g.at)}${g.logged?' <span class="tagtier t-low">logged</span>':''} <span style="color:var(--muted)">${esc(g.matchup||'')}, ${esc(g.clock||'')}, ${esc(g.score||'')}</span></td><td>${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.venue)}</a>`:esc(b.venue)}</td><td>${c(b.price)}</td><td>${pc(b.model)}</td><td><a class="go" href="${GAME}?event=${g.event}">Open game ›</a></td></tr>${b.how?`<tr class="howrow"><td colspan="5">${howBox(b.how)}</td></tr>`:''}`;}).join('')}</tbody></table>`
     :'<p><b>No live steady picks right now.</b> <span class="sub">They show up here during live games, usually right after a score, a timeout or a quarter break, priced from the live Polymarket US or Kalshi order book.</span></p>';
   const row=p=>`<tr><td><b>${esc(p.sel)}</b> <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.clock||'')}</span></td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.cashOut?'won':p.status}">${p.cashOut?`cashed at ${c(p.cashOut.bid)} +${Math.round(p.cashOut.pl*100)}¢`:p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
   el.innerHTML=`<h2>Steady picks <small>Low-risk favorites, from the one rule that held up on games the model had never seen. Not a sure thing.</small></h2>
@@ -391,12 +405,12 @@ async function renderSteady(d, RP, lg){
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },10000); // 10s: steady picks and cash-outs are time-sensitive
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-05.6';
+const BUILD='2026-10-05.7';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.6'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.7'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

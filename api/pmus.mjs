@@ -62,7 +62,10 @@ export function createPmusData(get) {
       const sides = m.marketSides || [], longSide = sides.find(s => s.long === true) || sides[0];
       const yesTeam = teamSide((longSide && longSide.team) || m.subject && { name: m.subject.name });
       const mid = bid != null && ask != null ? (bid + ask) / 2 : ask ?? bid;
-      const base = { slug: m.slug, bid, ask, mid, tick: num(m.orderPriceMinTickSize) || 0.01, minQty: num(m.minimumTradeQty) || 1 };
+      const sideLabel = sd => sd ? String(sd.description || sd.identifier || (sd.team && sd.team.name) || '').trim() || null : null;
+      const shortSide = sides.find(sd => sd !== longSide) || null;
+      const base = { slug: m.slug, bid, ask, mid, tick: num(m.orderPriceMinTickSize) || 0.01, minQty: num(m.minimumTradeQty) || 1,
+        name: String(m.question || m.title || '').trim() || null, yesLabel: sideLabel(longSide), noLabel: sideLabel(shortSide) };
       if (/moneyline/.test(type)) {
         if (!yesTeam || res[yesTeam]) continue;
         const other = yesTeam === 'A' ? 'B' : 'A';

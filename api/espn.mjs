@@ -331,7 +331,7 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
     const pr = px(m); if (!pr) continue;
     const label = `${m.yes_sub_title || ''} ${m.subtitle || ''} ${String(m.ticker || '').split('-').pop()}`;
     const sd = side(label); if (!sd) continue;
-    res[sd] = { ...pr, label: m.yes_sub_title || m.ticker, vol: +(m.volume_fp ?? m.volume) || null, ticker: m.ticker }; tickers[sd] = m.ticker;
+    res[sd] = { ...pr, label: m.yes_sub_title || m.ticker, vol: +(m.volume_fp ?? m.volume) || null, ticker: m.ticker, name: m.yes_sub_title || m.title || null }; tickers[sd] = m.ticker;
   }
   if (res.A && !res.B) res.B = { p: 1 - res.A.p, implied: true }; if (res.B && !res.A) res.A = { p: 1 - res.B.p, implied: true };
   // Spread and total ladders live in sibling series with the same game code: "X wins by over 14.5 points", "Over 46.5 points scored"
@@ -354,14 +354,14 @@ async function kalshiFor(A, B, pin, t0, t1, kickoff) {
   for (const m of sp) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const by = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
-    const sd = side(m.yes_sub_title || txt); if (sd && isFinite(by)) res.spreads.push({ side: sd, by, p: pr.p, bid: pr.bid ?? null, ask: pr.ask ?? null, ticker: m.ticker });
+    const sd = side(m.yes_sub_title || txt); if (sd && isFinite(by)) res.spreads.push({ side: sd, by, p: pr.p, bid: pr.bid ?? null, ask: pr.ask ?? null, ticker: m.ticker, name: m.yes_sub_title || m.title || null });
   }
   for (const m of to) {
     const pr = px(m); if (!pr) continue; const txt = `${m.yes_sub_title || ''} ${m.title || ''}`;
     const line = isFinite(+m.floor_strike) ? +m.floor_strike : +((txt.match(/over\s*([\d.]+)/i) || [])[1]);
     if (isFinite(line)) { const under = /under|below/i.test(m.yes_sub_title || '');
       // stored as the Over: ask = cost of Over, askOther = cost of Under
-      res.totals.push(under ? { line, p: 1 - pr.p, ask: pr.bid != null ? 1 - pr.bid : null, askOther: pr.ask ?? null, ticker: m.ticker, yesOver: false } : { line, p: pr.p, ask: pr.ask ?? null, askOther: pr.bid != null ? 1 - pr.bid : null, ticker: m.ticker, yesOver: true }); }
+      res.totals.push(under ? { line, p: 1 - pr.p, ask: pr.bid != null ? 1 - pr.bid : null, askOther: pr.ask ?? null, ticker: m.ticker, yesOver: false, name: m.yes_sub_title || m.title || null } : { line, p: pr.p, ask: pr.ask ?? null, askOther: pr.bid != null ? 1 - pr.bid : null, ticker: m.ticker, yesOver: true, name: m.yes_sub_title || m.title || null }); }
   }
   // Minute-by-minute price history for the game-winner market, so the chart has Kalshi's line from kickoff
   const hk = tickers.A || tickers.B;

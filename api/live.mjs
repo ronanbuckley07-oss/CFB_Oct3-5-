@@ -134,7 +134,7 @@ export function createLive({ api, pages, dataDir }) {
       leading[league] = uniq.slice(0, 20).map(e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url,
         price: +(e.ask ?? e.cost).toFixed(3), cost: +e.cost.toFixed(3), model: +e.model.toFixed(3), edge: +e.edge.toFixed(3), clock: e.clock, score: e.score, at: e.at, sims: e.sims,
         fair: e.fair != null ? +e.fair.toFixed(3) : null, fairEdge: e.fairEdge != null ? +e.fairEdge.toFixed(3) : null, tier: e.tier || null,
-        book: e.book || null, trade: e.trade || null, teamId: e.teamId || null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null, team: e.team || null, mid: e.mid ?? null, ask: e.ask ?? null }));
+        book: e.book || null, how: e.how || null, trade: e.trade || null, teamId: e.teamId || null, by: e.by ?? null, line: e.line ?? null, over: e.over ?? null, team: e.team || null, mid: e.mid ?? null, ask: e.ask ?? null }));
     } catch {} finally { scanning[league] = false; }
   }
   // Every 10 seconds (was 30): the scanner is what logs game bets and steady picks, so it has to keep up with the game
