@@ -97,7 +97,8 @@ export function createLive({ api, pages, dataDir }) {
       if (this.edges.length && this.edgesPk !== pk) { this.edges = []; this.cands = []; picks.dropSteadyLive(this.league, this.event); }
       // Same play, nothing new to simulate: re-check the order book for the bets we already have (every 10s tick)
       if (this.cands && this.cands.length && this.edgesPk === pk && now - (this.verAt || 0) >= 10000) {
-        this.verAt = now; this.edges = this.tag(await picks.verifyList(this, this.cands, 3), S, now);
+        this.verAt = now; const found = await picks.verifyList(this, this.cands, picks.MAX_CHECK);
+        if (this.lastA) picks.logFound(this, this.lastA, S, found); this.edges = this.tag(found.slice(0, 3), S, now);
       }
       // Re-simulate on every new play (was: at most every 2 minutes), so the leading list keeps up with the game
       if (!(steadyDue || (autoDue && now - this.lastScan > 60000) || (pk !== this.pk && now - this.lastScan > 20000) || now - this.lastScan > 300000)) return;
@@ -106,7 +107,9 @@ export function createLive({ api, pages, dataDir }) {
       const A = await pool.run(this.league, this.rosters, this.tk, prepS0(S, S.edge, S.total, LGS[this.league].cal), autoDue ? N_FULL : N_SCAN, { prio: autoDue ? 2 : 0 });
       if (!A) return; this.lastSims = A.n;
       this.cands = picks.edges(this, A, this.mk); this.edgesPk = pk; this.verAt = Date.now();
-      this.edges = this.tag(await picks.verifyList(this, this.cands, 3), S, Date.now(), A.n);
+      const found = await picks.verifyList(this, this.cands, picks.MAX_CHECK); this.lastA = A;
+      picks.logFound(this, A, S, found); // every bet found in every game is logged, watched or not
+      this.edges = this.tag(found.slice(0, 3), S, Date.now(), A.n);
       await picks.autoPick(this, A, this.mk, S);
       if (playKey(o) === this.pkSeen) await picks.steadyPick(this, A, this.mk, S, Date.now() - this.pkAt);
     }
@@ -247,7 +250,9 @@ export function createLive({ api, pages, dataDir }) {
       if (Date.now() - (E.at || 0) < 10000) return;
       this.rechecking = true;
       try {
-        const edges = E.pending ? [] : await picks.verifyList(this, this.cands || [], 8), logged = picks.forEvent(this.league, this.event);
+        const edges = E.pending ? [] : await picks.verifyList(this, this.cands || [], picks.MAX_CHECK);
+        if (this.lastAgg && edges.length) picks.logFound(this, this.lastAgg, this.lastS, edges);
+        const logged = picks.forEvent(this.league, this.event);
         if (this.last.edges !== E) return; // a new run replaced it meanwhile
         this.last.edges = { ...E, edges, logged, now: await picks.nowPrices(this, logged), at: Date.now() };
         this.broadcast('edges', this.last.edges);
@@ -269,7 +274,7 @@ export function createLive({ api, pages, dataDir }) {
         const at = this.hist.findIndex(h => h.k === pt.k); if (at >= 0) this.hist[at] = pt; else this.hist.push(pt);
         this.broadcast('hist', { pts: [pt] });
         if (this.mk && this.state !== 'post') {
-          const ed = await picks.consider(this, A, this.mk, S); await picks.autoPick(this, A, this.mk, S);
+          const ed = await picks.consider(this, A, this.mk, S); await picks.autoPick(this, A, this.mk, S); this.lastAgg = A; this.lastS = S;
           this.cands = picks.edges(this, A, this.mk);
           const logged = picks.forEvent(this.league, this.event);
           this.last.edges = { key, pk: playKey(S), edges: ed, logged, now: await picks.nowPrices(this, logged), at: Date.now(), clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}` };

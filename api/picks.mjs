@@ -10,7 +10,6 @@ const PAPER_STAKE = +process.env.PAPER_STAKE || 10; // dollars per bet in the re
 
 const MIN_EDGE_ML = 0.05;    // moneyline: model probability at least 5 points above the ask
 const MIN_EDGE_LINE = 0.06;  // spread/total ladders only give a midpoint, so ask for a little more
-const MAX_OPEN_PER_GAME = 4;
 // A bet is only logged against a quote fetched in the last 30 seconds. Older quotes trail the game: the model sees the
 // latest play and the price doesn't yet, so the "edge" is the play, the logged price is one nobody can still get, and
 // the paper record looks better than real trading would.
@@ -241,23 +240,18 @@ export function createPicks({ api, dir }) {
       return picked;
     } finally { busy.delete(id); }
   }
-  // Returns the bets that are buyable right now (checked on the book); logs the new ones
+  // Every bet found is logged: each distinct contract once per game, the first time it qualifies at a price checked on
+  // the order book. (Earlier versions kept one per market type per game; ladders of the same opinion now all count, so
+  // the overall record is less independent than its bet count suggests. The game-bet and steady records are unchanged.)
+  const MAX_CHECK = 30; // contracts checked on the book per run; enough for every rung of a game's ladders
+  function logFound(g, A, S, list) {
+    if (!A || quoteAge(g) > QUOTE_MAX_AGE) return [];
+    const out = []; for (const e of list) { const pick = logPick(g, A, S, e); if (pick) out.push(pick); } return out;
+  }
+  // Returns the bets that are buyable right now (checked on the book) and logs every new one
   async function consider(g, A, mk, S) {
-    const list = await verifyList(g, edges(g, A, mk), 8);
-    if (quoteAge(g) > QUOTE_MAX_AGE) return list; // shown, not logged
-    const id = `watch:${g.league}:${g.event}`; if (busy.has(id)) return list; busy.add(id);
-    try {
-      // Only order-book-checked (Polymarket US, Kalshi) bets count toward the one-per-type limit. Bets logged on other venues before they
-      // were dropped can't be bought, so they must not block a real bet of the same type later in the game.
-      const open = db.picks.filter(p => p.event === g.event && p.league === g.league && !p.auto && !p.steady && BUYABLE.has(p.venue) && p.trade);
-      for (const e of list) {
-        if (open.length >= MAX_OPEN_PER_GAME) break;
-        // One bet per market type per game. Four spread lines on the same team are one opinion, not four, and
-        // counting them separately would make the record look far more certain than it is.
-        if (open.some(p => p.type === e.type)) continue;
-        const pick = logPick(g, A, S, e); if (pick) open.push(pick);
-      }
-    } finally { busy.delete(id); }
+    const list = await verifyList(g, edges(g, A, mk), MAX_CHECK);
+    logFound(g, A, S, list);
     return list;
   }
 
@@ -388,5 +382,5 @@ export function createPicks({ api, dir }) {
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event));
   const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, edges, verifyList, nowPrices, consider, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, edges, verifyList, nowPrices, consider, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

@@ -2017,7 +2017,7 @@ function renderPicks(m){
     ${now&&m.stale?'<p class="small" style="margin:0 0 6px"><b>New play.</b> These were for the last play and can\'t be counted on; new numbers in a few seconds.</p>':''}
     ${now?`<div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Price</th><th>Model</th><th>Fair</th><th>Edge</th></tr></thead><tbody>${now}</tbody></table></div>`:none}
     ${lg?`<h3 class="sh" style="margin-top:14px">Logged for this game</h3><div class="tblwrap"><table class="picks"><thead><tr><th>Bet</th><th>Market</th><th>Logged at</th><th>Now</th><th>Model</th><th>Result</th></tr></thead><tbody>${lg}</tbody></table></div>`:''}
-    <p class="small" style="margin:8px 0 0">Only Polymarket US and Kalshi bets are listed (international Polymarket can't be traded from the US): price is the average a $10 order fills at on that venue's live order book, fee included, re-checked every 10 seconds and marked OLD on every new play until it is simulated. Red <b style="color:var(--bad)">OLD</b> means that price can't be counted on anymore. Each game also gets up to one game bet per active tier once it reaches ${WIN_LABEL}. All are paper picks graded at the final, not betting advice.</p>`;
+    <p class="small" style="margin:8px 0 0">Only Polymarket US and Kalshi bets are listed (international Polymarket can't be traded from the US): price is the average a $10 order fills at on that venue's live order book, fee included, re-checked every 10 seconds and marked OLD on every new play until it is simulated. Red <b style="color:var(--bad)">OLD</b> means that price can't be counted on anymore. Every bet found is logged, each contract once per game, watched or not; separately, each game gets one game bet per active tier once it reaches ${WIN_LABEL}. All are paper picks graded at the final, not betting advice.</p>`;
   tickAges();
 }
 // ===== Box score =====
@@ -2060,12 +2060,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-05.5';
+const BUILD='2026-10-05.6';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.5'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-05.6'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>

@@ -51,7 +51,10 @@ The server reads the engine, the model tables and each league's settings straigh
 - The window comes from `tools/timing_nfl.mjs`: replaying 2023-25 NFL snaps against Vegas win probability, the model's
   disagreements were best calibrated and most profitable there (269 bets, 57.5% hit vs 58.2% predicted, +9%). Not
   conclusive; the "When our bets hit" table on the home page tracks whether live results agree.
-- Bets taken while someone watches a game are logged too, up to 4 per game, and count in the overall record.
+- Every other bet found is logged too, in every live game whether or not anyone is watching: each distinct contract once
+  per game, the first time it qualifies at an order-book-checked price. These count in the overall record; ladder rungs
+  of the same opinion now all count, so that record is less independent than its bet count suggests. Game bets and
+  steady picks keep their own records.
 - `/api/picks?league=` returns the record and every bet; `/api/picks/leading?league=` the live gaps behind the
   "Leading bets right now" panel. Each logged bet stores the state and numbers behind it, which the game page turns into
   the "Why the model likes this" explanation.
