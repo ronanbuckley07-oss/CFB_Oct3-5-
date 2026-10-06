@@ -95,6 +95,21 @@ export function createPmusData(get) {
   return { leagueSlug, events, forGame, book };
 }
 
+// What an order actually filled, read from the response's executions, or (if none came back) from the order itself.
+// Prices are YES prices; a fill on our side costs that price for YES.
+export async function readFills(trader, r) {
+  let q = 0, notional = 0, fee = 0;
+  for (const x of ((r && r.executions) || []).filter(x => /FILL/.test(x.type || ''))) {
+    const sh = +x.lastShares || 0, px = +(x.lastPx && x.lastPx.value) || 0; q += sh; notional += sh * px; fee += +(x.commissionNotionalCollected && x.commissionNotionalCollected.value) || 0; }
+  if (!q && r && r.id && trader && trader.order) { // no executions in the reply: ask for the order
+    for (let i = 0; i < 3 && !q; i++) { await new Promise(res => setTimeout(res, 700));
+      try { const o = (await trader.order(r.id)).order || {}; const cq = +o.cumQuantity || 0;
+        if (cq) { q = cq; notional = cq * (+(o.avgPx && o.avgPx.value) || 0); fee = +(o.commissionNotionalTotalCollected && o.commissionNotionalTotalCollected.value) || 0; }
+        if (/FILLED|CANCELED|REJECTED|EXPIRED/.test(o.state || '') && !cq) break; } catch { break; } } }
+  const reject = ((r && r.executions) || []).map(x => x.orderRejectReason || (x.type === 'EXECUTION_TYPE_REJECTED' ? x.text : null)).find(Boolean) || null;
+  return { qty: q, avgYes: q ? notional / q : null, fee: +fee.toFixed(2), notional, reject };
+}
+
 // Walk the book the way a taker order would. Buying YES eats offers; buying NO sells YES into bids (cost 1 - bid each).
 // Returns what $stake would really get: contracts, average price per contract, taker fees, total cost.
 export function simulateFill(bk, outcome, stake, maxPrice = 0.97, theta = TAKER_THETA) {
@@ -127,16 +142,28 @@ export function createPmusTrader({ keyId = process.env.POLYMARKET_US_KEY_ID, sec
     if (!r.ok) throw new Error(`Polymarket US ${r.status}: ${(j && (j.message || j.error)) || text.slice(0, 200)}`);
     return j;
   }
-  // Prices are always the YES price. YES bets buy YES; NO bets sell YES (the docs' "buying NO").
-  const orderBody = ({ slug, outcome, qty, limitYesPx }) => ({
-    marketSlug: slug, type: 'ORDER_TYPE_LIMIT', price: { value: limitYesPx.toFixed(2), currency: 'USD' }, quantity: qty,
-    tif: 'TIME_IN_FORCE_IMMEDIATE_OR_CANCEL', intent: outcome === 'YES' ? 'ORDER_INTENT_BUY_LONG' : 'ORDER_INTENT_SELL_LONG',
-    manualOrderIndicator: 'MANUAL_ORDER_INDICATOR_MANUAL', synchronousExecution: true, maxBlockTime: '5' });
+  // Order fields follow Polymarket's official SDK (polymarket-us 2.3.0, types/orders.py). Only buying YES is placed:
+  // ORDER_INTENT_BUY_LONG at a YES limit price, exactly the SDK's own example. Buying NO is a short intent whose price
+  // convention the SDK doesn't spell out, and the old code sent SELL_LONG (selling YES you don't own), which can't be
+  // right; so NO orders are refused here until they've been checked against the exchange. Removed: maxBlockTime: '5'
+  // (not a valid duration, likely why every order failed). Orders from the autopilot are flagged AUTOMATIC.
+  const orderBody = ({ slug, outcome, qty, limitYesPx, auto = false }) => {
+    if (outcome !== 'YES') throw new Error('No-side orders are not supported through the API yet. Buy this one in the Polymarket US app.');
+    return { marketSlug: slug, type: 'ORDER_TYPE_LIMIT', price: { value: limitYesPx.toFixed(2), currency: 'USD' }, quantity: qty,
+      tif: 'TIME_IN_FORCE_IMMEDIATE_OR_CANCEL', intent: 'ORDER_INTENT_BUY_LONG',
+      manualOrderIndicator: auto ? 'MANUAL_ORDER_INDICATOR_AUTOMATIC' : 'MANUAL_ORDER_INDICATOR_MANUAL', synchronousExecution: true };
+  };
   return {
     balances: () => call('GET', '/v1/account/balances'),
     positions: () => call('GET', '/v1/portfolio/positions'),
     preview: o => call('POST', '/v1/order/preview', { request: orderBody(o) }),
     place: o => call('POST', '/v1/orders', orderBody(o)),
+    order: id => call('GET', `/v1/order/${encodeURIComponent(id)}`),
+    // Sells the whole position in a market, whichever side it is: the exchange's own close, so there's no buy/sell
+    // direction to get wrong. slippageBips bounds how far from the current price it may fill.
+    closePosition: ({ slug, currentYesPx, slippageBips = 300, auto = true }) => call('POST', '/v1/order/close-position', {
+      marketSlug: slug, manualOrderIndicator: auto ? 'MANUAL_ORDER_INDICATOR_AUTOMATIC' : 'MANUAL_ORDER_INDICATOR_MANUAL', synchronousExecution: true,
+      ...(currentYesPx != null ? { slippageTolerance: { currentPrice: { value: currentYesPx.toFixed(2), currency: 'USD' }, bips: slippageBips } } : {}) }),
     orderBody,
   };
 }

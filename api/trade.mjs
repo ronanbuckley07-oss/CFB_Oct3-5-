@@ -13,7 +13,7 @@
 import crypto from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
-import { simulateFill, createPmusTrader, takerFee } from './pmus.mjs';
+import { simulateFill, createPmusTrader, takerFee, readFills } from './pmus.mjs';
 import { gradeBet } from './picks.mjs';
 import { createAutopilot, clampConfig, describe } from './autopilot.mjs';
 
@@ -124,7 +124,7 @@ export function createTrading({ api, dir, leading, picks }) {
     if (route === '/state') {
       let account = null, accountError = null;
       if (trader) try { const b = await trader.balances(); account = (b.balances || [])[0] || null; } catch (e) { accountError = String(e.message || e); }
-      return send(res, 200, { autopilot: { ...auto.state(), liveAllowed: LIVE_AUTO() }, enabled: ENABLED, killed: db.killed, connected: !!trader, account, accountError, limits: LIMITS,
+      return send(res, 200, { autopilot: { ...auto.state(), liveAllowed: LIVE_AUTO(), liveMissing: [!trader && 'POLYMARKET_US_KEY_ID / POLYMARKET_US_SECRET_KEY', !ENABLED && 'TRADING_ENABLED=true', env('AUTOPILOT_LIVE', 'false') !== 'true' && 'AUTOPILOT_LIVE=true'].filter(Boolean) }, enabled: ENABLED, killed: db.killed, connected: !!trader, account, accountError, limits: LIMITS,
         spentToday: +spentToday().toFixed(2), openBets: openBets(), opportunities: await opportunities(), trades: db.trades.filter(t => t.mode !== 'paper').slice(-100).reverse(), paperTrades: db.trades.filter(t => t.mode === 'paper').slice(-100).reverse() });
     }
     if (route === '/autopilot/parse' && req.method === 'POST') {
@@ -137,6 +137,20 @@ export function createTrading({ api, dir, leading, picks }) {
       try { return send(res, 200, { run: auto.start(cfg) }); } catch (e) { return send(res, 409, { error: e.message }); }
     }
     if (route === '/autopilot/stop' && req.method === 'POST') { auto.stop(); return send(res, 200, { ok: true }); }
+    // Checks the live setup without trading: the keys work (balance), positions can be read, and the exchange accepts
+    // the order format (a preview of a 1-share YES limit order at 1 cent on a live market, which is never placed).
+    if (route === '/autopilot/test' && req.method === 'POST') {
+      const out = { switches: { keys: !!trader, TRADING_ENABLED: ENABLED, AUTOPILOT_LIVE: env('AUTOPILOT_LIVE', 'false') === 'true' } };
+      if (!trader) return send(res, 200, { ...out, ok: false, error: 'No Polymarket US keys in Render.' });
+      try { const b = (await trader.balances()).balances?.[0]; out.balance = b ? +(b.currentBalance || 0) : null; } catch (e) { out.balanceError = String(e.message || e); }
+      try { const p = await trader.positions(); out.positions = Object.keys(p.positions || p || {}).length; } catch (e) { out.positionsError = String(e.message || e); }
+      const m = leading('all').bets.find(x => x.venue === 'Polymarket US' && x.trade && x.trade.outcome === 'YES') || null;
+      if (m) { try { const pv = await trader.preview({ slug: m.trade.slug, outcome: 'YES', qty: 1, limitYesPx: 0.01 }); out.preview = { ok: true, market: m.sel, state: pv && pv.order && pv.order.state || null }; }
+        catch (e) { out.preview = { ok: false, market: m.sel, error: String(e.message || e) }; } }
+      else out.preview = { ok: null, note: 'No live Polymarket US market on the board right now to preview an order against. Try again during a game.' };
+      out.ok = out.balance != null && !out.balanceError && (out.preview.ok !== false);
+      return send(res, 200, out);
+    }
     if (route === '/kill' && req.method === 'POST') { const { on } = await body(req); db.killed = !!on; if (on) auto.stop(); save(); return send(res, 200, { killed: db.killed }); }
 
     if (route === '/preview' && req.method === 'POST') {
@@ -166,10 +180,9 @@ export function createTrading({ api, dir, leading, picks }) {
       if (db.trades.some(t => t.token === token)) return send(res, 409, { error: 'Already placed.' });
       let r, err = null;
       try { r = await trader.place({ slug: plan.slug, outcome: plan.outcome, qty: plan.qty, limitYesPx: plan.limitYesPx }); } catch (e) { err = String(e.message || e); }
-      // read back what actually filled
-      const ex = (r && r.executions) || [], fills = ex.filter(x => /FILL/.test(x.type || ''));
-      let qty = 0, notional = 0, fee = 0;
-      for (const x of fills) { const q = +x.lastShares || 0, px = +(x.lastPx && x.lastPx.value) || 0; qty += q; notional += q * (plan.outcome === 'YES' ? px : 1 - px); fee += +(x.commissionNotionalCollected && x.commissionNotionalCollected.value) || 0; }
+      // read back what actually filled (from the reply, or by looking the order up)
+      const ex = (r && r.executions) || [], F = r ? await readFills(trader, r) : { qty: 0, notional: 0, fee: 0, reject: null };
+      const qty = F.qty, notional = F.notional, fee = F.fee; if (!err && !qty && F.reject) err = `Rejected: ${F.reject}`;
       const t = { at: new Date().toISOString(), day: today(), token, orderId: r && r.id || null, error: err, ...plan, qty, avg: qty ? +(notional / qty).toFixed(4) : null,
         fee: +fee.toFixed(2), cost: +(notional + fee).toFixed(2), status: qty > 0 ? 'open' : 'unfilled', raw: ex.map(x => ({ type: x.type, shares: x.lastShares, px: x.lastPx && x.lastPx.value, reason: x.orderRejectReason || x.text || null })) };
       delete t.exp; db.trades.push(t); save();

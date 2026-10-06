@@ -14,14 +14,14 @@
 //
 // Stops: end of the window, budget used up, loss limit hit, kill switch, or repeated errors. Live mode also obeys
 // every manual-trading cap in Render (MAX_ORDER_USD, MAX_DAILY_USD, MAX_OPEN_BETS) and needs AUTOPILOT_LIVE=true.
-import { simulateFill, takerFee } from './pmus.mjs';
+import { simulateFill, takerFee, readFills } from './pmus.mjs';
 import { tierActive, STEADY } from './picks.mjs';
 
 const RISK = {
-  low:    { tiers: ['low'], kelly: 0.15, label: 'Low risk: favorites only, 15% of Kelly' },
-  medium: { tiers: ['low', 'medium'], kelly: 0.25, label: 'Medium: favorites and coin flips, 25% of Kelly' },
+  low:    { tiers: ['low'], kelly: 0.15, label: 'Low risk: favorites only' },
+  medium: { tiers: ['low', 'medium'], kelly: 0.25, label: 'Medium: favorites and coin flips' },
   // The underdog tier is paused (see TIERS in picks.mjs), so the most aggressive setting sizes up favorites and coin flips only
-  high:   { tiers: ['low', 'medium'], kelly: 0.40, label: 'Aggressive: favorites and coin flips, 40% of Kelly (underdog tier paused)' },
+  high:   { tiers: ['low', 'medium'], kelly: 0.40, label: 'Aggressive: favorites, coin flips and small edges (underdog tier paused)' },
 };
 const PRIOR_W = 0.5, PRIOR_STRENGTH = 40; // the prior counts like 40 settled bets at w = 0.5
 // Guard rails, the same ones the logged model bets use, plus one position per game:
@@ -56,7 +56,7 @@ function ruleParse(text, now = new Date()) {
   else if (/weekend/.test(t)) { end = new Date(now); end.setDate(end.getDate() + ((7 - end.getDay()) % 7) + 1); end.setHours(0, 0, 0, 0); }
   else { end = new Date(now); end.setHours(23, 59, 0, 0); } // default: rest of today
   cfg.start = start.toISOString(); cfg.end = end.toISOString();
-  if (cfg.maxPerBet == null) cfg.maxPerBet = Math.max(1, Math.round(cfg.budget / 8));
+  if (cfg.maxPerBet == null) cfg.maxPerBet = Math.max(1, Math.round(cfg.budget / 4)); // each bet uses this amount
   if (cfg.stopLoss == null) cfg.stopLoss = Math.round(cfg.budget * 0.5);
   return cfg;
 }
@@ -77,7 +77,9 @@ export function clampConfig(c, limits, live) {
     risk: RISK[c.risk] ? c.risk : 'medium', leagues: (Array.isArray(c.leagues) ? c.leagues : ['cfb', 'nfl']).filter(l => l === 'cfb' || l === 'nfl'),
     start: new Date(c.start || Date.now()).toISOString(), end: new Date(c.end || Date.now() + 3 * 3600000).toISOString(), mode: c.mode === 'live' ? 'live' : 'paper',
     // exits, per position: sell when its return reaches +takeProfit% or falls to -stopLossPct% (null = hold to the final)
-    takeProfit: +c.takeProfit > 0 ? Math.min(500, +c.takeProfit) : null, stopLossPct: +c.stopLossPct > 0 ? Math.min(99, +c.stopLossPct) : null, oneGame: !!c.oneGame };
+    takeProfit: +c.takeProfit > 0 ? Math.min(500, +c.takeProfit) : null, stopLossPct: +c.stopLossPct > 0 ? Math.min(99, +c.stopLossPct) : null, oneGame: !!c.oneGame,
+    // steady picks only: the one rule that held up on the replay; on by default for live money
+    steadyOnly: c.steadyOnly != null ? !!c.steadyOnly : c.mode === 'live' };
   if (!out.leagues.length) out.leagues = ['cfb', 'nfl'];
   if (out.mode === 'live') { out.maxPerBet = Math.min(out.maxPerBet, limits.maxOrder); out.budget = Math.min(out.budget, limits.maxDaily); }
   out.maxPerBet = Math.min(out.maxPerBet, out.budget); out.stopLoss = Math.min(out.stopLoss, out.budget);
@@ -85,10 +87,10 @@ export function clampConfig(c, limits, live) {
   if (new Date(out.end) - new Date(out.start) > 7 * 86400000) out.end = new Date(new Date(out.start).getTime() + 7 * 86400000).toISOString();
   return out;
 }
-export const describe = c => `${c.mode === 'live' ? 'LIVE money' : 'Paper (no real orders)'}: up to $${c.budget} total, at most $${c.maxPerBet} a bet, `
+export const describe = c => `${c.mode === 'live' ? 'LIVE money' : 'PAPER (no real orders)'}: up to $${c.budget} total, $${c.maxPerBet} a bet, `
   + `${RISK[c.risk].label}, ${c.leagues.map(l => l === 'nfl' ? 'NFL' : 'college').join(' and ')}, from ${new Date(c.start).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} `
   + `to ${new Date(c.end).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} ET, stop after losing $${c.stopLoss}.`
-  + `${c.oneGame ? ' One game only.' : ''} Sell a position ${c.takeProfit || c.stopLossPct ? [c.takeProfit ? `when it's up ${c.takeProfit}%` : '', c.stopLossPct ? `when it's down ${c.stopLossPct}%` : ''].filter(Boolean).join(' or ') : 'only at the final'}${' (steady picks also at 90¢)'}.`;
+  + `${c.oneGame ? ' One game only.' : ''}${c.steadyOnly ? ' Steady picks only.' : ''} Sell a position ${c.takeProfit || c.stopLossPct ? [c.takeProfit ? `when it's up ${c.takeProfit}%` : '', c.stopLossPct ? `when it's down ${c.stopLossPct}%` : ''].filter(Boolean).join(' or ') : 'only at the final'}${' (steady picks also at 90¢)'}.`;
 
 // ---------- learning how much to trust the model ----------
 export function learnTrust(picks) {
@@ -148,14 +150,12 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
         if (t.mode === 'paper') { closeAs(t, t.qty, s.proceeds, s.avg, why); continue; }
         if (t.exitTriedAt && Date.now() - Date.parse(t.exitTriedAt) < 30000) continue; // one live attempt per 30s per position
         t.exitTriedAt = new Date().toISOString();
-        const floor = Math.max(0.01, +(s.worst - limits.slip).toFixed(2)); // the worst per-share price we accept for our side
-        const order = { slug: t.slug, outcome: t.outcome === 'YES' ? 'NO' : 'YES', qty: t.qty, limitYesPx: t.outcome === 'YES' ? floor : +(1 - floor).toFixed(2) };
-        let r; try { r = await trader.place(order); } catch (e) { log(`Couldn't sell ${t.sel}: ${e.message || e}. Will retry.`); save(); continue; }
-        let q = 0, gross = 0, fee = 0;
-        for (const x of ((r && r.executions) || []).filter(x => /FILL/.test(x.type || ''))) { const sh = +x.lastShares || 0, px = +(x.lastPx && x.lastPx.value) || 0;
-          q += sh; gross += sh * (t.outcome === 'YES' ? px : 1 - px); fee += +(x.commissionNotionalCollected && x.commissionNotionalCollected.value) || 0; }
-        if (!q) { log(`Tried to sell ${t.sel} (${why}): no fill at ${Math.round(floor * 100)}¢ or better. Will retry.`); save(); continue; }
-        closeAs(t, Math.min(q, t.qty), +(gross - fee).toFixed(2), gross / q, why);
+        // the exchange's close-position order: sells this whole position, within 3% of the current YES price
+        const yesMid = bk.bids[0] && bk.offers[0] ? (bk.bids[0].px + bk.offers[0].px) / 2 : bk.bids[0]?.px ?? null;
+        let r; try { r = await trader.closePosition({ slug: t.slug, currentYesPx: yesMid, slippageBips: 300 }); } catch (e) { log(`Couldn't sell ${t.sel}: ${e.message || e}. Will retry.`); save(); continue; }
+        const F = await readFills(trader, r);
+        if (!F.qty) { log(`Tried to sell ${t.sel} (${why}): no fill${F.reject ? ` (${F.reject})` : ''}. Will retry.`); save(); continue; }
+        closeAs(t, Math.min(F.qty, t.qty), +(F.notional - F.fee).toFixed(2), F.avgYes, why);
       } catch (e) { /* one position's book failing must not stop the others */ }
     }
   }
@@ -196,11 +196,13 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
       // within 2 minutes on Polymarket US at no more than the logged price
       const kindOf = p => p.steady ? 'steady' : p.lean ? 'lean' : 'model';
       const cands = api.picksAll().filter(p => p.status === 'open' && !p.cashOut && p.venue === 'Polymarket US' && p.trade && p.trade.slug && c.leagues.includes(p.league)
-          && Date.now() - Date.parse(p.at) < PICK_FRESH && (p.steady || (p.lean ? c.risk === 'high' : tiers.includes(p.tier) && tierActive(p.tier))))
+          && Date.now() - Date.parse(p.at) < PICK_FRESH && (p.steady || (!c.steadyOnly && (p.lean ? c.risk === 'high' : tiers.includes(p.tier) && tierActive(p.tier)))))
         .map(p => ({ src: kindOf(p), league: p.league, event: p.event, matchup: p.matchup, sel: p.sel, type: p.type, teamId: p.teamId, by: p.by, line: p.line, over: p.over,
           tier: p.steady ? 'low' : p.tier, model: p.model, mid: p.why && p.why.mid != null ? p.why.mid : p.price, fair: p.fair, logged: p.price, trade: p.trade, key: p.key }))
         .filter(b => b.model - b.mid <= MAX_GAP)                                     // big gaps are information the model lacks
         .filter(b => !(c.oneGame && A.lockedEvent) || b.event === A.lockedEvent)     // one game only: stay on it
+        .filter(b => { if (c.mode !== 'live' || b.trade.outcome === 'YES') return true;      // live: YES contracts only (see pmus.mjs)
+          const k = `no-side|${b.key}`; if (!skipNoted.has(k)) { skipNoted.add(k); log(`Skipped ${b.sel}: it's a No-side contract, which isn't placed through the API yet.`); } return false; })
         .filter(b => !runTrades().some(t => t.pick === b.key || (t.qty > 0 && t.slug === b.trade.slug)))  // each pick and market once
         .sort((a, b) => (a.src === 'steady' ? 0 : a.src === 'model' ? 1 : 2) - (b.src === 'steady' ? 0 : b.src === 'model' ? 1 : 2));
       let bought = 0;
@@ -222,10 +224,9 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
         if (b.src === 'steady') { // the steady rule itself: 65-85c, fair at or above the price
           if (cost1 < STEADY.min || cost1 > STEADY.max || edge < 0) continue;
         } else if (edge < 0.01) continue; // after the learned trust, still at least 1 point of value per contract
-        const kelly = Math.max(0, (p - cost1) / (1 - cost1));
-        // steady picks: a flat small stake (the rule's own advice: same small amount every time), others fractional Kelly
-        // (a bet that passes every filter gets at least $1, so small budgets still follow the model's bets)
-        const stake = Math.min(gameRoom, b.src === 'steady' ? Math.min(c.maxPerBet, room, Math.max(1, c.budget / 10)) : Math.min(c.maxPerBet, room, Math.max(1, RISK[c.risk].kelly * kelly * c.budget)));
+        // Flat stake: every bet uses your per-bet amount (the steady rule's own advice: the same amount every time), limited
+        // by what's left of the budget and of this game's share
+        const stake = Math.min(c.maxPerBet, room, gameRoom);
         if (stake < 1) continue;
         const f = simulateFill(bk, b.trade.outcome, stake); if (!f.qty) continue;
         const limitSide = Math.min(0.99, +(f.worst + limits.slip).toFixed(2));
@@ -239,13 +240,12 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
             qty: f.qty, avg: +f.avg.toFixed(4), fee: f.fee, cost: f.cost, status: 'open' };
         } else {
           const bad = liveChecks(plan).filter(x => !x.ok); if (bad.length) { log(`Skipped ${b.sel}: ${bad.map(x => x.msg).join('; ')}`); continue; }
-          let r, err = null; try { r = await trader.place(plan); } catch (e) { err = String(e.message || e); }
-          const fills = ((r && r.executions) || []).filter(x => /FILL/.test(x.type || ''));
-          let q = 0, notional = 0, fee = 0;
-          for (const x of fills) { const s = +x.lastShares || 0, px = +(x.lastPx && x.lastPx.value) || 0; q += s; notional += s * (plan.outcome === 'YES' ? px : 1 - px); fee += +(x.commissionNotionalCollected && x.commissionNotionalCollected.value) || 0; }
+          let r, err = null; try { r = await trader.place({ ...plan, auto: true }); } catch (e) { err = String(e.message || e); }
+          const F = r ? await readFills(trader, r) : { qty: 0, notional: 0, fee: 0, reject: null }; // confirmed from the exchange
+          const q = F.qty, notional = F.notional, fee = F.fee; if (!err && !q && F.reject) err = `rejected: ${F.reject}`;
           t = { ...plan, at: new Date().toISOString(), day: new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }), mode: 'live', run: A.id, orderId: r && r.id || null, error: err,
             qty: q, avg: q ? +(notional / q).toFixed(4) : null, fee: +fee.toFixed(2), cost: +(notional + fee).toFixed(2), status: q > 0 ? 'open' : 'unfilled' };
-          if (err) { errors++; if (errors >= 3) { db.trades.push(t); return stop(`3 order errors in a row (${err})`); } } else errors = 0;
+          if (err) { log(`Order for ${b.sel} failed: ${err}`); errors++; if (errors >= 3) { db.trades.push(t); return stop(`3 order errors in a row (${err})`); } } else errors = 0;
         }
         db.trades.push(t);
         log(`${t.qty > 0 ? 'Bought' : 'Tried'} ${b.sel} (${b.matchup}): ${t.qty} @ ${t.avg != null ? Math.round(t.avg * 100) + '¢' : '–'}, $${t.cost} total. Model ${(b.model * 100).toFixed(1)}%, market ${(b.mid * 100).toFixed(1)}%, trust ${Math.round(w * 100)}% model, so ${(p * 100).toFixed(1)}% vs ${Math.round(cost1 * 100)}¢.`);

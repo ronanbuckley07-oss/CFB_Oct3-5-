@@ -48,6 +48,10 @@ select{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--paper);
 .log time{color:var(--muted);margin-right:8px;font-variant-numeric:tabular-nums}
 #preview{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
 #preview .card{max-width:560px;width:100%;margin:0;max-height:90vh;overflow:auto}
+.modebanner{padding:10px 12px;border-radius:10px;font-weight:800;margin-bottom:10px;font-size:15px}
+.modebanner.paper{background:color-mix(in srgb,var(--gold) 18%,transparent);color:var(--ink);border:2px solid var(--gold)}
+.modebanner.live{background:color-mix(in srgb,#2E9E5B 18%,transparent);border:2px solid #2E9E5B}
+.livestatus{margin:8px 0;font-size:14px}
 </style></head>
 <body><div class="wrap">
 <div class="row" style="justify-content:space-between"><h1>Trading desk</h1><span class="row"><a href="/" class="small">Back to the site</a><button id="logout" hidden>Log out</button></span></div>
@@ -211,7 +215,9 @@ function renderAuto(){
     With few results it stays near 50%; it only moves far when the record clearly favors one side.</p></details>`;
   if(run&&run.status==='running'){
     const st=run.stats, c=run.config, left=Math.max(0,Date.parse(c.end)-Date.now());
-    el.innerHTML=`<div class="row" style="justify-content:space-between"><h2>Autopilot: running</h2><button class="danger" id="apStop">Stop autopilot</button></div>
+    const liveRun=c.mode==='live';
+    el.innerHTML=`<div class="modebanner ${liveRun?'live':'paper'}">${liveRun?'LIVE: real orders on your Polymarket US account':'PAPER: practice only. No real orders are placed and nothing will show on your Polymarket account.'}</div>
+      <div class="row" style="justify-content:space-between"><h2>Autopilot: running</h2><button class="danger" id="apStop">Stop autopilot</button></div>
       <p class="small">${esc(run.summary)}</p>
       <div class="stats"><div><b>${usd(st.spent)} / $${c.budget}</b><span>spent / budget</span></div><div><b class="${st.realized>=0?'good':'bad'}">${st.realized>=0?'+':''}${usd(st.realized)}</b><span>settled profit (stops at −$${c.stopLoss})</span></div>
         <div><b>${st.bets}</b><span>bets (${st.won} won, ${st.lost} lost)</span></div><div><b>${Math.floor(left/3600000)}h ${Math.floor(left%3600000/60000)}m</b><span>left in window</span></div></div>
@@ -225,25 +231,34 @@ function renderAuto(){
     <p class="small">Tell it what to do in a sentence. It shows you the settings it understood before anything starts, then bets on its own during your window and stops at your budget, your loss limit, the end of the window, or the kill switch. Paper mode places no real orders.</p>
     <textarea id="apPrompt" placeholder="Spend up to $100 on NFL games today, low risk, no more than $10 a bet, and stop if I'm down $30."></textarea>
     <div class="row" style="margin-top:8px"><button class="primary" id="apParse">Read my instructions</button><span class="small" id="apMsg"></span></div>
+    <div class="livestatus">${A.liveAllowed?'<b class="good">Live trading is on.</b> Choose Live money in the form to place real orders.':`<b class="bad">Live trading is off</b>, so runs are paper only. To turn it on, set in Render → Environment: ${(A.liveMissing||[]).map(esc).join(', ')}.`}
+      <button id="apTest" style="margin-left:8px">Test connection</button> <span class="small" id="apTestMsg"></span></div>
     <div id="apForm"></div>${lastRun}${learned}`;
   $('apParse').onclick=async()=>{ $('apMsg').textContent='Reading…'; const r=await post('/autopilot/parse',{prompt:$('apPrompt').value}); const j=await r.json(); if(!r.ok){$('apMsg').textContent=j.error;return;}
     apDraft=j.config; $('apMsg').textContent=j.source==='claude'?'Read by Claude. Check the settings below.':'Check the settings below.'; drawForm(j.summary); };
+  $('apTest').onclick=async()=>{ $('apTestMsg').textContent='Checking…'; const r=await post('/autopilot/test'); const j=await r.json();
+    const sw=j.switches||{}, bits=[`keys ${sw.keys?'✓':'✗'}`,`TRADING_ENABLED ${sw.TRADING_ENABLED?'✓':'✗'}`,`AUTOPILOT_LIVE ${sw.AUTOPILOT_LIVE?'✓':'✗'}`];
+    if(j.balance!=null) bits.push(`balance $${j.balance.toFixed(2)}`); if(j.balanceError) bits.push(`balance error: ${j.balanceError}`);
+    if(j.preview) bits.push(j.preview.ok?`order format accepted (preview on ${j.preview.market})`:j.preview.ok===false?`order preview rejected: ${j.preview.error}`:j.preview.note);
+    if(j.error) bits.push(j.error);
+    $('apTestMsg').innerHTML=`<span class="${j.ok?'good':'bad'}">${j.ok?'Ready.':'Not ready.'}</span> ${esc(bits.join(' · '))}`; };
   if(apDraft) drawForm();
 }
 function drawForm(summary){
   const c=apDraft, A=S.autopilot||{}, live=A.liveAllowed;
   $('apForm').innerHTML=`<div class="form">
       <label>Total budget ($)<input type="number" id="f_budget" min="1" step="1" value="${c.budget}"></label>
-      <label>Max per bet ($)<input type="number" id="f_max" min="1" step="1" value="${c.maxPerBet}"></label>
+      <label>Each bet ($)<input type="number" id="f_max" min="1" step="1" value="${c.maxPerBet}"></label>
       <label>Stop after losing ($)<input type="number" id="f_stop" min="1" step="1" value="${c.stopLoss}"></label>
       <label>Risk<select id="f_risk">${['low','medium','high'].map(r=>`<option value="${r}" ${c.risk===r?'selected':''}>${(A.risk&&A.risk[r]?A.risk[r].label:r)}</option>`).join('')}</select></label>
       <label>Start<input type="datetime-local" id="f_start" value="${toLocal(c.start)}"></label>
       <label>End<input type="datetime-local" id="f_end" value="${toLocal(c.end)}"></label>
       <label>Leagues<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_cfb" ${c.leagues.includes('cfb')?'checked':''}> College</span><span><input type="checkbox" id="f_nfl" ${c.leagues.includes('nfl')?'checked':''}> NFL</span></span></label>
-      <label>Mode<select id="f_mode"><option value="paper">Paper (no real money)</option><option value="live" ${live?'':'disabled'}>Live money${live?'':' (off in Render)'}</option></select></label>
+      <label>Mode<select id="f_mode"><option value="paper">PAPER: practice, no real orders</option><option value="live" ${live?'selected':'disabled'}>LIVE: real money${live?'':' (off in Render)'}</option></select></label>
       <label>Sell when a position is up (%)<input type="number" id="f_tp" min="1" step="1" placeholder="off: hold to the final" value="${c.takeProfit??''}"></label>
       <label>Sell when a position is down (%)<input type="number" id="f_sl" min="1" max="99" step="1" placeholder="off: hold to the final" value="${c.stopLossPct??''}"></label>
       <label>Games<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_one" ${c.oneGame?'checked':''}> Only one game (the first one it bets on)</span></span></label>
+      <label>Picks<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_steady" ${c.steadyOnly!==false?'checked':''}> Steady picks only (the rule that held up on past games)</span></span></label>
     </div>
     <p class="small" style="margin:4px 0 0">Return is what selling the position right now would bring, fees out, against what it cost. Example: bought for $1.00, sells now for $1.30 = up 30%. Leave a box empty to hold to the final. Steady picks also sell at 90¢.</p>
     <p class="small" id="apSum">${esc(summary||'')}</p>
@@ -252,7 +267,7 @@ function drawForm(summary){
   $('apStart').onclick=async()=>{
     const cfg={budget:+$('f_budget').value,maxPerBet:+$('f_max').value,stopLoss:+$('f_stop').value,risk:$('f_risk').value,start:new Date($('f_start').value).toISOString(),end:new Date($('f_end').value).toISOString(),
       leagues:[$('f_cfb').checked&&'cfb',$('f_nfl').checked&&'nfl'].filter(Boolean),mode:$('f_mode').value,
-      takeProfit:+$('f_tp').value||null,stopLossPct:+$('f_sl').value||null,oneGame:$('f_one').checked};
+      takeProfit:+$('f_tp').value||null,stopLossPct:+$('f_sl').value||null,oneGame:$('f_one').checked,steadyOnly:$('f_steady').checked};
     if(cfg.mode==='live'&&!confirm(`Start LIVE autopilot with up to $${cfg.budget} of real money?`)) return;
     const r=await post('/autopilot/start',{config:cfg}); const j=await r.json(); if(!r.ok){ $('apSum').innerHTML=`<span class="bad">${esc(j.error)}</span>`; return; }
     apDraft=null; load(); };

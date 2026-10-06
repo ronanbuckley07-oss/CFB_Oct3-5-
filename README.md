@@ -271,6 +271,20 @@ game's positions are all graded or sold.
 Robustness: one candidate's failing order book or order no longer stops the others in the same check (logged once);
 live mode stops at once without Polymarket US keys, after 3 order errors in a row, on the kill switch, at the loss
 limit, at the end of the window, or when Render's switches are turned off.
+Live orders (October 6, 2026), checked against Polymarket's official SDK (polymarket-us 2.3.0):
+- the order body no longer sends `maxBlockTime: '5'` (not a valid duration; likely why live orders failed) and flags
+  autopilot orders AUTOMATIC;
+- only YES contracts are bought through the API (ORDER_INTENT_BUY_LONG, the SDK's own example). The old code bought NO
+  with SELL_LONG (selling YES you don't own), which can't be right, and the SDK doesn't define the price convention
+  for its short intents, so No-side bets are skipped in live mode until that's verified (buy them in the app);
+- every fill is confirmed: from the reply's executions, or by looking the order up (GET /v1/order/{id});
+- live sales use the exchange's close-position endpoint (POST /v1/order/close-position) within 3% of the price;
+- rejections and errors are written to the run's log with the exchange's own message;
+- `/trade` shows a PAPER or LIVE banner on every run, says which Render switches are missing when live is off, and has
+  "Test connection" (keys, balance, positions, and a preview of a 1-share 1-cent order that is never placed).
+Sizing: every bet uses the "Each bet" amount (flat), limited by what's left of the budget and the game's share; the
+default is a quarter of the budget. "Steady picks only" is on by default for live runs.
+
 It copies the model's picks; nothing here can promise the paper record's return, much of which came from prices that
 weren't actually available (see the holdout test above).
 
