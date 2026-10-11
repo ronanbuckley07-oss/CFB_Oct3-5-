@@ -172,6 +172,7 @@ tr.howrow td{border-top:0;padding-top:0}
 <main id="board">
   <div class="grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
 </main>
+<p style="text-align:center;margin:18px 0 28px;font-size:13px"><a href="/trade" style="color:var(--muted)">Owner sign-in</a></p>
 
 <form class="find" id="find">
   <label for="q" class="small">Not on the board?</label>
@@ -357,9 +358,9 @@ async function loadPicks(){
   try{
     const r=await fetch(`/api/picks?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json();
     const A=d.auto||{w:0,l:0,push:0}, R=d.record, el=$('rec');
-    const all=[...d.open,...d.settled], RP=await loadReplay();
+    const all=d.private?[]:[...d.open,...d.settled], RP=await loadReplay();
     let showReplay=false; try{showReplay=localStorage.getItem('showReplay')==='1';}catch(e){}
-    if(!all.length&&!d.passes){ el.hidden=true; }
+    if(d.private||(!all.length&&!d.passes)){ el.hidden=true; }
     else {
       const tierTag=t=>t?`<span class="tagtier t-${t}">${t==='low'?'low risk':t==='high'?'high risk':'medium'}</span>`:'';
       const row=p=>`<tr><td><b>${esc(p.sel)}</b>${p.replay?`<span class="tagreplay">replay ${p.season} wk ${p.week}</span>`:''}${p.steady?'<span class="tagtier t-low">steady</span>':''}${p.auto?'<span class="tagauto">game bet</span>':''}${tierTag(p.tier)} <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.type)}, ${esc(p.clock||'')}</span></td><td>${esc(p.replay?'Replay':p.venue)}</td><td>${c(p.replay?p.price:(p.ask??p.price))}</td><td>${pc(p.model)}</td><td class="${p.cashOut?'won':p.status}">${p.cashOut?`cashed ${p.cashOut.pl>0?'+':''}${Math.round(p.cashOut.pl*100)}¢`:p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
@@ -439,26 +440,26 @@ async function renderSteady(d, RP, lg){
       <li>Expect about 1 in 8 to lose. A losing day is normal; judge it over 50+ bets, not a weekend.</li>
     </ol>
     ${cashT}<h3 style="margin:10px 0 4px;font-size:17px">Right now</h3>${live}
-    <div class="recnums" style="margin-top:12px">
+    ${d.private?'':`<div class="recnums" style="margin-top:12px">
       <div><b>${R.w}–${R.l}</b><span>live record${R.cashed?` (${R.cashed} cashed out)`:''}</span></div>
       <div><b>${n?pc(R.pct):'–'}</b><span>win rate</span></div>
       <div><b>${R.roi==null?'–':(R.roi>0?'+':'')+(R.roi*100).toFixed(1)+'%'}</b><span>return on money staked</span></div>
       ${rp?`<div><b>${rp.roi>0?'+':''}${(rp.roi*100).toFixed(1)}%</b><span>replay, ${rp.n} NFL games 2025-26</span></div>`:''}
     </div>
     <p class="sub">${st.realistic&&st.realistic.n?`Realistic, what the Polymarket US order book really charged: ${st.realistic.w}–${st.realistic.l}, ${money(st.realistic.pl)}. `:''}${n&&n<50?`${n} settled live so far, still mostly luck. `:''}${rp?`Replay: ${rp.n} bets at an average ${c(rp.avgPrice)}, ${pc(rp.hitOrCash)} won or cashed out (${pc(rp.cashedShare)} reached 90¢), ${rp.roi>0?'+':''}${(rp.roi*100).toFixed(1)}% (plausible range +${(rp.roiLo*100).toFixed(0)}% to +${(rp.roiHi*100).toFixed(0)}%), about the same in 2025 and 2026. The same spots without the model's agreement lost 5%.`:lg==='cfb'?'This rule was tested on NFL games only. College games haven\'t been replayed yet, so treat college steady picks as untested.':''}</p>
-    ${list.length?`<details><summary>Steady bets so far (${list.length})</summary><table><thead><tr><th>Bet</th><th>Price</th><th>Model</th><th>Result</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></details>`:''}
+    ${list.length?`<details><summary>Steady bets so far (${list.length})</summary><table><thead><tr><th>Bet</th><th>Price</th><th>Model</th><th>Result</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></details>`:''}`}
     <p class="warn">Prices are what $10 fills at on the live Polymarket US or Kalshi order book, fee included. Red OLD means the check is over 30 seconds old: don't buy at that price without checking. Why it's not foolproof: the rule and the 90¢ cash-out were picked from hundreds of variations tried on past games, so some of its replay record is luck, and 2026 has only a few weeks of games in it. It only works when the price and the game are in sync, which is why a pick appears only once a play has settled. Prices move fast; if yours is worse than the one shown, the edge is gone. Only bet money you can afford to lose.</p>`;
   el.hidden=false; tickAges();
 }
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },10000); // 10s: steady picks and cash-outs are time-sensitive
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-06.1';
+const BUILD='2026-10-11.1';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-06.1'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-11.1'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

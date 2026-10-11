@@ -19,6 +19,8 @@ const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(im
 const LIVE = createLive({ api: API, pages: { cfb: path.join(ROOT, 'game.html'), nfl: path.join(ROOT, 'nfl', 'game.html') }, dataDir: DATA_DIR });
 // Private one-tap trading on Polymarket US (off unless TRADE_PASSWORD is set; see api/trade.mjs)
 const TRADE = createTrading({ api: API, dir: DATA_DIR, leading: l => LIVE.leadingFor(l), picks: LIVE.picks });
+// What everyone else gets from /api/picks: the steady-pick rule, no record, no past bets
+const publicReport = r => ({ private: true, steady: r.steady ? { rule: { ...r.steady.rule, replay: undefined }, paper: { w: 0, l: 0 }, open: [], settled: [] } : null });
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
@@ -74,12 +76,14 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/nfl') return await serveApi(req, res, u, 'nfl');
     if (u.pathname === '/api/version') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ build: BUILD, live: LIVE.leagues })); return; }
     if (u.pathname === '/api/picks/leading') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.leadingFor(u.searchParams.get('league') || 'all'))); return; }
+    // The bet record is private: only the owner, logged in on /trade, gets it. Live bets stay public.
+    if (['/api/picks/removed', '/api/picks/audit'].includes(u.pathname) && !TRADE.isOwner(req)) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end('{"error":"owner login required"}'); return; }
     if (u.pathname === '/api/picks/removed') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.removed(), null, 1)); return; }
     if (u.pathname === '/api/picks/audit') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.audit())); return; }
     if (u.pathname === '/api/picks/steady') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.steadyNow(u.searchParams.get('league') || 'all'))); return; }
-    if (u.pathname === '/api/picks') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.report(u.searchParams.get('league') || 'all'))); return; }
+    if (u.pathname === '/api/picks') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(TRADE.isOwner(req) ? LIVE.picks.report(u.searchParams.get('league') || 'all') : publicReport(LIVE.picks.report(u.searchParams.get('league') || 'all')))); return; }
     if (u.pathname.startsWith('/api/trade')) return await TRADE.handle(req, res, u);
-    if (u.pathname === '/api/live') return LIVE.handle(req, res, u);
+    if (u.pathname === '/api/live') return LIVE.handle(req, res, u, TRADE.isOwner(req));
     if (u.pathname === '/api/live/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.status())); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
 

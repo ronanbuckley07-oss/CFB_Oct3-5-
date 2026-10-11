@@ -116,9 +116,9 @@ export function createTrading({ api, dir, leading, picks }) {
       if (!crypto.timingSafeEqual(a, b)) { f.n++; if (f.n >= 5) { f.until = Date.now() + 15 * 60000; f.n = 0; } fails.set(ip, f); return send(res, 401, { error: 'Wrong password' }); }
       fails.delete(ip);
       const secure = /^https/.test(String(req.headers['x-forwarded-proto'] || '')) ? '; Secure' : '';
-      return send(res, 200, { ok: true }, { 'set-cookie': `tsess=${makeToken({ exp: Date.now() + 12 * 3600000 })}; Path=/api/trade; HttpOnly; SameSite=Strict; Max-Age=43200${secure}` });
+      return send(res, 200, { ok: true }, { 'set-cookie': `tsess=${makeToken({ exp: Date.now() + 12 * 3600000 })}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${secure}` });
     }
-    if (route === '/logout') return send(res, 200, { ok: true }, { 'set-cookie': 'tsess=; Path=/api/trade; Max-Age=0' });
+    if (route === '/logout') return send(res, 200, { ok: true }, { 'set-cookie': ['tsess=; Path=/; Max-Age=0', 'tsess=; Path=/api/trade; Max-Age=0'] });
     if (!authed(req)) return send(res, 401, { error: 'login required' });
 
     if (route === '/state') {
@@ -203,5 +203,6 @@ export function createTrading({ api, dir, leading, picks }) {
       { ok: !db.trades.some(t => t.mode !== 'paper' && t.qty > 0 && t.status === 'open' && t.slug === plan.slug), msg: 'Not already holding this market' },
     ];
   }
-  return { handle };
+  // The owner (logged in on /trade) is the only one who sees the bet record
+  return { handle, isOwner: req => !!PASSWORD && authed(req) };
 }

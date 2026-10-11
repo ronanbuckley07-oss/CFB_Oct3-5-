@@ -350,3 +350,7 @@ Run locally with `npm start` and open http://localhost:3000.
   chunks, so the update starts within a fraction of a second instead of waiting for 25,000 stale sims.
 - The Top 25 filter uses ESPN's poll rank. Weeks with no ranked games fall back to all FBS games.
 - Model, data sources and known limits are unchanged from v1.
+
+## Private record
+
+The bet record is owner-only. Everyone sees the live bets, small edges, steady picks and cash-outs on the home page and game pages. Only someone signed in on `/trade` (the `TRADE_PASSWORD` login, now a site-wide cookie) gets the record: the Model bets panel, past bets, "What the model learned", the steady-pick record, and each game's "Logged for this game" list. `/api/picks` returns only the steady-pick rule to everyone else, and `/api/picks/audit` and `/api/picks/removed` return 401. There is an "Owner sign-in" link at the bottom of the home page.

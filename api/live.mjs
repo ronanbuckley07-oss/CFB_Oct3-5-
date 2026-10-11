@@ -33,7 +33,7 @@ export function createLive({ api, pages, dataDir }) {
   const pool = (cfb || nfl) ? createPool({ engineSrc: (cfb || nfl).engineSrc, datas }) : null;
   const games = new Map();
 
-  function handle(req, res, u) {
+  function handle(req, res, u, owner = false) {
     const league = u.searchParams.get('league') === 'nfl' ? 'nfl' : 'cfb';
     const event = String(u.searchParams.get('event') || '').replace(/\D/g, '');
     const side = String(u.searchParams.get('side') || '').replace(/\D/g, '');
@@ -44,6 +44,7 @@ export function createLive({ api, pages, dataDir }) {
     if (!g) { g = new LiveGame(league, event, side); games.set(key, g); }
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.write('retry: 3000\n\n');
+    res.owner = owner; // only the owner gets the bets logged for this game and their results
     g.addViewer(res);
     const ping = setInterval(() => res.write(': ping\n\n'), 20000);
     req.on('close', () => { clearInterval(ping); g.removeViewer(res); });
@@ -341,7 +342,12 @@ function simDue(o, last) {
   return Math.abs(last.secs - o.secs) >= (late ? 5 : 30);
 }
 // ---------- helpers ported from the page (kept identical so keys and states match the browser's) ----------
-function send(res, type, data) { try { res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} }
+// Viewers who aren't the owner don't get the logged bets (the record); live bets are unchanged
+const noLog = e => e && e.logged ? { ...e, logged: [], now: [] } : e;
+function send(res, type, data) {
+  if (!res.owner && type === 'edges') data = noLog(data);
+  else if (!res.owner && type === 'hello' && data.last && data.last.edges) data = { ...data, last: { ...data.last, edges: noLog(data.last.edges) } };
+  try { res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); } catch {} }
 const clockOf = S => `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`;
 // The pregame read in this game's orientation, kept so each pick can explain where the model started
 function startInfo(pre, homeSlot, base, abbr) {
