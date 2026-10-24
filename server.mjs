@@ -10,6 +10,7 @@ const API = { cfb: createHandler(LEAGUES.cfb), nfl: createHandler(LEAGUES.nfl) }
 import { createLive } from './api/live.mjs';
 import { BUILD } from './api/version.mjs';
 import { createTrading } from './api/trade.mjs';
+import { createAP } from './api/ap.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const PORT = process.env.PORT || 3000;
@@ -18,6 +19,8 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const LIVE = createLive({ api: API, pages: { cfb: path.join(ROOT, 'game.html'), nfl: path.join(ROOT, 'nfl', 'game.html') }, dataDir: DATA_DIR });
 // Private one-tap trading on Polymarket US (off unless TRADE_PASSWORD is set; see api/trade.mjs)
+// AP poll projection and season simulator (see api/ap.mjs)
+const AP = createAP({ dataDir: DATA_DIR });
 const TRADE = createTrading({ api: API, dir: DATA_DIR, leading: l => LIVE.leadingFor(l), picks: LIVE.picks });
 // What everyone else gets from /api/picks: the steady-pick rule, no record, no past bets
 const publicReport = r => ({ private: true, steady: r.steady ? { rule: { ...r.steady.rule, replay: undefined }, paper: { w: 0, l: 0 }, open: [], settled: [] } : null });
@@ -27,7 +30,7 @@ const TYPES = {
   '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
 };
 // Clean URLs: /game/401858250 and /game?event=401858250 both open the simulator; /nfl... is the same for the NFL
-const PAGES = { '/trade': 'trade.html', '/': 'index.html', '/cfb': 'index.html', '/college': 'index.html', '/game': 'game.html', '/nfl': 'index.html', '/nfl/game': 'nfl/game.html' };
+const PAGES = { '/ap': 'ap.html', '/trade': 'trade.html', '/': 'index.html', '/cfb': 'index.html', '/college': 'index.html', '/game': 'game.html', '/nfl': 'index.html', '/nfl/game': 'nfl/game.html' };
 
 // Static files are read and compressed once, then served from memory. The sim page is ~1 MB raw, ~150 KB gzipped.
 const fileCache = new Map();
@@ -82,6 +85,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/picks/audit') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.audit())); return; }
     if (u.pathname === '/api/picks/steady') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.steadyNow(u.searchParams.get('league') || 'all'))); return; }
     if (u.pathname === '/api/picks') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(TRADE.isOwner(req) ? LIVE.picks.report(u.searchParams.get('league') || 'all') : publicReport(LIVE.picks.report(u.searchParams.get('league') || 'all')))); return; }
+    if (u.pathname.startsWith('/api/ap/')) return await AP.handle(req, res, u);
     if (u.pathname.startsWith('/api/trade')) return await TRADE.handle(req, res, u);
     if (u.pathname === '/api/live') return LIVE.handle(req, res, u, TRADE.isOwner(req));
     if (u.pathname === '/api/live/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.status())); return; }

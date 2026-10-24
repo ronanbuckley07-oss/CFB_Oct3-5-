@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AP Poll & Seasons</title>
+<meta name="description" content="Live projection of the next AP poll and a season simulator for every name-brand college football team.">
+<link rel="icon" href="/logo.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#F3F5F8;--card:#FFFFFF;--ink:#0C2340;--muted:#5A6A80;--line:#D8DEE7;--gold:#B8902A;--goldsoft:#F1E6C6;--bad:#B23A3A;--good:#2E7D4F;--live:#D23B3B;--peg:#9AA7B8;--base:#C9D1DC;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0A1626;--card:#10213A;--ink:#E8EDF4;--muted:#93A3B8;--line:#22385A;--goldsoft:#3A3220;--live:#F0605A;--good:#4FB27A;--bad:#E26A6A;--peg:#4E6584;--base:#3A5276;}}
+:root[data-theme="dark"]{--paper:#0A1626;--card:#10213A;--ink:#E8EDF4;--muted:#93A3B8;--line:#22385A;--goldsoft:#3A3220;--live:#F0605A;--good:#4FB27A;--bad:#E26A6A;--peg:#4E6584;--base:#3A5276;}
+*,*::before,*::after{box-sizing:inherit}
+[hidden]{display:none!important}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.45 Barlow,system-ui,-apple-system,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:20px 16px 40px}
+h1,h2,h3,.cond{font-family:"Barlow Condensed",Barlow,system-ui,sans-serif}
+a{color:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.mast{padding-bottom:14px;border-bottom:3px solid var(--ink);margin-bottom:16px}
+.brand{display:inline-flex;align-items:center;gap:9px;text-decoration:none;margin-bottom:10px;font:800 21px/1 "Barlow Condensed",sans-serif}
+.brand img{border-radius:8px;display:block}
+.leaguebar{display:flex;gap:6px;margin:4px 0 12px;flex-wrap:wrap}
+.leaguebar a{padding:8px 16px;border:1px solid var(--line);border-radius:999px;font:700 16px Barlow,sans-serif;text-decoration:none;color:var(--ink);background:var(--card)}
+.leaguebar a:hover{border-color:var(--gold)}
+.leaguebar a[aria-current="page"]{background:var(--gold);border-color:var(--gold);color:#0C2340}
+.mast h1{font-size:clamp(32px,6vw,54px);line-height:.92;margin:0;font-weight:800}
+.mast p{margin:8px 0 0;color:var(--muted);max-width:62ch}
+.tabs{display:flex;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card);margin:0 0 16px;width:fit-content;max-width:100%}
+.tabs button{border:0;background:transparent;color:var(--ink);padding:10px 18px;font:700 16px Barlow,sans-serif;cursor:pointer}
+.tabs button+button{border-left:1px solid var(--line)}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--card)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+.panel h2{margin:0 0 4px;font-size:26px;line-height:1.05}
+.sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+.status{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.dot.on{background:var(--live)}
+/* Projected poll rows */
+.prow{display:grid;grid-template-columns:40px 30px minmax(0,1fr) 120px 150px;gap:10px;align-items:center;padding:9px 4px;border-top:1px solid var(--line)}
+.prow:first-of-type{border-top:0}
+.prk{font:800 26px/1 "Barlow Condensed",sans-serif;text-align:right}
+.prow img{width:30px;height:30px;object-fit:contain}
+.pnm{min-width:0}
+.pnm b{font-size:17px}
+.mv{font-size:12px;font-weight:700;margin-left:6px}
+.mv.up{color:var(--good)}.mv.dn{color:var(--bad)}.mv.nw{color:var(--gold)}.mv.eq{color:var(--muted)}
+.pg{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pg .W{color:var(--good);font-weight:700}.pg .L{color:var(--bad);font-weight:700}.pg .LV{color:var(--live);font-weight:700}
+.rng{font-size:13px;color:var(--muted);text-align:right}
+.rng b{color:var(--ink);font-size:14px}
+.spark{display:flex;align-items:flex-end;gap:1px;height:30px}
+.spark i{flex:1;background:var(--gold);border-radius:2px 2px 0 0;min-height:1px;opacity:.95}
+.spark i.out{background:var(--base)}
+.spark i:hover{opacity:.6}
+.bubble{margin-top:10px;padding-top:6px;border-top:2px dashed var(--line)}
+.bubble h3{margin:8px 0 2px;font-size:18px}
+@media (max-width:680px){
+  .prow{grid-template-columns:34px 26px minmax(0,1fr) 92px;gap:8px}
+  .prow .spark{grid-column:3 / 5;height:22px}
+  .prk{font-size:22px}.prow img{width:26px;height:26px}
+  .pg{white-space:normal}
+}
+/* Backtest */
+.kpis{display:flex;gap:10px 26px;flex-wrap:wrap;margin:10px 0}
+.kpis div{display:flex;flex-direction:column}
+.kpis b{font:800 30px/1 "Barlow Condensed",sans-serif}
+.kpis span{font-size:13px;color:var(--muted)}
+.bars{display:grid;grid-template-columns:120px 1fr 52px;gap:6px 10px;align-items:center;font-size:14px;margin:8px 0}
+.bars .bar{height:14px;background:var(--base);border-radius:0 4px 4px 0}
+.bars .bar.me{background:var(--gold)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600;font-size:13px}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+details{margin-top:8px}summary{cursor:pointer;color:var(--muted);font-weight:600;font-size:14px}
+.tag{font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;margin-left:6px;border:1px solid var(--line);color:var(--muted)}
+.tag.live{border-color:var(--gold);color:var(--gold)}
+.scroll{overflow-x:auto}
+/* Season list */
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 12px}
+.filters input,.filters select{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.filters input{flex:1;min-width:180px}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.tcard{display:grid;grid-template-columns:36px 1fr;gap:4px 10px;align-items:center;text-align:left;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card);color:var(--ink);cursor:pointer;font:inherit}
+.tcard:hover{border-color:var(--gold)}
+.tcard img{width:36px;height:36px;object-fit:contain;grid-row:1 / 3}
+.tcard .nm{font-weight:700;font-size:16px;line-height:1.1}
+.tcard .nm i{font-style:normal;color:var(--muted);font-weight:600;font-size:13px;margin-right:4px}
+.tcard .meta{font-size:13px;color:var(--muted)}
+.tcard .spark{grid-column:1 / 3;height:28px;margin-top:4px}
+/* Team view */
+.thead{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.thead img{width:56px;height:56px;object-fit:contain}
+.thead h2{font-size:32px}
+.back{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:7px 12px;font:600 14px Barlow,sans-serif;cursor:pointer;margin-bottom:10px}
+.board{position:relative;width:100%;margin-top:10px}
+.board canvas{display:block;width:100%;border-radius:10px;background:var(--paper)}
+.bctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.bctl button{border:1px solid var(--gold);background:var(--gold);color:#0C2340;border-radius:8px;padding:8px 14px;font:700 15px Barlow,sans-serif;cursor:pointer}
+.bctl button.ghost{background:var(--card);color:var(--ink);border-color:var(--line)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:5px}
+.sched .pbar{position:relative;height:8px;border-radius:4px;background:var(--base);min-width:70px}
+.sched .pbar i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--gold)}
+.res.W{color:var(--good);font-weight:700}.res.L{color:var(--bad);font-weight:700}.res.LV{color:var(--live);font-weight:700}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--card);font:600 13px Barlow,sans-serif;padding:5px 8px;border-radius:6px;z-index:10;white-space:nowrap}
+.err{background:#7a2e2e;color:#fff;padding:10px 14px;border-radius:10px;margin:0 0 12px;font:600 14px Barlow,sans-serif}
+.skel{height:160px;border-radius:12px;background:var(--card);border:1px solid var(--line);opacity:.6}
+</style></head>
+<body><div class="wrap">
+<header class="mast">
+  <a class="brand" href="/" aria-label="Home"><img src="/logo.svg" alt="" width="34" height="34"><span>CFB Live Sim</span></a>
+  <nav class="leaguebar" aria-label="Sections"><a href="/cfb">College football</a><a href="/nfl">NFL</a><a href="/ap" aria-current="page">AP poll & seasons</a></nav>
+  <h1>AP poll & seasons</h1>
+  <p>Where every team should land in next week's AP poll, updating live as this week's games play out, and how each team's season is likely to finish.</p>
+</header>
+<div class="tabs" role="tablist">
+  <button role="tab" id="tabPoll" aria-selected="true" data-tab="poll">AP poll projection</button>
+  <button role="tab" id="tabSeason" aria-selected="false" data-tab="season">Season simulator</button>
+</div>
+<div id="err" class="err" hidden></div>
+
+<section id="pollView">
+  <div class="panel" id="projPanel"><div class="skel"></div></div>
+  <div class="panel" id="btPanel" hidden></div>
+</section>
+
+<section id="seasonView" hidden>
+  <div class="panel" id="listPanel"><div class="skel"></div></div>
+  <div class="panel" id="teamPanel" hidden></div>
+</section>
+<div class="tip" id="tip" hidden></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const logo=id=>`https://a.espncdn.com/i/teamlogos/ncaa/500/${encodeURIComponent(id)}.png`;
+const pct=v=>v==null?'–':Math.round(v*100)+'%';
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// ---------- hover tooltips: any element with data-tip ----------
+const tip=$('tip');
+document.addEventListener('pointerover',e=>{ const t=e.target.closest('[data-tip]'); if(!t){ tip.hidden=true; return; } tip.textContent=t.dataset.tip; tip.hidden=false; });
+document.addEventListener('pointermove',e=>{ if(tip.hidden) return; const x=Math.min(e.clientX+12, innerWidth-tip.offsetWidth-8); tip.style.left=x+'px'; tip.style.top=(e.clientY-34)+'px'; });
+document.addEventListener('pointerout',e=>{ if(!e.relatedTarget||!e.relatedTarget.closest||!e.relatedTarget.closest('[data-tip]')) tip.hidden=true; });
+
+// ---------- tabs and routing: #poll, #season, #team=ID ----------
+function route(){
+  const h=location.hash.slice(1), team=(h.match(/^team=(\d+)/)||[])[1], season=h==='season'||!!team;
+  $('tabPoll').setAttribute('aria-selected',String(!season)); $('tabSeason').setAttribute('aria-selected',String(season));
+  $('pollView').hidden=season; $('seasonView').hidden=!season;
+  if(season){ if(team) openTeam(team); else { $('teamPanel').hidden=true; $('listPanel').hidden=false; loadTeams(); } }
+  else loadPoll();
+}
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ location.hash=b.dataset.tab==='season'?'season':'poll'; });
+addEventListener('hashchange',route);
+function showErr(m){ const e=$('err'); e.textContent=m; e.hidden=!m; }
+
+// ---------- AP poll projection ----------
+let POLL=null;
+function gameText(g){
+  if(!g) return '<span>Bye this week</span>';
+  const vs=`${g.neutral?'vs':g.home?'vs':'at'} ${g.oppRank?'#'+g.oppRank+' ':''}${esc(g.opp)}`;
+  if(g.state==='post'){ const w=g.us>g.them; return `<span class="${w?'W':'L'}">${w?'W':'L'} ${g.us}–${g.them}</span> ${vs}`; }
+  if(g.state==='in') return `<span class="LV">LIVE ${g.us??0}–${g.them??0}</span> ${vs} · ${esc(g.clock)} · ${pct(g.p)} to win`;
+  return `${vs} · ${pct(g.p)} to win`;
+}
+function spark(hist,label){ // rank 1..26 (26 = unranked); bars scaled to the most likely rank
+  const m=Math.max(...hist,1), n=hist.reduce((a,b)=>a+b,0)||1;
+  return `<div class="spark" aria-label="${esc(label)}">${hist.map((c,i)=>`<i class="${i===25?'out':''}" style="height:${Math.max(3,c/m*100)}%" data-tip="${i===25?'Unranked':'#'+(i+1)}: ${Math.round(c/n*100)}% of sims"></i>`).join('')}</div>`;
+}
+function prow(t,i){
+  const now=i+1, mv=t.prev==null?'<span class="mv nw">NEW</span>':t.prev>now?`<span class="mv up">▲${t.prev-now}</span>`:t.prev<now?`<span class="mv dn">▼${now-t.prev}</span>`:'<span class="mv eq">–</span>';
+  const range=t.lo===t.hi?`#${t.lo}`:`#${t.lo}–${t.hi>25?'NR':t.hi}`;
+  return `<div class="prow"><div class="prk">${now}</div><img src="${logo(t.id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+    <div class="pnm"><b>${esc(t.name)}</b>${mv}<span class="sub" style="font-size:12px;margin-left:6px">${t.prev?`was #${t.prev}`:'unranked'}</span><div class="pg">${gameText(t.game)}</div></div>
+    <div class="rng"><b>${range}</b><br>${t.p25>=0.995?'In the top 25':pct(t.p25)+' top 25'}</div>
+    ${spark(t.hist,`${t.name}: chance of each rank`)}</div>`;
+}
+async function loadPoll(){
+  try{
+    const r=await fetch('/api/ap/poll',{cache:'no-store'}); if(!r.ok) throw new Error('The poll projection is unavailable ('+r.status+')');
+    const d=POLL=await r.json(); showErr('');
+    const top=d.projection.slice(0,25), bub=d.projection.slice(25,32), g=d.games, liveNow=g.live>0;
+    $('projPanel').innerHTML=`<h2>Projected AP poll, week ${d.next}</h2>
+      <p class="sub">Starting from the week ${d.week} AP poll${d.rebuilt?' (rebuilt from game ranks: ESPN unreachable)':''} and this week's results. Every unfinished game is played out ${d.sims} times, and each outcome goes through the poll model trained on how AP voters have moved teams since 2010.</p>
+      <div class="status"><i class="dot ${liveNow?'on':''}"></i><span>${g.final} final · ${g.live} live · ${g.upcoming} still to play</span><span>· source ${esc(d.source)}</span><span>· updated <span id="ago" data-at="${Date.now()}">now</span></span></div>
+      <p class="sub" style="margin-top:10px">Bars show the chance of each spot, #1 on the left to unranked (gray) on the right. Range is the middle 80% of simulations.</p>
+      <div style="margin-top:6px">${top.map(prow).join('')}</div>
+      ${bub.length?`<div class="bubble"><h3>Next in line</h3>${bub.map((t,i)=>prow(t,25+i)).join('')}</div>`:''}`;
+    renderBacktest(d);
+  }catch(e){ showErr(e.message||'Could not load the poll projection.'); }
+}
+function renderBacktest(d){
+  const b=d.backtest, a=b.all, el=$('btPanel');
+  const rows=[['This model',a.model.avgMiss,true],['Losers drop 8',a.drop8.avgMiss,false],['Poll unchanged',a.unchanged.avgMiss,false]], mx=Math.max(...rows.map(r=>r[1]));
+  const seasons=Object.entries(b.bySeason);
+  const weeks=[...(b.latest||[]).map(w=>({...w,src:'backtest'})),...(d.log||[]).map(w=>({...w,src:'live'}))].reduce((m,w)=>{ m[w.week]=w; return m; },{});
+  const wl=Object.values(weeks).sort((x,y)=>x.week-y.week);
+  const wkRow=w=>`<tr><td>Week ${w.week} poll ${w.src==='live'?'<span class="tag live">live</span>':'<span class="tag">backtest</span>'}</td><td class="num">${w.avgMiss.toFixed(2)}</td><td class="num">${pct(w.top25)}</td></tr>
+    <tr><td colspan="3" style="padding:0 8px 8px"><details><summary>Projected vs. actual</summary><div class="scroll"><table><thead><tr><th>Team</th><th class="num">Last week</th><th class="num">Projected</th><th class="num">Actual</th></tr></thead><tbody>${w.rows.map(r=>`<tr><td>${esc(r.name)}</td><td class="num">${r.prev?'#'+r.prev:'NR'}</td><td class="num">${r.proj&&r.proj<=25?'#'+r.proj:'NR'}</td><td class="num">#${r.actual}</td></tr>`).join('')}</tbody></table></div></details></td></tr>`;
+  el.innerHTML=`<h2>How well it works</h2>
+    <p class="sub">Backtested on every AP poll from ${b.seasons[0]} to ${b.seasons[1]} through late October (after that ESPN's historical ranks switch to the CFP rankings). Each season was projected using only earlier seasons, the way it runs live.</p>
+    <div class="kpis"><div><b>${a.model.avgMiss.toFixed(1)}</b><span>spots off, on average</span></div><div><b>${pct(a.model.within2)}</b><span>within 2 spots</span></div><div><b>${pct(a.model.top25)}</b><span>of the real top 25 picked</span></div><div><b>${a.model.n.toLocaleString()}</b><span>team-weeks tested</span></div></div>
+    <p class="sub" style="margin-top:0">Average miss, in poll spots (shorter is better):</p>
+    <div class="bars">${rows.map(([l,v,me])=>`<span>${l}</span><div class="bar ${me?'me':''}" style="width:${v/mx*100}%" data-tip="${l}: ${v.toFixed(2)} spots off on average"></div><span class="num">${v.toFixed(2)}</span>`).join('')}</div>
+    <details><summary>By season</summary><div class="scroll"><table><thead><tr><th>Season</th><th class="num">Avg miss</th><th class="num">Poll unchanged</th><th class="num">Top 25 picked</th></tr></thead><tbody>${seasons.map(([s,x])=>`<tr><td>${s}</td><td class="num">${x.model.avgMiss.toFixed(2)}</td><td class="num">${x.unchanged.avgMiss.toFixed(2)}</td><td class="num">${pct(x.model.top25)}</td></tr>`).join('')}</tbody></table></div><p class="sub">2020 was the COVID season: conferences started weeks apart and the polls behaved differently, so it's left out of training.</p></details>
+    <h3 style="margin:16px 0 4px;font-size:20px">This season, week by week</h3>
+    <p class="sub">Projected (once the week's games were final) vs. the real poll. Every new poll is added to the model's training data and the model is refit, so it keeps learning how this year's voters move teams. Learned live so far: ${d.model.learnedWeeks.length?'weeks '+d.model.learnedWeeks.join(', '):'none yet (the next poll will be the first)'}.</p>
+    <div class="scroll"><table><thead><tr><th>Poll</th><th class="num">Avg miss</th><th class="num">Top 25 picked</th></tr></thead><tbody>${wl.map(wkRow).join('')||'<tr><td colspan="3">Nothing yet.</td></tr>'}</tbody></table></div>
+    <p class="sub" style="margin-top:10px"><b>Tested, didn't help, left out:</b> weighting this season's weeks 3× or 6× (avg miss 2.93 and 2.96 vs 2.91), and carrying each team's miss into the next week (3.3 to 3.9). Voters' habits are steady from year to year, so the model learns from new weeks at the same weight as old ones.</p>`;
+  el.hidden=false;
+}
+setInterval(()=>{ const a=$('ago'); if(a){ const s=Math.round((Date.now()-+a.dataset.at)/1000); a.textContent=s<5?'now':s+'s ago'; } },1000);
+setInterval(()=>{ if(document.hidden) return; if(!$('pollView').hidden) loadPoll(); else if(!$('teamPanel').hidden&&CUR) openTeam(CUR,true); },20000);
+
+// ---------- Season simulator: team list ----------
+let TEAMS=null, FILTER={q:'',conf:''};
+try{ FILTER=JSON.parse(localStorage.getItem('apFilter'))||FILTER; }catch(e){}
+function winSpark(t){ // final wins 0..16, only the reachable range
+  const lo=t.w, hi=Math.min(16,t.w+(t.games-t.w-t.l)), h=t.hist.slice(lo,hi+1), m=Math.max(...h,0.0001);
+  return `<div class="spark">${h.map((p,i)=>`<i style="height:${Math.max(3,p/m*100)}%" data-tip="${lo+i}–${t.games-(lo+i)}: ${Math.round(p*100)}%"></i>`).join('')}</div>`;
+}
+async function loadTeams(){
+  try{
+    if(!TEAMS){ const r=await fetch('/api/ap/teams'); if(!r.ok) throw new Error('The season simulator is unavailable ('+r.status+')'); TEAMS=await r.json(); }
+    showErr(''); renderTeams();
+  }catch(e){ showErr(e.message); }
+}
+function renderTeams(){
+  const d=TEAMS, confs=[...new Set(d.teams.map(t=>t.conf))].sort();
+  const q=FILTER.q.toLowerCase(), list=d.teams.filter(t=>(!q||t.name.toLowerCase().includes(q))&&(!FILTER.conf||t.conf===FILTER.conf));
+  const el=$('listPanel');
+  if(!el.querySelector('.tgrid')){
+    el.innerHTML=`<h2>Season simulator</h2><p class="sub">Every power-conference team, Notre Dame, and anyone ranked in the last three seasons. The rest of the regular season is played out ${d.sims.toLocaleString()} times. Tap a team to watch its season drop.</p>
+      <div class="filters"><input id="q" type="search" placeholder="Find a team" aria-label="Find a team"><select id="conf" aria-label="Conference"><option value="">All conferences</option>${confs.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div><div class="tgrid" id="tgrid"></div>`;
+    $('q').value=FILTER.q; $('conf').value=FILTER.conf;
+    $('q').oninput=e=>{ FILTER.q=e.target.value; saveF(); renderTeams(); }; $('conf').onchange=e=>{ FILTER.conf=e.target.value; saveF(); renderTeams(); };
+  }
+  $('tgrid').innerHTML=list.map(t=>`<button class="tcard" data-id="${t.id}"><img src="${logo(t.id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+    <span class="nm">${t.rank?`<i>#${t.rank}</i>`:''}${esc(t.name)}</span><span class="meta">${t.w}–${t.l} now · projected ${t.mean.toFixed(1)}–${(t.games-t.mean).toFixed(1)} · ${esc(t.conf)}</span>${winSpark(t)}</button>`).join('')||'<p class="sub">No team matches.</p>';
+  $('tgrid').querySelectorAll('.tcard').forEach(b=>b.onclick=()=>{ location.hash='team='+b.dataset.id; });
+}
+const saveF=()=>{ try{ localStorage.setItem('apFilter',JSON.stringify(FILTER)); }catch(e){} };
+
+// ---------- Season simulator: one team, with the dropping-ball board ----------
+let CUR=null, T=null, anim=null;
+async function openTeam(id,quiet){
+  CUR=id; $('listPanel').hidden=true; const el=$('teamPanel'); el.hidden=false;
+  if(!quiet) el.innerHTML='<div class="skel"></div>';
+  try{
+    const r=await fetch('/api/ap/team?id='+id,{cache:'no-store'}); if(!r.ok) throw new Error('Team not found');
+    const t=await r.json(); showErr('');
+    const same=quiet&&T&&T.id===t.id&&JSON.stringify(T.games.map(g=>[g.state,g.p]))===JSON.stringify(t.games.map(g=>[g.state,g.p]));
+    T=t; if(same) return; renderTeam(t);
+  }catch(e){ showErr(e.message); }
+}
+function renderTeam(t){
+  const rest=t.games.filter(g=>g.state!=='post'), el=$('teamPanel');
+  const row=g=>{ const vs=`${g.neutral?'vs':g.home?'vs':'at'} ${g.oppRank?'#'+g.oppRank+' ':''}${esc(g.opp)}${g.oppFcs?' <span class="tag">FCS</span>':''}`;
+    const res=g.state==='post'?`<span class="res ${g.won?'W':'L'}">${g.won?'W':'L'} ${g.us}–${g.them}</span>`:g.state==='in'?`<span class="res LV">LIVE ${g.us??0}–${g.them??0}</span> <span class="sub">${esc(g.clock)}</span>`:'';
+    return `<tr><td>${g.week}</td><td>${vs}</td><td>${res||`<span class="sub">${esc(g.date||'')}</span>`}</td><td class="num">${g.state==='post'?'':pct(g.p)}</td><td>${g.state==='post'?'':`<div class="pbar" data-tip="${pct(g.p)} to win, expected margin ${g.margin>0?'+':''}${g.margin}"><i style="width:${g.p*100}%"></i></div>`}</td></tr>`; };
+  const exp=`${t.mean.toFixed(1)}–${(t.games.length-t.mean).toFixed(1)}`;
+  const best=t.hist.indexOf(Math.max(...t.hist));
+  el.innerHTML=`<button class="back" onclick="location.hash='season'">‹ All teams</button>
+    <div class="thead"><img src="${logo(t.id)}" alt="" onerror="this.style.visibility='hidden'"><div><h2>${t.rank?'#'+t.rank+' ':''}${esc(t.name)}</h2><p class="sub">${esc(t.conf)} · ${t.w}–${t.l} now · rating ${t.rating>0?'+':''}${t.rating} pts vs an average FBS team</p></div></div>
+    <div class="kpis"><div><b>${exp}</b><span>expected final record</span></div><div><b>${best}–${t.games.length-best}</b><span>most likely (${pct(t.hist[best])})</span></div><div><b>${pct(t.hist[t.w+rest.length])}</b><span>chance to win out</span></div><div><b>${rest.length}</b><span>games left</span></div></div>
+    ${rest.length?`<h3 style="margin:14px 0 2px;font-size:20px">Watch the rest of the season drop</h3>
+    <p class="sub">Each row of pegs is a game still to play. At every peg a ball bounces right (win) with that game's win chance or left (loss). Where 60 balls land is a spread of final records; the outline is the same thing from ${t.sims.toLocaleString()} full simulations.</p>
+    <div class="board"><canvas id="cv" role="img" aria-label="Dropping-ball board of ${esc(t.name)}'s remaining games"></canvas></div>
+    <div class="bctl"><button id="drop">Drop 60 again</button><button class="ghost" id="fast">Show result</button><span class="sub" id="landed"></span></div>
+    <div class="legend"><span><i style="background:var(--gold)"></i>balls (one season each)</span><span><i style="background:transparent;border:2px solid var(--ink)"></i>${t.sims.toLocaleString()}-sim spread</span></div>`:'<p class="sub">Regular season complete.</p>'}
+    <h3 style="margin:16px 0 4px;font-size:20px">Schedule</h3>
+    <div class="scroll sched"><table><thead><tr><th>Wk</th><th>Opponent</th><th>Result</th><th class="num">Win %</th><th style="min-width:90px"></th></tr></thead><tbody>${t.games.map(row).join('')}</tbody></table></div>
+    <p class="sub" style="margin-top:10px">Win chances come from team ratings built from this season's scores (last season's as the starting point), plus the betting line and ESPN's live win probability when a game is on. Backtested 2014–2025, the favorite won 72.7% of FBS games. Regular season only; conference title games aren't scheduled yet. Each simulation also nudges every team's strength a little, because nobody knows exactly how good a team is, which makes the spread wider and more honest than treating games as coin flips.</p>`;
+  if(rest.length){ $('drop').onclick=()=>drop(t,false); $('fast').onclick=()=>drop(t,true); drop(t,false); }
+}
+function drop(t,instant){
+  if(anim) cancelAnimationFrame(anim);
+  const cv=$('cv'); if(!cv) return;
+  const rest=t.games.filter(g=>g.state!=='post'), n=rest.length, W0=t.w, dpr=devicePixelRatio||1;
+  const Wd=cv.parentElement.clientWidth, labW=Wd<520?118:170, binH=Wd<520?110:140, rowH=Wd<520?30:36, Hd=24+n*rowH+binH+34;
+  cv.width=Wd*dpr; cv.height=Hd*dpr; cv.style.height=Hd+'px'; const c=cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0);
+  const plotW=Wd-labW-12, nb=n+1, colW=plotW/nb, x0=labW;
+  const px=(row,k)=>x0+colW*(k+(n-row)/2)+colW/2, py=row=>24+row*rowH; // peg k of row `row` (k = wins so far)
+  const cols={ink:css('--ink'),muted:css('--muted'),gold:css('--gold'),peg:css('--peg'),line:css('--line'),base:css('--base'),good:css('--good'),bad:css('--bad')};
+  // 60 seasons, each a path of win/loss bounces
+  const balls=[]; for(let b=0;b<60;b++){ let k=0; const path=[0]; for(const g of rest){ if(Math.random()<g.p) k++; path.push(k); } balls.push({path,start:b*7,k}); }
+  const counts=new Array(nb).fill(0), binTop=24+n*rowH+8, binBot=Hd-30;
+  const expMax=Math.max(...t.hist.slice(W0,W0+nb),0.001);
+  function frame(f){
+    c.clearRect(0,0,Wd,Hd);
+    c.font='600 12px Barlow, sans-serif'; c.textBaseline='middle';
+    rest.forEach((g,i)=>{
+      // win % right-aligned at the label column's edge, the opponent's name trimmed to the room left of it
+      c.fillStyle=cols.ink; c.textAlign='right'; c.fillText(Math.round(g.p*100)+'%',labW-8,py(i));
+      let s=(g.home||g.neutral?'':'@')+(g.oppRank?'#'+g.oppRank+' ':'')+g.opp; const room=labW-8-c.measureText('100%').width-6;
+      if(c.measureText(s).width>room){ while(s.length>1&&c.measureText(s+'…').width>room) s=s.slice(0,-1); s+='…'; }
+      c.fillStyle=cols.muted; c.textAlign='left'; c.fillText(s,4,py(i));
+      for(let k=0;k<=i;k++){ c.beginPath(); c.arc(px(i,k),py(i),3,0,7); c.fillStyle=cols.peg; c.fill(); } });
+    // bins
+    const bh=binBot-binTop, mxc=Math.max(...counts,1), scale=Math.max(mxc/60, expMax);
+    for(let k=0;k<nb;k++){ const x=x0+colW*k+colW/2, wbin=Math.max(4,colW-6);
+      const h=counts[k]/60/scale*bh; if(h>0){ c.fillStyle=cols.gold; roundTop(c,x-wbin/2,binBot-h,wbin,h,4); }
+      c.fillStyle=cols.ink; c.textAlign='center'; c.font='700 13px Barlow, sans-serif'; c.fillText(`${W0+k}–${t.games.length-W0-k}`,x,binBot+14); c.font='600 12px Barlow, sans-serif';
+      if(counts[k]){ c.fillStyle=cols.ink; c.fillText(counts[k],x,binBot-h-9); } }
+    // the full-simulation spread as an outline
+    c.beginPath(); for(let k=0;k<nb;k++){ const x=x0+colW*k+colW/2, y=binBot-(t.hist[W0+k]||0)/scale*bh; k?c.lineTo(x,y):c.moveTo(x,y); } c.strokeStyle=cols.ink; c.lineWidth=2; c.stroke();
+    c.strokeStyle=cols.line; c.lineWidth=1; c.beginPath(); c.moveTo(x0,binBot+.5); c.lineTo(x0+plotW,binBot+.5); c.stroke();
+    // balls in flight
+    let alive=0;
+    for(const b of balls){ const t0=(f-b.start)/9; if(t0<0){ alive++; continue; } if(b.done) continue;
+      const row=Math.floor(t0); if(row>=n){ b.done=true; counts[b.k]++; continue; } alive++;
+      const fr=t0-row, xA=row===0?px(0,0):px(row,b.path[row]), yA=py(row), xB=row+1<=n-1?px(row+1,b.path[row+1]):x0+colW*b.path[n]+colW/2, yB=row+1<=n-1?py(row+1):binTop;
+      const x=xA+(xB-xA)*fr, y=yA+(yB-yA)*fr-Math.sin(fr*Math.PI)*8;
+      c.beginPath(); c.arc(x,y,4.5,0,7); c.fillStyle=cols.gold; c.fill(); c.lineWidth=1.5; c.strokeStyle=css('--paper'); c.stroke(); }
+    const lab=$('landed'); if(lab){ const done=counts.reduce((a,b)=>a+b,0); lab.textContent=done?`${done} of 60 seasons landed`:''; }
+    if(alive) anim=requestAnimationFrame(()=>frame(f+1)); else anim=null;
+  }
+  if(instant||matchMedia('(prefers-reduced-motion: reduce)').matches){ for(const b of balls){ counts[b.k]++; b.done=true; } frame(1e9); } else frame(0);
+}
+function roundTop(c,x,y,w,h,r){ r=Math.min(r,h,w/2); c.beginPath(); c.moveTo(x,y+h); c.lineTo(x,y+r); c.quadraticCurveTo(x,y,x+r,y); c.lineTo(x+w-r,y); c.quadraticCurveTo(x+w,y,x+w,y+r); c.lineTo(x+w,y+h); c.closePath(); c.fill(); }
+addEventListener('resize',()=>{ if(T&&!$('teamPanel').hidden&&$('cv')) drop(T,true); });
+route();
+</script>
+</body></html>

@@ -354,3 +354,19 @@ Run locally with `npm start` and open http://localhost:3000.
 ## Private record
 
 The bet record is owner-only. Everyone sees the live bets, small edges, steady picks and cash-outs on the home page and game pages. Only someone signed in on `/trade` (the `TRADE_PASSWORD` login, now a site-wide cookie) gets the record: the Model bets panel, past bets, "What the model learned", the steady-pick record, and each game's "Logged for this game" list. `/api/picks` returns only the steady-pick rule to everyone else, and `/api/picks/audit` and `/api/picks/removed` return 401. There is an "Owner sign-in" link at the bottom of the home page.
+
+## AP poll projection and season simulator (`/ap`)
+
+A new tab at the top of the site with two views.
+
+**AP poll projection.** It starts from this week's AP poll (ESPN's rankings) and this week's games, which are final, live or still to play. It simulates the unfinished games 300 times. Live games use the score, the clock and ESPN's live win probability; upcoming games use the betting line or team ratings. Every outcome goes through the poll model, which gives each team's projected spot, its middle-80% range, its chance to make the top 25 and a bar for each rank.
+
+- **The model** (`api/apmodel.mjs`) is ridge regression on where AP voters put teams the week after: last week's rank, win/loss/bye, opponent rank, margin, home or road, FCS opponent, record, power conference and team rating. Ranked and unranked teams get separate weights. The predicted values are then sorted into a poll.
+- **Training data** comes from sportsdataverse's copy of ESPN's schedules, which stamp each team's poll rank at kickoff. That gives every poll from 2010 on. Only weeks through late October are used, because after that ESPN's ranks are the CFP rankings. 2020 is left out.
+- **Backtest** (`tools/ap/backtest.mjs`): each season is projected using only earlier seasons. The model misses by **2.9 spots** on average and picks **88%** of the real top 25. "Poll unchanged" misses by 4.7 spots and "losers drop 8" by 4.1.
+- **Learning:** when ESPN posts a new poll, last week's poll plus last week's results and the new poll become new training rows. The model is refit from its sufficient statistics, and what it projected is logged next to the real poll. Both are shown on the page and saved in `DATA_DIR/ap_state.json`.
+- **Tested and left out:** weighting this season more (3× or 6×) and carrying each team's miss forward. Both made the backtest worse.
+
+**Season simulator.** It covers every power-conference team, Notre Dame, and anyone ranked in the last three seasons. Ratings come from this season's scores, with last season's ratings ×0.9 as a prior worth 6 games. In backtest the favorite won 72.7% of FBS games, and win chances use a 12.5-point SD. The rest of the regular season is simulated 4,000 times. Each simulation nudges every team's strength by about 4 points, so a team's results move together. Tap a team for its schedule with win chances and a dropping-ball board: 60 balls drop through a row of pegs per remaining game, with the 4,000-simulation spread drawn on top.
+
+To rebuild the shipped data, run `python3 tools/ap/fetch.py`, then `node tools/ap/build.mjs games.json`. That writes `api/apdata.json`, which is also used when ESPN can't be reached. `node tools/ap/test_live.mjs` runs the live path, including learning, on fake ESPN responses.
