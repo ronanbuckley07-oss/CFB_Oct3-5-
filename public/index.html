@@ -153,7 +153,7 @@ tr.howrow td{border-top:0;padding-top:0}
 <header class="mast">
   <div>
     <a class="brand" href="/" id="brand" aria-label="Home"><img src="/logo.svg" alt="" width="34" height="34"><span id="brandName">CFB Live Sim</span></a>
-    <nav class="leaguebar" aria-label="League"><a href="/cfb" id="lgCfb">College football</a><a href="/nfl" id="lgNfl">NFL</a><a href="/ap">AP poll & seasons</a></nav>
+    <nav class="leaguebar" aria-label="League"><a href="/cfb" id="lgCfb">College football</a><a href="/nfl" id="lgNfl">NFL</a><a href="/ap">AP poll & seasons</a><a href="/ml">How it works</a></nav>
     <h1 id="h1">College football, live</h1>
     <p>Scores, down and distance, and ESPN's win probability for every game on the board, refreshed every few seconds. Open a game to run the simulator on it.</p>
   </div>
@@ -454,12 +454,12 @@ async function renderSteady(d, RP, lg){
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },10000); // 10s: steady picks and cash-outs are time-sensitive
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-25.1';
+const BUILD='2026-10-25.2';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-25.1'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-25.2'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

@@ -200,7 +200,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--muted);font-weight:600
 <body><div class="wrap">
 <header class="mast">
   <a class="brand" href="/" aria-label="Home"><img src="/logo.svg" alt="" width="34" height="34"><span>CFB Live Sim</span></a>
-  <nav class="leaguebar" aria-label="Sections"><a href="/cfb">College football</a><a href="/nfl">NFL</a><a href="/ap" aria-current="page">AP poll & seasons</a></nav>
+  <nav class="leaguebar" aria-label="Sections"><a href="/cfb">College football</a><a href="/nfl">NFL</a><a href="/ap" aria-current="page">AP poll & seasons</a><a href="/ml">How it works</a></nav>
   <h1>AP poll & seasons</h1>
   <p>Where every team should land in next week's AP poll, updating live as this week's games play out; every poll this season; how each team's season is likely to finish; and any matchup you can dream up.</p>
 </header>
@@ -445,7 +445,7 @@ function renderTeam(t){
     <div class="legend"><span><i style="background:var(--gold)"></i>balls (one season each)</span><span><i style="background:transparent;border:2px solid var(--ink)"></i>${t.sims.toLocaleString()}-sim spread</span></div>`:'<p class="sub">Regular season complete.</p>'}
     <h3 style="margin:16px 0 4px;font-size:20px">Schedule</h3>
     <div class="scroll sched"><table><thead><tr><th>Wk</th><th>Opponent</th><th>Result</th><th class="num">Win %</th><th style="min-width:90px"></th></tr></thead><tbody>${t.games.map(row).join('')}</tbody></table></div>
-    <p class="sub" style="margin-top:10px">Win chances come from team ratings built from this season's scores (last season's as the starting point), plus the betting line and ESPN's live win probability when a game is on. Backtested 2014–2025, the favorite won 72.7% of FBS games. Regular season only; conference title games aren't scheduled yet. Each simulation also nudges every team's strength a little, because nobody knows exactly how good a team is, which makes the spread wider and more honest than treating games as coin flips.</p>`;
+    <p class="sub" style="margin-top:10px">Win chances come from team ratings built from this season's scores (last season's as the starting point), plus the betting line and ESPN's live win probability when a game is on. Backtested 2014–2025, the favorite won 72.5% of FBS games. Regular season only; conference title games aren't scheduled yet. Each simulation also nudges every team's strength a little, because nobody knows exactly how good a team is, which makes the spread wider and more honest than treating games as coin flips.</p>`;
   if(rest.length){ $('drop').onclick=()=>drop(t,false); $('fast').onclick=()=>drop(t,true); drop(t,false); }
 }
 function drop(t,instant){
@@ -572,7 +572,7 @@ function renderMatch(d){
     <h3 style="margin:16px 0 2px;font-size:18px">Tale of the tape</h3><div class="key"><span><i style="background:var(--ta)"></i>${esc(A.name)}</span><span><i style="background:var(--tb)"></i>${esc(B.name)}</span><span>◆ = the edge</span></div><div class="tape">${tape}</div>
     <div class="mgrid" style="margin-top:12px"><p class="sub"><b>${esc(A.name)}</b> ${A.w}–${A.l}. ${res(A)}</p><p class="sub"><b>${esc(B.name)}</b> ${B.w}–${B.l}. ${res(B)}</p></div>
     ${d.common.length?`<h3 style="margin:14px 0 2px;font-size:18px">Common opponents</h3><div class="scroll"><table><thead><tr><th>Opponent</th><th>${esc(A.name)}</th><th>${esc(B.name)}</th><th class="num">Points to ${esc(short(A.name))}</th></tr></thead><tbody>${d.common.map(c=>`<tr><td>${esc(c.name)}</td><td>${c.a}</td><td>${c.b}</td><td class="num">${sign(c.implied)}</td></tr>`).join('')}</tbody></table></div><p class="sub">Each margin is adjusted for home field first.</p>`:''}
-    <p class="sub" style="margin-top:12px">Ratings are points per game better than an average FBS team, from this season's scores with last season as a starting point. Backtested, the favorite wins 72.7% of FBS games; win chances use a 12.5-point spread. The score splits the margin using offense and defense ratings. It knows scores, not injuries, weather or rivalries.</p></div>`;
+    <p class="sub" style="margin-top:12px">Ratings are points per game better than an average FBS team, from this season's scores with last season as a starting point. Backtested, the favorite wins 72.5% of FBS games; win chances use a 12.5-point spread. The score splits the margin using offense and defense ratings. It knows scores, not injuries, weather or rivalries.</p></div>`;
   return sb+`<div class="mgrid">${grid}${curve}</div>`+whyP;
 }
 addEventListener('resize',()=>{ if(T&&!$('teamPanel').hidden&&$('cv')) drop(T,true); if(HIST&&!$('pollView').hidden) renderBump(); });

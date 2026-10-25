@@ -30,7 +30,7 @@ const TYPES = {
   '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
 };
 // Clean URLs: /game/401858250 and /game?event=401858250 both open the simulator; /nfl... is the same for the NFL
-const PAGES = { '/ap': 'ap.html', '/trade': 'trade.html', '/': 'index.html', '/cfb': 'index.html', '/college': 'index.html', '/game': 'game.html', '/nfl': 'index.html', '/nfl/game': 'nfl/game.html' };
+const PAGES = { '/ml': 'ml.html', '/ap': 'ap.html', '/trade': 'trade.html', '/': 'index.html', '/cfb': 'index.html', '/college': 'index.html', '/game': 'game.html', '/nfl': 'index.html', '/nfl/game': 'nfl/game.html' };
 
 // Static files are read and compressed once, then served from memory. The sim page is ~1 MB raw, ~150 KB gzipped.
 const fileCache = new Map();

@@ -26,7 +26,7 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
   const D = JSON.parse(fs.readFileSync(path.join(here, 'apdata.json'), 'utf8'));
   const season = D.season, teams = { ...D.teams };
   const file = dataDir ? path.join(dataDir, 'ap_state.json') : null;
-  let st = { season, polls: {}, live: null, learned: [], log: [] };
+  let st = { season, polls: {}, live: null, learned: [], log: [], weightHist: [] };
   try { if (file) { const s = JSON.parse(fs.readFileSync(file, 'utf8')); if (s.season === season) st = { ...st, ...s }; } } catch {}
   const save = () => { if (!file) return; try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file + '.tmp', JSON.stringify(st)); fs.renameSync(file + '.tmp', file); } catch (e) { console.error('ap: save failed', e.message); } };
   const modelNow = () => (st.live ? fitStats({ R: addStats(D.stats.R, st.live.R), U: addStats(D.stats.U, st.live.U) }) : D.model);
@@ -133,7 +133,9 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
       const miss = act.reduce((a, [id, r]) => a + Math.min(15, Math.abs((proj[id] || 40) - r)), 0) / act.length;
       st.log = st.log.filter(l => l.week !== w + 1).concat([{ week: w + 1, avgMiss: +miss.toFixed(2), top25: +(act.filter(([id]) => predTop.has(id)).length / act.length).toFixed(3), n: act.length,
         rows: act.sort((a, b) => a[1] - b[1]).map(([id, r]) => ({ id, name: teams[id]?.name || id, actual: r, proj: proj[id] ?? null, prev: prev[id] || null })) }]).sort((a, b) => a.week - b.week);
-      st.learned.push(w); model = modelNow(); save();
+      st.learned.push(w); model = modelNow();
+      // keep the weights after each lesson, for the How it works page
+      (st.weightHist ||= []).push({ week: w + 1, R: model.R.map(v => +v.toFixed(4)), U: model.U.map(v => +v.toFixed(4)), sdR: +model.sdR.toFixed(3), at: new Date().toISOString() }); save();
       console.log(`ap: learned from week ${w} -> ${w + 1}: projection missed by ${miss.toFixed(2)} spots`);
     }
   }
@@ -243,6 +245,31 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
       };
     });
   }
+  // ---------- How it works (/ml): the experiments, the live weights, and what the playground needs ----------
+  let ML = null; try { ML = JSON.parse(fs.readFileSync(path.join(here, 'mldata.json'), 'utf8')); } catch {}
+  function ml() {
+    return memoOut('ml', 30000, () => {
+      const P = currentPoll(), W = P.week, R = rate(), G0 = all(), od = odNow();
+      const sim = projectPoll({ games: G0, season, week: W, poll: P.ranks, R, teams, model, live, sims: 60 });
+      // record before this week's game, for building a feature row in the browser
+      const rec = {}; for (const g of G0) { if (g[G.week] >= W || g[G.hp] == null || g[G.hp] === g[G.ap]) continue; const hw = g[G.hp] > g[G.ap];
+        for (const [id, won] of [[String(g[G.hid]), hw], [String(g[G.aid]), !hw]]) { const r = rec[id] ||= { w: 0, l: 0 }; won ? r.w++ : r.l++; } }
+      const ids = Object.entries(sim.likely).sort((a, b) => a[1] - b[1]).slice(0, 35).map(([id]) => id);
+      const wk = G0.filter(g => g[G.week] === W);
+      const play = ids.map(id => { const g = wk.find(x => String(x[G.hid]) === id || String(x[G.aid]) === id), home = g && String(g[G.hid]) === id, op = g ? String(home ? g[G.aid] : g[G.hid]) : null;
+        return { id, name: nameOf(id), prev: P.ranks[id] || null, w: rec[id]?.w || 0, l: rec[id]?.l || 0, p4: teams[id]?.p4 ? 1 : 0, rating: +(R[id] ?? 0).toFixed(2),
+          game: g ? { opp: teams[op] ? nameOf(op) : (home ? g[G.away] : g[G.home]), oppRank: P.ranks[op] || null, fcs: !teams[op], home: !!home && !g[G.neutral], road: !home && !g[G.neutral], p: +(home ? sim.outlook[g[G.id]].p : 1 - sim.outlook[g[G.id]].p).toFixed(3) } : null }; });
+      const topR = Object.entries(R).filter(([k]) => teams[k]).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([id, r]) => ({ id, name: nameOf(id), r: +r.toFixed(1), o: +(od.o[id] ?? 0).toFixed(1), d: +(od.d[id] ?? 0).toFixed(1), prior: +(D.prior[id] ?? 0).toFixed(1) }));
+      const played = G0.filter(g => g[G.hp] != null).length;
+      return {
+        season, week: W, feats: D.feats, model: { R: model.R, U: model.U, sdR: model.sdR, sdU: model.sdU }, shipped: D.model, trained: D.trained,
+        weightHist: [{ week: D.trained.week + 1, R: D.model.R, U: D.model.U, sdR: D.model.sdR, shipped: true }, ...(st.weightHist || [])],
+        learned: st.learned.slice().sort((a, b) => a - b), log: st.log.map(l => ({ week: l.week, avgMiss: l.avgMiss, top25: l.top25 })), latest: (D.backtest.latest || []).map(l => ({ week: l.week, avgMiss: l.avgMiss, top25: l.top25 })),
+        backtest: D.backtest.all, play, values: Object.fromEntries(Object.entries(sim.likelyValues).map(([k, v]) => [k, +v.toFixed(3)])), topRatings: topR, gamesPlayed: played, ptsMean: +od.mean.toFixed(1),
+        exp: ML,
+      };
+    });
+  }
   const pickList = () => memoOut('pick', 300000, () => Object.values(teams).map(t => ({ id: t.id, name: nameOf(t.id), conf: t.conf, rank: currentPoll().ranks[t.id] || null, brand: D.brand.includes(t.id) })).sort((x, y) => x.name.localeCompare(y.name)));
   const seasonOut = () => memoOut('season', 60000, () => seasonSim({ games: all(), season, R: rate(), teams, live, sims: 4000 }));
   function teamList() {
@@ -272,6 +299,7 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
     const r = u.pathname.replace('/api/ap', '') || '/';
     if (r === '/poll') return send(res, 200, poll(u.searchParams.get('force') || ''));
     if (r === '/history') return send(res, 200, history(), 60);
+    if (r === '/ml') return send(res, 200, ml(), 30);
     if (r === '/pick') return send(res, 200, pickList(), 300);
     if (r === '/matchup') { const m = matchup((u.searchParams.get('a') || '').replace(/\D/g, ''), (u.searchParams.get('b') || '').replace(/\D/g, ''), ['a', 'n', 'b'].includes(u.searchParams.get('site')) ? u.searchParams.get('site') : 'n');
       return m ? send(res, 200, m, 20) : send(res, 400, { error: 'pick two different FBS teams' }); }
@@ -281,5 +309,5 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
   }
   // keep learning even when nobody has the page open: new polls show up Sunday afternoons
   setInterval(() => refresh(true).catch(() => {}), 5 * 60000).unref();
-  return { handle, refresh, poll, history, matchup, teamList, team, _state: () => st };
+  return { handle, refresh, poll, history, matchup, ml, teamList, team, _state: () => st };
 }

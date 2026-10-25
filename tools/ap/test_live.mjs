@@ -53,5 +53,6 @@ const m = ap.matchup('333', '61', 'n'); assert.ok(m.p > 0 && m.p < 1); assert.eq
 const mh = ap.matchup('333', '61', 'a'), ma = ap.matchup('333', '61', 'b'); assert.ok(mh.p > m.p && m.p > ma.p, 'home field moves it');
 assert.ok(Math.abs(m.sims.filter(x => x[0] > x[1]).length / 100 - m.p) < 0.2);
 console.log('matchup', m.a.name, m.score[0], '-', m.score[1], m.b.name, 'p', m.p, 'common', m.common.length, '| swing top', p.swing[0].awayName, '@', p.swing[0].homeName);
+const mlo = ap.ml(); assert.ok(mlo.exp && mlo.exp.poll.ablation.length === 8); assert.equal(mlo.weightHist.length, 2, 'shipped weights + one learned week'); assert.ok(mlo.play.length > 20 && mlo.values[mlo.play[0].id] != null);
 console.log('ok:', p.projection.slice(0, 5).map(x => `${x.name} (${x.prev}->${x.mean.toFixed(1)})`).join(', '), '| fetches', calls.length);
 process.exit(0);

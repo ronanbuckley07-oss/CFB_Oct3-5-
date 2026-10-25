@@ -11,10 +11,10 @@ const val = r => (r ? 26 - r : 0); // #1 = 25 ... #25 = 1, unranked = 0
 // ---------- team ratings: points-per-game margin, ridge-regressed toward a prior ----------
 // Every FBS team gets a rating r so that a game's expected margin is r_home - r_away + HFA (0 on a neutral field).
 // FCS opponents share one rating. The prior (last season's rating, shrunk) keeps September from being noise.
-// Backtested 2014-2025 (tools/ap/calib_games.mjs): ratings from earlier games pick 72.7% of FBS winners; a 12.5-point
-// spread SD gives the best-calibrated win probabilities, with last season's ratings x0.9 as the prior, worth 6 games.
+// Backtested 2014-2025 (tools/ap/calib_games.mjs): ratings from earlier games pick 72.5% of FBS winners; a 12.5-point
+// spread SD gives the best-calibrated win probabilities, with last season's ratings x0.9 as the prior, worth 3 games (tools/ap/ml.mjs: 3 beat 0, 1, 6, 10, 20, 40).
 export const HFA = 2.5, SIGMA = 12.5, FCS = 'FCS', PRIOR_SHRINK = 0.9;
-export function ratings(games, { prior = {}, priorWeight = 6, iters = 60, cap = 28 } = {}) {
+export function ratings(games, { prior = {}, priorWeight = 3, iters = 60, cap = 28 } = {}) {
   const done = games.filter(g => g[G.hp] != null && g[G.ap] != null);
   const key = (id, div) => (div === 'fbs' ? String(id) : FCS);
   const R = {}, n = {};
@@ -30,8 +30,9 @@ export function ratings(games, { prior = {}, priorWeight = 6, iters = 60, cap = 
       num[a] = (num[a] || 0) - m + hfa + R[h]; den[a] = (den[a] || 0) + 1;
     }
     for (const k of Object.keys(num)) { if (k === FCS) continue; const p = prior[k] ?? 0; R[k] = (num[k] + priorWeight * p) / (den[k] + priorWeight); }
-    // keep the FBS average at zero
-    const ks = Object.keys(R).filter(k => k !== FCS), mu = ks.reduce((a, k) => a + R[k], 0) / (ks.length || 1);
+    // keep the FBS average at zero, over teams that played (a team only in the prior, e.g. one that left FBS, keeps its
+    // prior and stays out of the average; re-centering it every pass used to make it drift)
+    const ks = Object.keys(num).filter(k => k !== FCS), mu = ks.reduce((a, k) => a + R[k], 0) / (ks.length || 1);
     for (const k of ks) R[k] -= mu;
   }
   return R;
@@ -225,7 +226,8 @@ export function projectPoll({ games, season, week, poll, R, teams, model, live =
   // The projected poll: teams in order of their average simulated rank
   out.sort((a, b) => a.mean - b.mean || a.likely - b.likely);
   chaos.anyTop5 /= sims; chaos.top10Losses = chaos.top10Losses.map(c => c / sims);
-  return { teams: out.filter(t => t.p25 > 0.02 || t.prev || t.likely <= 30), outlook, open: open.length, total: wk.length, sims, chaos, likely, fixed };
+  const likelyValues = one(fav);
+  return { teams: out.filter(t => t.p25 > 0.02 || t.prev || t.likely <= 30), outlook, open: open.length, total: wk.length, sims, chaos, likely, likelyValues, fixed };
 }
 
 // The games that move the poll most: each unfinished game is settled both ways (everything else to the favorite) and
