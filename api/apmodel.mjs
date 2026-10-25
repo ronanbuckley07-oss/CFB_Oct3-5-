@@ -29,7 +29,9 @@ export function ratings(games, { prior = {}, priorWeight = 3, iters = 60, cap = 
       num[h] = (num[h] || 0) + m - hfa + R[a]; den[h] = (den[h] || 0) + 1;
       num[a] = (num[a] || 0) - m + hfa + R[h]; den[a] = (den[a] || 0) + 1;
     }
-    for (const k of Object.keys(num)) { if (k === FCS) continue; const p = prior[k] ?? 0; R[k] = (num[k] + priorWeight * p) / (den[k] + priorWeight); }
+    // FCS opponents share one rating, estimated from their games like a team's (it used to sit at last season's value x0.9
+    // and shrink toward zero year after year)
+    for (const k of Object.keys(num)) { const p = k === FCS ? (prior[k] ?? -22) : (prior[k] ?? 0); R[k] = (num[k] + priorWeight * p) / (den[k] + priorWeight); }
     // keep the FBS average at zero, over teams that played (a team only in the prior, e.g. one that left FBS, keeps its
     // prior and stays out of the average; re-centering it every pass used to make it drift)
     const ks = Object.keys(num).filter(k => k !== FCS), mu = ks.reduce((a, k) => a + R[k], 0) / (ks.length || 1);
@@ -298,4 +300,45 @@ export function seasonSim({ games, season, R, teams, live = {}, sims = 4000, sho
     out[id] = { w: W0[id], l: L0[id], games, mean, hist: h };
   }
   return { teams: out, rest: rest.length, sims };
+}
+
+// ---------- strength of schedule and strength of record ----------
+// For one point in the season (ratings R built from games through `week`):
+//   difficulty of a game  = opponent's rating - home edge (a road game at a +10 team counts as 12.5)
+//   SOS                   = average difficulty (played, remaining, full season)
+//   benchmark             = the average rating of the top 25 teams right now ("a typical top-25 team")
+//   strength of record    = chance the benchmark team would win at least as many of these games (lower = more impressive)
+//   wins above benchmark  = actual wins - the benchmark team's expected wins against the same games
+//   game score            = margin (capped at 28) - home edge + opponent rating: how well the team played that day,
+//                           in rating points
+export function sosTable(games, season, week, R, teams) {
+  const S = games.filter(g => g[G.season] === season), fbs = Object.keys(teams).filter(id => R[id] != null);
+  const bench = fbs.map(id => R[id]).sort((a, b) => b - a).slice(0, 25).reduce((a, b) => a + b, 0) / 25;
+  const out = {};
+  for (const id of fbs) out[id] = { id, played: [], rest: [], w: 0, l: 0 };
+  for (const g of S) for (const [me, op, home] of [[String(g[G.hid]), String(g[G.aid]), true], [String(g[G.aid]), String(g[G.hid]), false]]) {
+    const t = out[me]; if (!t) continue;
+    const opR = teams[op] ? (R[op] ?? 0) : (R[FCS] ?? -22), site = g[G.neutral] ? 0 : home ? HFA : -HFA, diff = opR - site;
+    const done = g[G.week] <= week && g[G.hp] != null && g[G.hp] !== g[G.ap];
+    const x = { op, opR, site, diff, pb: Phi((bench - diff) / SIGMA), week: g[G.week], id: g[G.id] };
+    if (done) { const m = (home ? 1 : -1) * (g[G.hp] - g[G.ap]); x.m = m; x.won = m > 0; x.score = Math.max(-28, Math.min(28, m)) - site + opR; x.won ? t.w++ : t.l++; t.played.push(x); }
+    else if (g[G.week] > week) t.rest.push(x);
+  }
+  for (const t of Object.values(out)) { t.played.sort((a, b) => a.week - b.week); t.rest.sort((a, b) => a.week - b.week); }
+  const avg = a => (a.length ? a.reduce((s, x) => s + x.diff, 0) / a.length : null);
+  for (const t of Object.values(out)) {
+    // P(benchmark wins >= t.w of the played games): Poisson-binomial by dynamic programming
+    let dp = [1]; for (const x of t.played) { const n = new Array(dp.length + 1).fill(0); dp.forEach((p, k) => { n[k] += p * (1 - x.pb); n[k + 1] += p * x.pb; }); dp = n; }
+    t.sor = t.played.length ? dp.slice(t.w).reduce((a, b) => a + b, 0) : null;
+    t.benchW = t.played.reduce((a, x) => a + x.pb, 0); t.wab = t.w - t.benchW;
+    t.sos = avg(t.played); t.futSos = avg(t.rest); t.fullSos = avg([...t.played, ...t.rest]);
+    t.futBenchW = t.rest.reduce((a, x) => a + x.pb, 0);
+    t.perf = t.played.length ? t.played.reduce((a, x) => a + x.score, 0) / t.played.length : null;
+    t.power = R[t.id] ?? 0;
+  }
+  // ranks: hardest schedule = 1; most impressive record = 1 (lowest SOR, then more wins above benchmark)
+  const rank = (key, cmp) => { const L = Object.values(out).filter(t => t[key] != null).sort(cmp); L.forEach((t, i) => { t[key + 'Rank'] = i + 1; }); };
+  rank('sos', (a, b) => b.sos - a.sos); rank('futSos', (a, b) => b.futSos - a.futSos); rank('fullSos', (a, b) => b.fullSos - a.fullSos);
+  rank('sor', (a, b) => a.sor - b.sor || b.wab - a.wab); rank('power', (a, b) => b.power - a.power); rank('wab', (a, b) => b.wab - a.wab);
+  return { bench, teams: out };
 }

@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { G, ratings, odRatings, features, fitStats, stats, addStats, projectPoll, swingGames, seasonSim, gameOutlook, rankFrom, predictValues, p4Of, Phi, SIGMA, HFA, rng } from './apmodel.mjs';
+import { G, ratings, odRatings, features, fitStats, stats, addStats, projectPoll, swingGames, seasonSim, gameOutlook, rankFrom, predictValues, p4Of, Phi, SIGMA, HFA, rng, sosTable } from './apmodel.mjs';
 
 const BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/college-football';
 const CORE = 'https://sports.core.api.espn.com/v2/sports/football/leagues/college-football';
@@ -245,6 +245,44 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
       };
     });
   }
+  // ---------- strength of schedule, strength of record, and the schedule-adjusted ranking, week by week ----------
+  // Each week is recomputed with the ratings as they stood after that week, so a schedule gets harder or easier as the
+  // opponents on it turn out better or worse.
+  function sosWeeks() {
+    return memoOut('sosw', 60000, () => {
+      const G0 = all(), W = currentPoll().week, last = Math.max(1, ...G0.filter(g => g[G.hp] != null).map(g => g[G.week])), snaps = [];
+      for (let w = 1; w <= Math.max(last, W - 1); w++) {
+        if (!G0.some(g => g[G.week] === w && g[G.hp] != null)) continue;
+        const R = ratings(G0.filter(g => g[G.hp] != null && g[G.week] <= w), { prior: D.prior });
+        snaps.push({ week: w, R, ...sosTable(G0, season, w, R, teams) });
+      }
+      return snaps;
+    });
+  }
+  const r1 = v => (v == null ? null : +v.toFixed(1)), r3 = v => (v == null ? null : +v.toFixed(3));
+  function sos() {
+    return memoOut('sos', 60000, () => {
+      const S = sosWeeks(), now = S[S.length - 1], P = currentPoll(); if (!now) return { season, weeks: [], teams: [] };
+      const list = Object.values(now.teams).filter(t => t.played.length).map(t => ({
+        id: t.id, name: nameOf(t.id), conf: teams[t.id]?.conf || null, brand: D.brand.includes(t.id), ap: P.ranks[t.id] || null, w: t.w, l: t.l,
+        sor: r3(t.sor), sorRank: t.sorRank, wab: +t.wab.toFixed(2), wabRank: t.wabRank, power: r1(t.power), powerRank: t.powerRank, perf: r1(t.perf),
+        sos: r1(t.sos), sosRank: t.sosRank, futSos: r1(t.futSos), futSosRank: t.futSosRank ?? null, fullSos: r1(t.fullSos), fullSosRank: t.fullSosRank, futBenchW: +t.futBenchW.toFixed(2), left: t.rest.length,
+        hist: S.map(x => { const y = x.teams[t.id]; return y ? [x.week, y.sorRank ?? null, y.sosRank ?? null, y.powerRank ?? null] : [x.week, null, null, null]; }),
+      })).sort((a, b) => a.sorRank - b.sorRank);
+      return { season, week: now.week, bench: r1(now.bench), weeks: S.map(x => ({ week: x.week, bench: r1(x.bench) })), n: list.length, teams: list, agreement: D.sosAgreement || null };
+    });
+  }
+  function sosTeam(id) {
+    id = String(id); const S = sosWeeks(), now = S[S.length - 1]; if (!now || !now.teams[id]) return null;
+    const t = now.teams[id], P = currentPoll(), before = w => { const x = S.filter(s => s.week < w).pop(); return x ? x.R : D.prior; };
+    const opName = (op, x) => { if (teams[op]) return nameOf(op); const g = games.get(x.id); return g ? (String(g[G.hid]) === op ? g[G.home] : g[G.away]) : 'FCS team'; };
+    const row = x => ({ week: x.week, op: x.op, opName: opName(x.op, x), fcs: !teams[x.op], site: x.site, opNow: r1(x.opR), opThen: teams[x.op] ? r1(before(x.week)[x.op] ?? 0) : r1(x.opR), diff: r1(x.diff),
+      pBench: r3(x.pb), m: x.m ?? null, won: x.won ?? null, score: r1(x.score), opAp: P.ranks[x.op] || null });
+    const base = sos().teams.find(x => x.id === id);
+    return { ...base, bench: r1(now.bench), played: t.played.map(row), rest: t.rest.map(row),
+      timeline: S.map(x => { const y = x.teams[id]; return y ? { week: x.week, sorRank: y.sorRank ?? null, sosRank: y.sosRank ?? null, powerRank: y.powerRank ?? null, futSosRank: y.futSosRank ?? null, sos: r1(y.sos), wab: y.wab != null ? +y.wab.toFixed(2) : null } : null; }).filter(Boolean) };
+  }
+
   // ---------- How it works (/ml): the experiments, the live weights, and what the playground needs ----------
   let ML = null; try { ML = JSON.parse(fs.readFileSync(path.join(here, 'mldata.json'), 'utf8')); } catch {}
   function ml() {
@@ -290,7 +328,8 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
       return { week: g[G.week], date: g[G.date], opp: teams[op] ? nameOf(op) : (home ? g[G.away] : g[G.home]) || op, oppId: op, oppRank: P.ranks[op] || null, oppFcs: !teams[op], home, neutral: !!g[G.neutral],
         state: o.final ? 'post' : o.live ? 'in' : 'pre', clock: L.clock || '', us: us ?? null, them: them ?? null, won: o.final ? (us > them) : null, p: +p.toFixed(3), margin: +((home ? 1 : -1) * o.mu).toFixed(1) };
     });
-    return { season, id, name: nameOf(id), conf: teams[id].conf, rank: P.ranks[id] || null, rating: +(R[id] ?? 0).toFixed(1), w: S.w, l: S.l, mean: +S.mean.toFixed(2), hist: S.hist.map(p => +p.toFixed(4)), sims: seasonOut().sims, games: sched };
+    const so = sos().teams.find(x => x.id === id) || null;
+    return { season, id, name: nameOf(id), conf: teams[id].conf, rank: P.ranks[id] || null, sos: so && { sosRank: so.sosRank, futSosRank: so.futSosRank, sorRank: so.sorRank, n: sos().n }, rating: +(R[id] ?? 0).toFixed(1), w: S.w, l: S.l, mean: +S.mean.toFixed(2), hist: S.hist.map(p => +p.toFixed(4)), sims: seasonOut().sims, games: sched };
   }
 
   const send = (res, code, obj, maxAge = 10) => { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': `public, max-age=${maxAge}` }); res.end(JSON.stringify(obj)); };
@@ -300,6 +339,7 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
     if (r === '/poll') return send(res, 200, poll(u.searchParams.get('force') || ''));
     if (r === '/history') return send(res, 200, history(), 60);
     if (r === '/ml') return send(res, 200, ml(), 30);
+    if (r === '/sos') { const id = (u.searchParams.get('id') || '').replace(/\D/g, ''); if (!id) return send(res, 200, sos(), 60); const t = sosTeam(id); return t ? send(res, 200, t, 60) : send(res, 404, { error: 'unknown team' }); }
     if (r === '/pick') return send(res, 200, pickList(), 300);
     if (r === '/matchup') { const m = matchup((u.searchParams.get('a') || '').replace(/\D/g, ''), (u.searchParams.get('b') || '').replace(/\D/g, ''), ['a', 'n', 'b'].includes(u.searchParams.get('site')) ? u.searchParams.get('site') : 'n');
       return m ? send(res, 200, m, 20) : send(res, 400, { error: 'pick two different FBS teams' }); }
@@ -309,5 +349,5 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
   }
   // keep learning even when nobody has the page open: new polls show up Sunday afternoons
   setInterval(() => refresh(true).catch(() => {}), 5 * 60000).unref();
-  return { handle, refresh, poll, history, matchup, ml, teamList, team, _state: () => st };
+  return { handle, refresh, poll, history, matchup, ml, sos, sosTeam, teamList, team, _state: () => st };
 }

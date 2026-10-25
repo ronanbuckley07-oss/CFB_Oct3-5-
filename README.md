@@ -394,4 +394,17 @@ A separate page, linked from the top bar, that explains every model on the site 
   - a Monte Carlo convergence demo.
 - **Changes from these experiments:**
   - **Prior weight:** the ratings' prior is now worth 3 games instead of 6. It measured best of 0, 1, 3, 6, 10, 20 and 40.
-  - **Solver bug:** the convergence chart exposed a bug. A team in last season's prior that no longer plays FBS was re-centered every pass and drifted to −171, shifting real ratings by up to 0.2 points. Re-centering now covers only teams that played. Win-probability log loss went from 0.5347 to 0.5334.
+  - **Solver bug:** the convergence chart exposed a bug. A team in last season's prior that no longer plays FBS was re-centered every pass and drifted to −171, shifting real ratings by up to 0.2 points. Re-centering now covers only teams that played.
+  - **FCS bug:** the shared rating for FCS opponents was never estimated from games, only carried over at 0.9× a year, so it had shrunk from −22 to −4. It's now estimated each season (about −20). With both fixes, win-probability log loss went from 0.5347 to 0.5309 and the poll backtest from 2.90 to 2.85 spots off.
+
+## Schedule strength (`/ap#sos`)
+
+A "Schedule strength" tab on `/ap`, computed by `sosTable` in `api/apmodel.mjs`. Each week is recomputed with the ratings as they stood after that week, so a schedule gets harder or easier as opponents keep playing.
+- **Game difficulty:** the opponent's rating minus the home edge (±2.5).
+- **Strength of schedule:** average difficulty, split into played, still to play, and full season.
+- **Benchmark:** the average rating of the current top 25.
+- **Strength of record:** the exact chance (Poisson-binomial, not simulated) that the benchmark team wins at least as many of the same games. Teams are ranked by it for the **schedule-adjusted ranking**, with ties broken by wins above the benchmark.
+- **Game score:** capped margin minus the home edge plus the opponent's rating, i.e. how well a team played that day in rating points.
+- **Agreement with voters:** on the last AP poll before November, 2014–2025, strength-of-record order matches the voters slightly better than power order (rank correlation 0.764 vs 0.744).
+- **The page:** a sortable table with a weekly trend for each team, lists of who the polls over- or under-rate vs. their résumé, and the hardest remaining schedules. Each team page has rank-over-time lines plus game-by-game tables (opponent rating at kickoff → now, difficulty, a top-25 team's win chance, result, game score). The season simulator's team view links to it.
+- **API:** `/api/ap/sos` for the table, `/api/ap/sos?id=ID` for one team.

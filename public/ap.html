@@ -194,6 +194,17 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--muted);font-weight:600
 .why{margin:8px 0 0;padding-left:18px}.why li{margin:4px 0}
 .mgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media (max-width:800px){.mgrid{grid-template-columns:1fr}}
+.chart{width:100%;display:block}
+.sost td,.sost th{white-space:nowrap}
+.sost tbody tr{cursor:pointer}.sost tbody tr:hover{background:var(--goldsoft)}
+.sost .tn{display:inline-flex;align-items:center;gap:8px;font-weight:700}.sost .tn img{width:24px;height:24px;object-fit:contain}
+.srt{border:0;background:none;color:var(--muted);font:600 13px Barlow,sans-serif;cursor:pointer;padding:0}.srt[aria-pressed="true"]{color:var(--ink)}
+.sbar{display:inline-block;width:60px;height:8px;border-radius:4px;background:var(--base);vertical-align:middle;position:relative;overflow:hidden}.sbar i{position:absolute;left:0;top:0;bottom:0;background:var(--gold);border-radius:4px}
+.gs{display:inline-block;width:70px;height:8px;border-radius:4px;background:var(--base);vertical-align:middle;position:relative;overflow:hidden}.gs i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+.cols3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}.cols3 h3{margin:0 0 6px;font-size:18px}
+.mini{margin:0;padding-left:20px;font-size:14px}.mini li{margin:3px 0}
+@media (max-width:760px){.cols3{grid-template-columns:1fr}.sost .hm{display:none}.sost .sbar{width:34px}.sost td,.sost th{padding:6px 5px}}
+@media (max-width:560px){.tabs{display:grid;grid-template-columns:1fr 1fr;width:100%}.tabs button{border-top:1px solid var(--line)}.tabs button:nth-child(-n+2){border-top:0}.tabs button:nth-child(odd){border-left:0}}
 .err{background:#7a2e2e;color:#fff;padding:10px 14px;border-radius:10px;margin:0 0 12px;font:600 14px Barlow,sans-serif}
 .skel{height:160px;border-radius:12px;background:var(--card);border:1px solid var(--line);opacity:.6}
 </style></head>
@@ -202,11 +213,12 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--muted);font-weight:600
   <a class="brand" href="/" aria-label="Home"><img src="/logo.svg" alt="" width="34" height="34"><span>CFB Live Sim</span></a>
   <nav class="leaguebar" aria-label="Sections"><a href="/cfb">College football</a><a href="/nfl">NFL</a><a href="/ap" aria-current="page">AP poll & seasons</a><a href="/ml">How it works</a></nav>
   <h1>AP poll & seasons</h1>
-  <p>Where every team should land in next week's AP poll, updating live as this week's games play out; every poll this season; how each team's season is likely to finish; and any matchup you can dream up.</p>
+  <p>Where every team should land in next week's AP poll, updating live as this week's games play out; every poll this season; how each team's season is likely to finish; who has played the toughest schedule and what their record is really worth; and any matchup you can dream up.</p>
 </header>
 <div class="tabs" role="tablist">
   <button role="tab" id="tabPoll" aria-selected="true" data-tab="poll">AP poll projection</button>
   <button role="tab" id="tabSeason" aria-selected="false" data-tab="season">Season simulator</button>
+  <button role="tab" id="tabSos" aria-selected="false" data-tab="sos">Schedule strength</button>
   <button role="tab" id="tabMatch" aria-selected="false" data-tab="matchup">Matchup machine</button>
 </div>
 <div id="err" class="err" hidden></div>
@@ -218,6 +230,10 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--muted);font-weight:600
   <div class="panel" id="whatifPanel" hidden></div>
   <div class="panel" id="bumpPanel" hidden></div>
   <div class="panel" id="btPanel" hidden></div>
+</section>
+<section id="sosView" hidden>
+  <div class="panel" id="sosList"><div class="skel"></div></div>
+  <div class="panel" id="sosTeam" hidden></div>
 </section>
 <section id="matchView" hidden>
   <div class="panel" id="matchPick"><div class="skel"></div></div>
@@ -245,11 +261,14 @@ document.addEventListener('pointerout',e=>{ if(!e.relatedTarget||!e.relatedTarge
 
 // ---------- tabs and routing: #poll, #season, #team=ID ----------
 function route(){
-  const h=location.hash.slice(1), team=(h.match(/^team=(\d+)/)||[])[1], season=h==='season'||!!team, match=/^matchup/.test(h), poll=!season&&!match;
-  $('tabPoll').setAttribute('aria-selected',String(poll)); $('tabSeason').setAttribute('aria-selected',String(season)); $('tabMatch').setAttribute('aria-selected',String(match));
-  $('pollView').hidden=!poll; $('seasonView').hidden=!season; $('matchView').hidden=!match;
+  const h=location.hash.slice(1), team=(h.match(/^team=(\d+)/)||[])[1], season=h==='season'||!!team, match=/^matchup/.test(h), sosId=(h.match(/^sos=(\d+)/)||[])[1], sos=h==='sos'||!!sosId, poll=!season&&!match&&!sos;
+  $('tabPoll').setAttribute('aria-selected',String(poll)); $('tabSeason').setAttribute('aria-selected',String(season)); $('tabMatch').setAttribute('aria-selected',String(match)); $('tabSos').setAttribute('aria-selected',String(sos));
+  $('pollView').hidden=!poll; $('seasonView').hidden=!season; $('matchView').hidden=!match; $('sosView').hidden=!sos;
   if(season){ if(team) openTeam(team); else { $('teamPanel').hidden=true; $('listPanel').hidden=false; loadTeams(); } }
-  else if(match) openMatch(h); else loadPoll();
+  else if(match) openMatch(h);
+  else if(sos){ if(sosId){ if(!SOS) loadSos().then(()=>{ $('sosList').hidden=true; }); openSos(sosId); } else { $('sosTeam').hidden=true; $('sosList').hidden=false; loadSos(); } }
+  else loadPoll();
+  scrollTo(0,0);
 }
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ location.hash=b.dataset.tab; });
 addEventListener('hashchange',route);
@@ -436,7 +455,7 @@ function renderTeam(t){
   const exp=`${t.mean.toFixed(1)}–${(t.games.length-t.mean).toFixed(1)}`;
   const best=t.hist.indexOf(Math.max(...t.hist));
   el.innerHTML=`<button class="back" onclick="location.hash='season'">‹ All teams</button>
-    <div class="thead"><img src="${logo(t.id)}" alt="" onerror="this.style.visibility='hidden'"><div><h2>${t.rank?'#'+t.rank+' ':''}${esc(t.name)}</h2><p class="sub">${esc(t.conf)} · ${t.w}–${t.l} now · rating ${t.rating>0?'+':''}${t.rating} pts vs an average FBS team</p></div></div>
+    <div class="thead"><img src="${logo(t.id)}" alt="" onerror="this.style.visibility='hidden'"><div><h2>${t.rank?'#'+t.rank+' ':''}${esc(t.name)}</h2><p class="sub">${esc(t.conf)} · ${t.w}–${t.l} now · rating ${t.rating>0?'+':''}${t.rating} pts vs an average FBS team${t.sos?` · schedule #${t.sos.sosRank} hardest so far, #${t.sos.futSosRank??'–'} still to play · <a href="#sos=${t.id}">schedule-adjusted #${t.sos.sorRank} ›</a>`:''}</p></div></div>
     <div class="kpis"><div><b>${exp}</b><span>expected final record</span></div><div><b>${best}–${t.games.length-best}</b><span>most likely (${pct(t.hist[best])})</span></div><div><b>${pct(t.hist[t.w+rest.length])}</b><span>chance to win out</span></div><div><b>${rest.length}</b><span>games left</span></div></div>
     ${rest.length?`<h3 style="margin:14px 0 2px;font-size:20px">Watch the rest of the season drop</h3>
     <p class="sub">Each row of pegs is a game still to play. At every peg a ball bounces right (win) with that game's win chance or left (loss). Where 60 balls land is a spread of final records; the outline is the same thing from ${t.sims.toLocaleString()} full simulations.</p>
@@ -493,6 +512,85 @@ function drop(t,instant){
   if(instant||matchMedia('(prefers-reduced-motion: reduce)').matches){ for(const b of balls){ counts[b.k]++; b.done=true; } frame(1e9); } else frame(0);
 }
 function roundTop(c,x,y,w,h,r){ r=Math.min(r,h,w/2); c.beginPath(); c.moveTo(x,y+h); c.lineTo(x,y+r); c.quadraticCurveTo(x,y,x+r,y); c.lineTo(x+w-r,y); c.quadraticCurveTo(x+w,y,x+w,y+r); c.lineTo(x+w,y+h); c.closePath(); c.fill(); }
+// ---------- Schedule strength: strength of schedule, strength of record, schedule-adjusted ranking ----------
+let SOS=null, SOSAT=0, SF={scope:'brand',conf:'',sort:'sorRank',dir:1};
+try{ SF={...SF,...JSON.parse(localStorage.getItem('sosF')||'{}')}; }catch(e){}
+const ord=n=>n==null?'–':'#'+n;
+function rankSpark(h,i,lab){ // weekly ranks (lower is better), drawn with #1 at the top
+  const pts=h.filter(x=>x[i]!=null); if(pts.length<2) return '';
+  const w=90,ht=26,mx=Math.max(...pts.map(x=>x[i]),10),X=k=>4+k/(pts.length-1)*(w-8),Y=r=>3+(r-1)/(mx-1||1)*(ht-6);
+  return `<svg width="${w}" height="${ht}" aria-label="${esc(lab)}"><path d="${pts.map((x,k)=>(k?'L':'M')+X(k)+' '+Y(x[i])).join('')}" fill="none" stroke="var(--gold)" stroke-width="2"/><circle cx="${X(pts.length-1)}" cy="${Y(pts[pts.length-1][i])}" r="3" fill="var(--gold)"/>${pts.map((x,k)=>`<circle cx="${X(k)}" cy="${Y(x[i])}" r="7" fill="transparent" data-tip="Week ${x[0]}: ${ord(x[i])}"/>`).join('')}</svg>`;
+}
+async function loadSos(){
+  try{ if(!SOS||Date.now()-SOSAT>60000){ const r=await fetch('/api/ap/sos'); if(!r.ok) throw new Error('Schedule strength is unavailable ('+r.status+')'); SOS=await r.json(); SOSAT=Date.now(); } showErr(''); renderSos(); }
+  catch(e){ showErr(e.message); }
+}
+function renderSos(){
+  const d=SOS, el=$('sosList'), confs=[...new Set(d.teams.map(t=>t.conf).filter(Boolean))].sort();
+  const list=d.teams.filter(t=>(SF.scope==='all'||t.brand||t.ap)&&(!SF.conf||t.conf===SF.conf)).sort((a,b)=>((a[SF.sort]??999)-(b[SF.sort]??999))*SF.dir||a.sorRank-b.sorRank);
+  const gaps=d.teams.filter(t=>t.ap).map(t=>({...t,gap:t.sorRank-t.ap})).sort((a,b)=>b.gap-a.gap);
+  const th=(k,l,cls='')=>`<th class="${cls}"><button class="srt" data-k="${k}" aria-pressed="${SF.sort===k}">${l}${SF.sort===k?(SF.dir>0?' ▲':' ▼'):''}</button></th>`;
+  const lst=(arr,f)=>arr.map(t=>`<li><a href="#sos=${t.id}">${esc(t.name)}</a> <span class="sub">${f(t)}</span></li>`).join('');
+  el.innerHTML=`<h2>Schedule-adjusted ranking</h2>
+    <p class="sub">Every team ranked by <b>what its record is worth against the schedule it actually played</b>: how often a typical top-25 team would do at least as well against the same opponents, home and away. Lower is more impressive. Strength of schedule is re-figured every week as opponents keep playing, so a win over a team that turns out good counts for more as the season goes.</p>
+    <div class="filters"><select id="sScope" aria-label="Which teams"><option value="brand">Name-brand teams + AP top 25</option><option value="all">All FBS</option></select><select id="sConf" aria-label="Conference"><option value="">All conferences</option>${confs.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div>
+    <div class="scroll"><table class="sost"><thead><tr>${th('sorRank','Adj.')}<th>Team</th>${th('w','Record','hm')}${th('ap','AP')}${th('powerRank','Power','hm')}${th('sosRank','Schedule so far')}${th('futSosRank','Still to play','hm')}${th('sor','Top-25 team does this','hm')}${th('wabRank','Wins vs. top-25 team','hm')}<th class="hm">Adj. rank by week</th></tr></thead>
+    <tbody>${list.map(t=>`<tr data-id="${t.id}"><td class="num"><b>${t.sorRank}</b></td><td><span class="tn"><img src="${logo(t.id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">${esc(t.name)}</span></td><td class="num hm">${t.w}–${t.l}</td><td class="num">${ord(t.ap)}</td><td class="num hm">${ord(t.powerRank)}</td>
+      <td><span class="sbar" data-tip="Average opponent ${t.sos>0?'+':''}${t.sos} pts (road games count harder)"><i style="width:${Math.max(3,100-(t.sosRank-1)/(d.n-1)*100)}%"></i></span> ${ord(t.sosRank)}</td><td class="num hm">${t.left?ord(t.futSosRank):'done'}</td><td class="num hm">${pct(t.sor)}</td><td class="num hm" style="color:var(${t.wab>=0?'--good':'--bad'})">${t.wab>0?'+':''}${t.wab.toFixed(1)}</td><td class="hm">${rankSpark(t.hist,1,t.name+' adjusted rank by week')}</td></tr>`).join('')}</tbody></table></div>
+    <p class="sub">Schedule bars: longer = harder (${d.n} FBS teams). "Wins vs. top-25 team" is actual wins minus what a typical top-25 team would expect against the same games.</p>
+    <div class="cols3">
+      <div class="card"><h3>Polls like them more than their résumé</h3><ol class="mini">${lst(gaps.slice(0,5).filter(t=>t.gap>0),t=>`AP ${ord(t.ap)} · résumé ${ord(t.sorRank)}`)||'<li class="sub">None</li>'}</ol></div>
+      <div class="card"><h3>Résumé better than their AP rank</h3><ol class="mini">${lst(gaps.slice().reverse().slice(0,5).filter(t=>t.gap<0),t=>`AP ${ord(t.ap)} · résumé ${ord(t.sorRank)}`)||'<li class="sub">None</li>'}</ol></div>
+      <div class="card"><h3>Hardest road still ahead</h3><ol class="mini">${lst(d.teams.filter(t=>t.left&&(t.brand||t.ap)).sort((a,b)=>a.futSosRank-b.futSosRank).slice(0,5),t=>`${t.left} left, avg opp ${t.futSos>0?'+':''}${t.futSos}`)}</ol></div>
+    </div>
+    <details><summary>How it's calculated</summary>
+      <p class="sub"><b>Game difficulty</b> = the opponent's rating (points better than an average FBS team) minus the home edge: +2.5 easier at home, 2.5 harder on the road. <b>Schedule strength</b> = the average difficulty. <b>Benchmark</b> = the average rating of this week's top 25 teams (${d.bench>0?'+':''}${d.bench} now). <b>Strength of record</b> = the chance that benchmark team, playing these exact games, wins at least as many; it's computed exactly over every win/loss combination, not simulated. Ties broken by wins above the benchmark.</p>
+      ${d.agreement?`<p class="sub">Checked against history: on the last AP poll before November, 2014–2025, ordering teams by strength of record matches the voters (rank correlation ${d.agreement.sor}) about as well as or slightly better than ordering by power rating (${d.agreement.power}). Voters reward résumés.</p>`:''}
+    </details>`;
+  $('sScope').value=SF.scope; $('sConf').value=SF.conf;
+  $('sScope').onchange=e=>{ SF.scope=e.target.value; saveS(); renderSos(); }; $('sConf').onchange=e=>{ SF.conf=e.target.value; saveS(); renderSos(); };
+  el.querySelectorAll('.srt').forEach(b=>b.onclick=()=>{ const k=b.dataset.k; if(SF.sort===k) SF.dir=-SF.dir; else { SF.sort=k; SF.dir=k==='w'||k==='wab'?-1:1; } saveS(); renderSos(); });
+  el.querySelectorAll('tr[data-id]').forEach(r=>r.onclick=()=>{ location.hash='sos='+r.dataset.id; });
+}
+const saveS=()=>{ try{ localStorage.setItem('sosF',JSON.stringify(SF)); }catch(e){} };
+async function openSos(id){
+  $('sosList').hidden=true; const el=$('sosTeam'); el.hidden=false; el.innerHTML='<div class="skel"></div>';
+  try{ const r=await fetch('/api/ap/sos?id='+id); if(!r.ok) throw new Error('Team not found'); const t=await r.json(); showErr(''); el.innerHTML=renderSosTeam(t); }
+  catch(e){ showErr(e.message); }
+}
+function renderSosTeam(t){
+  const tl=t.timeline, n=SOS?SOS.n:130;
+  // ranks over time: two lines, #1 at the top
+  const W=innerWidth<600?360:700,H=innerWidth<600?220:230,L=40,B=30,T=14,Rr=44, mx=Math.max(10,...tl.flatMap(x=>[x.sorRank||0,x.sosRank||0])), X=k=>L+(tl.length>1?k/(tl.length-1):0.5)*(W-L-Rr), Y=r=>T+(r-1)/(mx-1)*(H-T-B);
+  const series=[['sorRank','--ta','Adjusted rank'],['sosRank','--tb','Schedule so far']];
+  let svg=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Ranks by week">`;
+  for(const r of [1,Math.round(mx/4),Math.round(mx/2),Math.round(3*mx/4),mx]) svg+=`<line x1="${L}" x2="${W-Rr}" y1="${Y(r)}" y2="${Y(r)}" stroke="var(--line)"/><text x="${L-6}" y="${Y(r)+4}" text-anchor="end" fill="var(--muted)" font-size="12">#${r}</text>`;
+  tl.forEach((x,k)=>{ svg+=`<text x="${X(k)}" y="${H-8}" text-anchor="middle" fill="var(--muted)" font-size="12">Wk ${x.week}</text>`; });
+  for(const [k,c,lab] of series){ const pts=tl.map((x,i)=>[i,x[k]]).filter(p=>p[1]!=null); if(!pts.length) continue;
+    svg+=`<path d="${pts.map(([i,r],j)=>(j?'L':'M')+X(i)+' '+Y(r)).join('')}" fill="none" stroke="var(${c})" stroke-width="3"/>`;
+    for(const [i,r] of pts) svg+=`<circle cx="${X(i)}" cy="${Y(r)}" r="4.5" fill="var(${c})" stroke="var(--card)" stroke-width="2"/><circle cx="${X(i)}" cy="${Y(r)}" r="11" fill="transparent" data-tip="${lab}, week ${tl[i].week}: #${r}"/>`;
+    const [li,lr]=pts[pts.length-1]; svg+=`<text x="${X(li)+9}" y="${Y(lr)+4}" fill="var(--ink)" font-size="12" font-weight="700">#${lr}</text>`; }
+  svg+='</svg>';
+  const site=s=>s>0?'vs':s<0?'at':'vs (neutral)';
+  const g=x=>{ const ch=x.opThen!=null&&x.opNow!=null?x.opNow-x.opThen:0;
+    return `<tr><td>${x.week}</td><td>${site(x.site)} ${x.opAp?'#'+x.opAp+' ':''}${esc(x.opName)}${x.fcs?' <span class="tag">FCS</span>':''}</td>
+      <td class="num">${x.opThen>0?'+':''}${x.opThen} → <b>${x.opNow>0?'+':''}${x.opNow}</b> ${Math.abs(ch)>=1?`<span style="color:var(${ch>0?'--good':'--bad'})" data-tip="Opponent's rating has moved ${ch>0?'up':'down'} since the game">${ch>0?'▲':'▼'}</span>`:''}</td>
+      <td class="num">${x.diff>0?'+':''}${x.diff}</td><td class="num">${pct(x.pBench)}</td>
+      <td>${x.won==null?'':`<span class="res ${x.won?'W':'L'}">${x.won?'W':'L'} by ${Math.abs(x.m)}</span>`}</td>
+      <td>${x.score==null?'':`<span class="gs" data-tip="Played like a ${x.score>0?'+':''}${x.score} team (season rating ${t.power>0?'+':''}${t.power})"><i style="width:${Math.min(100,Math.max(2,(x.score+10)/50*100))}%;background:var(${x.score>=t.power?'--ta':'--tb'})"></i></span> ${x.score>0?'+':''}${x.score}`}</td></tr>`; };
+  const r=x=>`<tr><td>${x.week}</td><td>${site(x.site)} ${x.opAp?'#'+x.opAp+' ':''}${esc(x.opName)}${x.fcs?' <span class="tag">FCS</span>':''}</td><td class="num">${x.opNow>0?'+':''}${x.opNow}</td><td class="num">${x.diff>0?'+':''}${x.diff}</td><td class="num">${pct(x.pBench)}</td></tr>`;
+  const moved=tl.length>1?tl[tl.length-1].sosRank-tl[0].sosRank:0;
+  return `<button class="back" onclick="location.hash='sos'">‹ All teams</button>
+    <div class="thead"><img src="${logo(t.id)}" alt="" onerror="this.style.visibility='hidden'"><div><h2>${t.ap?'#'+t.ap+' ':''}${esc(t.name)}</h2><p class="sub">${esc(t.conf||'')} · ${t.w}–${t.l} · <a href="#team=${t.id}">season simulator ›</a></p></div></div>
+    <div class="kpis"><div><b>#${t.sorRank}</b><span>schedule-adjusted rank (of ${n})</span></div><div><b>${pct(t.sor)}</b><span>chance a top-25 team does ${t.w}–${t.l} or better on this schedule</span></div><div><b style="color:var(${t.wab>=0?'--good':'--bad'})">${t.wab>0?'+':''}${t.wab.toFixed(2)}</b><span>wins vs. a top-25 team's expected</span></div><div><b>#${t.sosRank}</b><span>hardest schedule so far</span></div><div><b>${t.left?'#'+t.futSosRank:'–'}</b><span>hardest still to play${t.left?` (top-25 team expects ${t.futBenchW.toFixed(1)} of ${t.left})`:''}</span></div><div><b>#${t.powerRank}</b><span>power rating (${t.power>0?'+':''}${t.power})</span></div></div>
+    <h3 style="margin:14px 0 2px;font-size:20px">Over time</h3>
+    <p class="sub">Re-figured after every week with the ratings as they stood then.${moved?` Their schedule has gone from #${tl[0].sosRank} to #${tl[tl.length-1].sosRank} as opponents kept playing.`:''}</p>
+    <div class="key"><span><i style="background:var(--ta)"></i>Schedule-adjusted rank</span><span><i style="background:var(--tb)"></i>Schedule so far (#1 = hardest)</span></div>${svg}
+    <h3 style="margin:14px 0 2px;font-size:20px">Game by game</h3>
+    <p class="sub">Opponent rating at kickoff → now. Difficulty includes home or road. Game score is how well they played that day, in rating points: margin (capped at 28), adjusted for home field, plus the opponent's rating. Gold beat their season rating, blue fell short.</p>
+    <div class="scroll"><table><thead><tr><th>Wk</th><th>Opponent</th><th class="num">Opp rating</th><th class="num">Difficulty</th><th class="num">Top-25 team wins</th><th>Result</th><th>Game score</th></tr></thead><tbody>${t.played.map(g).join('')}</tbody></table></div>
+    ${t.rest.length?`<h3 style="margin:14px 0 2px;font-size:20px">Still to play</h3><div class="scroll"><table><thead><tr><th>Wk</th><th>Opponent</th><th class="num">Opp rating</th><th class="num">Difficulty</th><th class="num">Top-25 team wins</th></tr></thead><tbody>${t.rest.map(r).join('')}</tbody></table></div>`:''}`;
+}
 
 // ---------- Matchup machine ----------
 let PICK=null, M={a:null,b:null,site:'n'};

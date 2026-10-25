@@ -54,5 +54,8 @@ const mh = ap.matchup('333', '61', 'a'), ma = ap.matchup('333', '61', 'b'); asse
 assert.ok(Math.abs(m.sims.filter(x => x[0] > x[1]).length / 100 - m.p) < 0.2);
 console.log('matchup', m.a.name, m.score[0], '-', m.score[1], m.b.name, 'p', m.p, 'common', m.common.length, '| swing top', p.swing[0].awayName, '@', p.swing[0].homeName);
 const mlo = ap.ml(); assert.ok(mlo.exp && mlo.exp.poll.ablation.length === 8); assert.equal(mlo.weightHist.length, 2, 'shipped weights + one learned week'); assert.ok(mlo.play.length > 20 && mlo.values[mlo.play[0].id] != null);
+const so = ap.sos(); assert.ok(so.teams.length > 100 && so.teams[0].sorRank === 1); const st1 = ap.sosTeam(so.teams[0].id); assert.ok(st1.played.length && st1.timeline.length);
+assert.ok(st1.played.every((x, i, a) => !i || a[i - 1].week <= x.week), 'games in week order');
+const fcsGame = so.teams.map(t => ap.sosTeam(t.id)).flatMap(t => t.played).find(x => x.fcs); if (fcsGame) assert.ok(fcsGame.opNow < -12, 'FCS opponents rate well below average');
 console.log('ok:', p.projection.slice(0, 5).map(x => `${x.name} (${x.prev}->${x.mean.toFixed(1)})`).join(', '), '| fetches', calls.length);
 process.exit(0);
