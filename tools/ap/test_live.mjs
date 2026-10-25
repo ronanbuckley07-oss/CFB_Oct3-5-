@@ -43,5 +43,15 @@ assert.ok(fs.existsSync(path.join(dir, 'ap_state.json')));
 const ap2 = createAP({ dataDir: dir, fetchImpl: fakeFetch }); await ap2.refresh(true); assert.deepEqual(ap2._state().learned, [W]);
 const t = ap.team('333'); assert.ok(t.games.length >= 10); assert.ok(t.hist.reduce((a, b) => a + b, 0) > 0.99);
 const tl = ap.teamList(); assert.ok(tl.teams.length > 60);
+// what-if: force a live game the other way and the poll changes
+const sl = p.slate.find(x => x.state === 'in' || x.state === 'pre'); assert.ok(sl, 'slate has an open game');
+const flip = ap.poll(`${sl.id}:${sl.p >= 0.5 ? 'a' : 'h'}`); assert.equal(Object.keys(flip.force).length, 1);
+assert.equal(flip.slate.find(x => x.id === sl.id).state, 'forced');
+assert.ok(p.swing.length > 0 && p.chaos.top10Losses.length === 11);
+const h = ap.history(); assert.ok(h.weeks.length >= 2); assert.equal(h.weeks[h.weeks.length - 1].week, W + 1); assert.equal(h.weeks.find(x => x.week === W).source, 'ESPN');
+const m = ap.matchup('333', '61', 'n'); assert.ok(m.p > 0 && m.p < 1); assert.equal(m.sims.length, 100); assert.ok(m.score[0] > 0 && m.common.length >= 0);
+const mh = ap.matchup('333', '61', 'a'), ma = ap.matchup('333', '61', 'b'); assert.ok(mh.p > m.p && m.p > ma.p, 'home field moves it');
+assert.ok(Math.abs(m.sims.filter(x => x[0] > x[1]).length / 100 - m.p) < 0.2);
+console.log('matchup', m.a.name, m.score[0], '-', m.score[1], m.b.name, 'p', m.p, 'common', m.common.length, '| swing top', p.swing[0].awayName, '@', p.swing[0].homeName);
 console.log('ok:', p.projection.slice(0, 5).map(x => `${x.name} (${x.prev}->${x.mean.toFixed(1)})`).join(', '), '| fetches', calls.length);
 process.exit(0);

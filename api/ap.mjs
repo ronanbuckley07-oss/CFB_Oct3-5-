@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { G, ratings, features, fitStats, stats, addStats, projectPoll, seasonSim, gameOutlook, rankFrom, predictValues, p4Of } from './apmodel.mjs';
+import { G, ratings, odRatings, features, fitStats, stats, addStats, projectPoll, swingGames, seasonSim, gameOutlook, rankFrom, predictValues, p4Of, Phi, SIGMA, HFA, rng } from './apmodel.mjs';
 
 const BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/college-football';
 const CORE = 'https://sports.core.api.espn.com/v2/sports/football/leagues/college-football';
@@ -74,7 +74,8 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
   }
   // A past AP poll from ESPN's core API (team ids come as $ref links)
   async function pastAP(w) {
-    const d = await get(`${CORE}/seasons/${season}/types/2/weeks/${w}/rankings/1`, 86400000);
+    const d = await get(`${CORE}/seasons/${season}/types/2/weeks/${w}/rankings/1`, 86400000)
+      .catch(e => { if (w === 1) return get(`${CORE}/seasons/${season}/types/1/weeks/1/rankings/1`, 86400000); throw e; });
     const ranks = {}; for (const r of d.ranks || []) { const id = (String(r.team?.$ref || '').match(/teams\/(\d+)/) || [])[1]; if (id && r.current) ranks[id] = r.current; }
     return Object.keys(ranks).length >= 20 ? { week: w, ranks, at: d.date || null } : null;
   }
@@ -118,7 +119,7 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
   async function learn() {
     const W = apNow ? apNow.week : null; if (!W) return;
     // fill in this season's earlier polls once (ESPN core API), so the track record and learning cover the whole season
-    for (let w = 2; w < W; w++) if (!st.polls[w]) { const p = await pastAP(w).catch(() => null); if (p) { st.polls[w] = { ranks: p.ranks, at: p.at }; save(); } }
+    for (let w = 1; w < W; w++) if (!st.polls[w]) { const p = await pastAP(w).catch(() => null); if (p) { st.polls[w] = { ranks: p.ranks, at: p.at }; save(); } }
     for (let w = Math.max(1, D.trained.week + 1); w < W; w++) {
       if (st.learned.includes(w) || !st.polls[w] || !st.polls[w + 1] || playedShare(w) < 0.9) continue;
       const prev = st.polls[w].ranks, next = st.polls[w + 1].ranks, G0 = all();
@@ -142,10 +143,23 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
   const memoOut = (k, ttl, f) => { const h = cache.get(k); if (h && h.exp > Date.now()) return h.v; const v = f(); cache.set(k, { exp: Date.now() + ttl, v }); return v; };
   const rate = () => memoOut('R', 20000, () => ratings(all().filter(g => g[G.hp] != null), { prior: D.prior }));
   const nameOf = id => teams[id]?.name || apNow?.names?.[id] || id;
-  function poll() {
-    return memoOut('poll', 15000, () => {
+  // force: "gameId:h,gameId:a" -> what-if with those unfinished games settled
+  function poll(forceStr = '') {
+    const P0 = currentPoll(), open = new Set(all().filter(g => g[G.week] === P0.week && g[G.hp] == null).map(g => g[G.id])), force = {};
+    for (const part of String(forceStr).split(',').slice(0, 40)) { const [id, side] = part.split(':'); if (open.has(id) && (side === 'h' || side === 'a')) force[id] = side; }
+    const fkey = Object.entries(force).sort().map(x => x.join(':')).join(',');
+    return memoOut('poll|' + fkey, 15000, () => {
       const P = currentPoll(), W = P.week, R = rate(), G0 = all();
-      const sim = projectPoll({ games: G0, season, week: W, poll: P.ranks, R, teams, model, live, sims: 300 });
+      const sim = projectPoll({ games: G0, season, week: W, poll: P.ranks, R, teams, model, live, sims: 300, force });
+      const swing = swingGames({ games: G0, season, week: W, poll: P.ranks, R, teams, model, live, fixed: sim.fixed, top: 6 })
+        .map(x => ({ ...x, homeName: nameOf(x.home), awayName: nameOf(x.away), homeRank: P.ranks[x.home] || null, awayRank: P.ranks[x.away] || null, p: +x.p.toFixed(3) }));
+      // this week's games that matter to the poll, for the what-if toggles
+      const proj30 = new Set(Object.entries(sim.likely).filter(([, x]) => x <= 30).map(([id]) => id));
+      const slate = G0.filter(g => g[G.week] === W && (P.ranks[g[G.hid]] || P.ranks[g[G.aid]] || proj30.has(String(g[G.hid])) || proj30.has(String(g[G.aid])))).map(g => {
+        const o = sim.outlook[g[G.id]], L = live[g[G.id]] || {}, nm = (id, row) => (teams[id] ? nameOf(String(id)) : row);
+        return { id: g[G.id], home: String(g[G.hid]), away: String(g[G.aid]), homeName: nm(g[G.hid], g[G.home]), awayName: nm(g[G.aid], g[G.away]), homeRank: P.ranks[g[G.hid]] || null, awayRank: P.ranks[g[G.aid]] || null,
+          neutral: !!g[G.neutral], state: o.final ? 'post' : o.forced ? 'forced' : o.live ? 'in' : 'pre', forced: o.forced || null, p: +o.p.toFixed(3), hs: g[G.hp] ?? L.hs ?? null, as: g[G.ap] ?? L.as ?? null, clock: L.clock || '', date: g[G.date] };
+      }).sort((a, b) => Math.min(a.homeRank || 99, a.awayRank || 99) - Math.min(b.homeRank || 99, b.awayRank || 99));
       const wk = G0.filter(g => g[G.week] === W), byTeam = {};
       for (const g of wk) for (const [me, op, home] of [[g[G.hid], g[G.aid], true], [g[G.aid], g[G.hid], false]]) {
         const o = sim.outlook[g[G.id]], L = live[g[G.id]] || {}, myP = home ? o.p : 1 - o.p;
@@ -157,12 +171,79 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
         season, week: W, next: W + 1, source, rebuilt: !!P.rebuilt, updated: new Date().toISOString(), error: lastErr,
         current: Object.entries(P.ranks).sort((a, b) => a[1] - b[1]).map(([id, r]) => ({ id, name: nameOf(id), rank: r, points: P.points?.[id] ?? null })),
         projection: sim.teams.slice(0, 32).map(t => ({ ...t, name: nameOf(t.id), conf: teams[t.id]?.conf || null, game: byTeam[t.id] || null, hist: t.hist.slice(0, 26) })),
-        games: counts, sims: sim.sims,
+        games: counts, sims: sim.sims, force, chaos: sim.chaos, swing, slate,
         model: { rows: D.trained.rows, learnedWeeks: st.learned.slice().sort((a, b) => a - b), sd: +model.sdR.toFixed(2) },
         backtest: D.backtest, log: st.log,
       };
     });
   }
+  // Every AP poll this season (ESPN's, or rebuilt from game ranks where ESPN's is missing), with what we projected
+  function history() {
+    return memoOut('history', 60000, () => {
+      const P = currentPoll(), weeks = [];
+      for (let w = 1; w <= P.week; w++) {
+        const espn = st.polls[w]?.ranks || (w === P.week && !P.rebuilt ? P.ranks : null), ranks = espn || D.polls[w]; if (!ranks) continue;
+        const proj = [...(D.backtest.latest || []), ...st.log].filter(l => l.week === w).pop();
+        weeks.push({ week: w, source: espn ? 'ESPN' : 'rebuilt', teams: Object.entries(ranks).sort((a, b) => a[1] - b[1]).map(([id, r]) => ({ id, name: nameOf(id), rank: r })),
+          proj: proj ? { avgMiss: proj.avgMiss, top25: proj.top25, ranks: Object.fromEntries(proj.rows.map(x => [x.id, x.proj])) } : null });
+      }
+      return { season, week: P.week, weeks };
+    });
+  }
+
+  // ---------- hypothetical matchups ----------
+  const odNow = () => memoOut('OD', 20000, () => odRatings(all().filter(g => g[G.hp] != null), { prior: D.priorOD || {} }));
+  function resume(id, R, od) {
+    const done = all().filter(g => g[G.hp] != null && (String(g[G.hid]) === id || String(g[G.aid]) === id));
+    let w = 0, l = 0, pf = 0, pa = 0, sos = 0; const res = [];
+    for (const g of done.sort((a, b) => a[G.week] - b[G.week])) {
+      const home = String(g[G.hid]) === id, op = String(home ? g[G.aid] : g[G.hid]), us = home ? g[G.hp] : g[G.ap], them = home ? g[G.ap] : g[G.hp];
+      const opR = teams[op] ? (R[op] ?? 0) : (R.FCS ?? -22), site = g[G.neutral] ? 0 : home ? HFA : -HFA, exp = (R[id] ?? 0) - opR + site;
+      us > them ? w++ : l++; pf += us; pa += them; sos += opR;
+      res.push({ week: g[G.week], op, opName: teams[op] ? nameOf(op) : (home ? g[G.away] : g[G.home]), opR, us, them, home, neutral: !!g[G.neutral], resid: us - them - exp, site });
+    }
+    const n = res.length || 1, wins = res.filter(x => x.us > x.them), losses = res.filter(x => x.us < x.them);
+    const fbs = Object.keys(teams).filter(k => R[k] != null), rk = (m, k) => 1 + fbs.filter(x => (m[x] ?? -99) > (m[k] ?? -99)).length;
+    return { w, l, ppg: +(pf / n).toFixed(1), papg: +(pa / n).toFixed(1), sos: +(sos / n).toFixed(1), rating: +(R[id] ?? 0).toFixed(1), off: +(od.o[id] ?? 0).toFixed(1), def: +(od.d[id] ?? 0).toFixed(1),
+      ratingRank: rk(R, id), offRank: rk(od.o, id), defRank: rk(od.d, id), of: fbs.length,
+      form: res.length ? +(res.slice(-3).reduce((a, x) => a + x.resid, 0) / Math.min(3, res.length)).toFixed(1) : 0,
+      best: wins.sort((a, b) => b.opR - a.opR)[0] || null, worst: losses.sort((a, b) => a.opR - b.opR)[0] || null, games: res };
+  }
+  function matchup(a, b, site = 'n') {
+    a = String(a); b = String(b); if (!teams[a] || !teams[b] || a === b) return null;
+    return memoOut(`m|${a}|${b}|${site}`, 20000, () => {
+      const R = rate(), od = odNow(), P = currentPoll(), hfa = site === 'a' ? HFA : site === 'b' ? -HFA : 0;
+      const rA = R[a] ?? 0, rB = R[b] ?? 0, margin = rA - rB + hfa, p = Phi(margin / SIGMA);
+      const e = hfa / 2, sA = od.mean + e + (od.o[a] ?? 0) - (od.d[b] ?? 0), sB = od.mean - e + (od.o[b] ?? 0) - (od.d[a] ?? 0), total = sA + sB;
+      // projected score: the ratings' margin, the offense/defense total
+      const scoreA = (total + margin) / 2, scoreB = (total - margin) / 2;
+      // 100 simulated games for the grid (seeded so the picture is stable), plus the margin curve
+      const r = rng(Number(a) * 7919 + Number(b) * 104729 + site.charCodeAt(0)), gauss = () => { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r()); };
+      const sims = [];
+      for (let k = 0; k < 100; k++) { let m = Math.round(margin + SIGMA * gauss()), t = Math.max(10, Math.round(total + 13 * gauss())); if (!m) m = r() < p ? 3 : -3; if ((t + m) % 2) t++;
+        let x = Math.max(0, (t + m) / 2), y = Math.max(0, (t - m) / 2); if (x === y) x += 3; sims.push([x, y]); }
+      sims.sort((u, v) => (v[0] - v[1]) - (u[0] - u[1]));
+      const curve = []; for (let m = -45; m <= 45; m += 3) curve.push({ m, p: +(Phi((m + 1.5 - margin) / SIGMA) - Phi((m - 1.5 - margin) / SIGMA)).toFixed(4) });
+      const A = resume(a, R, od), B = resume(b, R, od);
+      // common opponents: what each did against the same team, site-adjusted, and what that implies for A vs B
+      const byOp = x => { const m = {}; for (const g of x.games) (m[g.op] ||= []).push(g); return m; };
+      const oa = byOp(A), ob = byOp(B), common = [];
+      for (const op of Object.keys(oa)) if (ob[op] && op !== a && op !== b) {
+        const ga = oa[op][0], gb = ob[op][0], ma = ga.us - ga.them - ga.site, mb = gb.us - gb.them - gb.site;
+        common.push({ op, name: ga.opName, a: `${ga.us > ga.them ? 'W' : 'L'} ${ga.us}–${ga.them}`, b: `${gb.us > gb.them ? 'W' : 'L'} ${gb.us}–${gb.them}`, implied: +(ma - mb).toFixed(1) });
+      }
+      const real = all().find(g => (String(g[G.hid]) === a && String(g[G.aid]) === b) || (String(g[G.hid]) === b && String(g[G.aid]) === a));
+      const slim = x => { const { games, ...rest } = x; return { ...rest, best: x.best && { opName: x.best.opName, us: x.best.us, them: x.best.them }, worst: x.worst && { opName: x.worst.opName, us: x.worst.us, them: x.worst.them } }; };
+      return {
+        a: { id: a, name: nameOf(a), conf: teams[a].conf, rank: P.ranks[a] || null, ...slim(A) }, b: { id: b, name: nameOf(b), conf: teams[b].conf, rank: P.ranks[b] || null, ...slim(B) },
+        site, margin: +margin.toFixed(1), p: +p.toFixed(3), score: [Math.round(scoreA), Math.round(scoreB)], total: +total.toFixed(1), sigma: SIGMA, hfa,
+        parts: { a: +rA.toFixed(1), b: +rB.toFixed(1), home: hfa, offA: +((od.o[a] ?? 0) - (od.d[b] ?? 0)).toFixed(1), offB: +((od.o[b] ?? 0) - (od.d[a] ?? 0)).toFixed(1), mean: +od.mean.toFixed(1) },
+        sims, curve, common, commonImplied: common.length ? +(common.reduce((x, c) => x + c.implied, 0) / common.length).toFixed(1) : null,
+        real: real ? { date: real[G.date], week: real[G.week], homeId: String(real[G.hid]), final: real[G.hp] != null, hs: real[G.hp], as: real[G.ap] } : null,
+      };
+    });
+  }
+  const pickList = () => memoOut('pick', 300000, () => Object.values(teams).map(t => ({ id: t.id, name: nameOf(t.id), conf: t.conf, rank: currentPoll().ranks[t.id] || null, brand: D.brand.includes(t.id) })).sort((x, y) => x.name.localeCompare(y.name)));
   const seasonOut = () => memoOut('season', 60000, () => seasonSim({ games: all(), season, R: rate(), teams, live, sims: 4000 }));
   function teamList() {
     return memoOut('teams', 30000, () => {
@@ -189,12 +270,16 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
   async function handle(req, res, u) {
     await refresh().catch(() => {});
     const r = u.pathname.replace('/api/ap', '') || '/';
-    if (r === '/poll') return send(res, 200, poll());
+    if (r === '/poll') return send(res, 200, poll(u.searchParams.get('force') || ''));
+    if (r === '/history') return send(res, 200, history(), 60);
+    if (r === '/pick') return send(res, 200, pickList(), 300);
+    if (r === '/matchup') { const m = matchup((u.searchParams.get('a') || '').replace(/\D/g, ''), (u.searchParams.get('b') || '').replace(/\D/g, ''), ['a', 'n', 'b'].includes(u.searchParams.get('site')) ? u.searchParams.get('site') : 'n');
+      return m ? send(res, 200, m, 20) : send(res, 400, { error: 'pick two different FBS teams' }); }
     if (r === '/teams') return send(res, 200, teamList(), 30);
     if (r === '/team') { const t = team((u.searchParams.get('id') || '').replace(/\D/g, '')); return t ? send(res, 200, t) : send(res, 404, { error: 'unknown team' }); }
     return send(res, 404, { error: 'not found' });
   }
   // keep learning even when nobody has the page open: new polls show up Sunday afternoons
   setInterval(() => refresh(true).catch(() => {}), 5 * 60000).unref();
-  return { handle, refresh, poll, teamList, team, _state: () => st };
+  return { handle, refresh, poll, history, matchup, teamList, team, _state: () => st };
 }

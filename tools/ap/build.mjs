@@ -6,11 +6,14 @@
 //   node tools/ap/build.mjs games.json
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { G, PRIOR_SHRINK, ratings, rebuildPolls, teamsOf, samplesFor, stats, fitStats, FEATS } from '../../api/apmodel.mjs';
+import { G, PRIOR_SHRINK, ratings, odRatings, rebuildPolls, teamsOf, samplesFor, stats, fitStats, FEATS } from '../../api/apmodel.mjs';
 const src = process.argv[2] || 'games.json', games = JSON.parse(fs.readFileSync(src, 'utf8'));
 const seasons = [...new Set(games.map(g => g[G.season]))].sort(), season = seasons[seasons.length - 1];
 const priors = {};
 for (const s of seasons) { const R = ratings(games.filter(g => g[G.season] === s), { prior: priors[s] || {} }); priors[s + 1] = Object.fromEntries(Object.entries(R).map(([k, v]) => [k, +(v * PRIOR_SHRINK).toFixed(2)])); }
+// offense/defense priors the same way (x0.8: points split more noisily than margins)
+const shrinkOD = (od, k) => ({ o: Object.fromEntries(Object.entries(od.o).map(([t, v]) => [t, +(v * k).toFixed(2)])), d: Object.fromEntries(Object.entries(od.d).map(([t, v]) => [t, +(v * k).toFixed(2)])) });
+const priorsOD = {}; for (const s of seasons) priorsOD[s + 1] = shrinkOD(odRatings(games.filter(g => g[G.season] === s), { prior: priorsOD[s] || {} }), 0.8);
 const all = seasons.filter(s => s !== 2020).flatMap(s => samplesFor(games, s, { prior: priors[s] || {} }));
 const st = { R: stats(all.filter(x => x.ranked)), U: stats(all.filter(x => !x.ranked)) }, model = fitStats(st);
 const cur = all.filter(x => x.season === season), trainedWeek = cur.length ? Math.max(...cur.map(x => x.week)) : 0;
@@ -26,7 +29,7 @@ const data = {
   built: new Date().toISOString(), season, trained: { season, week: trainedWeek, rows: all.length },
   feats: FEATS, model: { R: round(model.R), U: round(model.U), sdR: +model.sdR.toFixed(3), sdU: +model.sdU.toFixed(3) },
   stats: { R: { A: st.R.A.map(round), b: round(st.R.b), yy: +st.R.yy.toFixed(2), n: st.R.n }, U: { A: st.U.A.map(round), b: round(st.U.b), yy: +st.U.yy.toFixed(2), n: st.U.n } },
-  prior: priors[season], teams, brand,
+  prior: priors[season], priorOD: priorsOD[season], teams, brand,
   polls: Object.fromEntries(Object.entries(polls).map(([w, p]) => [w, p.poll])),
   games: games.filter(g => g[G.season] === season),
   backtest,

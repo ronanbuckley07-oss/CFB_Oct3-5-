@@ -190,19 +190,32 @@ export function gameOutlook(R, g, live) {
 
 // The next AP poll, simulated: unfinished games this week are played out `sims` times, each outcome goes through the
 // poll model, and voter noise (the model's own miss size) is added. Returns each team's rank distribution.
-export function projectPoll({ games, season, week, poll, R, teams, model, live = {}, sims = 300, seed = 7 }) {
+// force: { gameId: 'h' | 'a' } settles unfinished games for a what-if (the forced team wins by its expected margin, at
+// least a touchdown if it was the underdog).
+export const forcedRow = (g, o, side) => { const t = g.slice(), m = side === 'h' ? Math.max(o.mu > 0 ? Math.round(o.mu) : 7, 1) : -Math.max(o.mu < 0 ? Math.round(-o.mu) : 7, 1);
+  t[G.hp] = Math.max(0, m); t[G.ap] = Math.max(0, -m); return t; };
+export function projectPoll({ games, season, week, poll, R, teams, model, live = {}, sims = 300, seed = 7, force = {} }) {
   const r = rng(seed), wk = games.filter(g => g[G.season] === season && g[G.week] === week), open = [];
-  const outlook = {};
-  for (const g of wk) { const o = gameOutlook(R, g, live[g[G.id]]); outlook[g[G.id]] = o; if (!o.final) open.push(g); }
+  const outlook = {}, fixed = {};
+  for (const g of wk) { const o = gameOutlook(R, g, live[g[G.id]]); outlook[g[G.id]] = o;
+    if (!o.final && force[g[G.id]]) { fixed[g[G.id]] = forcedRow(g, o, force[g[G.id]]); outlook[g[G.id]] = { ...o, forced: force[g[G.id]], p: force[g[G.id]] === 'h' ? 1 : 0 }; }
+    else if (!o.final) open.push(g); }
+  // chaos: how many of the current top 10 lose this week, sim by sim
+  const top10 = Object.entries(poll).filter(([, x]) => x <= 10).map(([id]) => id), top5 = new Set(top10.filter(id => poll[id] <= 5));
+  const lostIn = row => { const out = []; if (row[G.hp] == null || row[G.hp] === row[G.ap]) return out; out.push(String(row[G.hp] > row[G.ap] ? row[G.aid] : row[G.hid])); return out; };
+  const chaos = { anyTop5: 0, top10Losses: new Array(11).fill(0) };
   const ids = Object.keys(teams), N = {}, P25 = {}, P10 = {}, sum = {}, hist = {};
   for (const id of ids) { N[id] = 0; P25[id] = 0; P10[id] = 0; sum[id] = 0; hist[id] = new Array(27).fill(0); }
   const one = override => { const X = features(games, season, week, poll, R, teams, override); return predictValues(model, X, poll); };
   // the single most likely outcome: every open game goes to the team that's ahead or favored
-  const fav = {}; for (const g of open) { const m = outlook[g[G.id]].mu; const t = g.slice(); const mm = Math.round(m) || (m >= 0 ? 1 : -1); t[G.hp] = Math.max(0, mm); t[G.ap] = Math.max(0, -mm); fav[g[G.id]] = t; }
+  const fav = { ...fixed }; for (const g of open) { const m = outlook[g[G.id]].mu; const t = g.slice(); const mm = Math.round(m) || (m >= 0 ? 1 : -1); t[G.hp] = Math.max(0, mm); t[G.ap] = Math.max(0, -mm); fav[g[G.id]] = t; }
   const likely = rankFrom(one(fav));
   for (let k = 0; k < sims; k++) {
-    const ov = {};
+    const ov = { ...fixed };
     for (const g of open) { const o = outlook[g[G.id]]; let m = Math.round(o.mu + o.s * gauss(r)); if (!m) m = r() < o.p ? 1 : -1; const t = g.slice(); t[G.hp] = Math.max(0, m); t[G.ap] = Math.max(0, -m); ov[g[G.id]] = t; }
+    { let n = 0, t5 = false; const T10 = new Set(top10);
+      for (const g of wk) { const row = ov[g[G.id]] || g; for (const id of lostIn(row)) if (T10.has(id)) { n++; if (top5.has(id)) t5 = true; } }
+      chaos.top10Losses[Math.min(10, n)]++; if (t5) chaos.anyTop5++; }
     const v = one(ov); for (const id of ids) v[id] += gauss(r) * (poll[id] ? model.sdR : Math.min(model.sdU, model.sdR)) * 0.5;
     const rk = rankFrom(v);
     for (const id of ids) { const x = rk[id]; sum[id] += Math.min(x, 26); hist[id][Math.min(x, 26)]++; if (x <= 25) P25[id]++; if (x <= 10) P10[id]++; }
@@ -211,7 +224,46 @@ export function projectPoll({ games, season, week, poll, R, teams, model, live =
   const out = ids.map(id => ({ id, prev: poll[id] || null, likely: likely[id], mean: sum[id] / sims, p25: P25[id] / sims, p10: P10[id] / sims, lo: q(hist[id], 0.1), hi: q(hist[id], 0.9), hist: hist[id].slice(1) }));
   // The projected poll: teams in order of their average simulated rank
   out.sort((a, b) => a.mean - b.mean || a.likely - b.likely);
-  return { teams: out.filter(t => t.p25 > 0.02 || t.prev || t.likely <= 30), outlook, open: open.length, total: wk.length, sims };
+  chaos.anyTop5 /= sims; chaos.top10Losses = chaos.top10Losses.map(c => c / sims);
+  return { teams: out.filter(t => t.p25 > 0.02 || t.prev || t.likely <= 30), outlook, open: open.length, total: wk.length, sims, chaos, likely, fixed };
+}
+
+// The games that move the poll most: each unfinished game is settled both ways (everything else to the favorite) and
+// the two projected polls are compared. Swing = total spots the top 30 move between the two outcomes.
+export function swingGames({ games, season, week, poll, R, teams, model, live = {}, fixed = {}, top = 6 }) {
+  const wk = games.filter(g => g[G.season] === season && g[G.week] === week), outlook = {}, base = { ...fixed }, open = [];
+  for (const g of wk) { const o = gameOutlook(R, g, live[g[G.id]]); outlook[g[G.id]] = o; if (!o.final && !fixed[g[G.id]]) { open.push(g); base[g[G.id]] = forcedRow(g, o, o.mu >= 0 ? 'h' : 'a'); } }
+  const run = ov => rankFrom(predictValues(model, features(games, season, week, poll, R, teams, ov), poll));
+  const ref = run(base), watch = Object.entries(ref).filter(([, x]) => x <= 30).map(([id]) => id);
+  const out = [];
+  for (const g of open) {
+    const h = g[G.hid], a = g[G.aid]; if (!(poll[h] || poll[a] || ref[h] <= 30 || ref[a] <= 30)) continue;
+    const H = run({ ...base, [g[G.id]]: forcedRow(g, outlook[g[G.id]], 'h') }), A = run({ ...base, [g[G.id]]: forcedRow(g, outlook[g[G.id]], 'a') });
+    const ids = new Set([...watch, String(h), String(a)]); let swing = 0; for (const id of ids) swing += Math.min(15, Math.abs((H[id] || 40) - (A[id] || 40)));
+    out.push({ id: g[G.id], home: String(h), away: String(a), p: outlook[g[G.id]].p, swing, ifHome: { home: H[h], away: H[a] }, ifAway: { home: A[h], away: A[a] } });
+  }
+  return out.sort((x, y) => y.swing - x.swing).slice(0, top);
+}
+
+// Offense and defense ratings: expected points = mean + off(team) - def(opponent) +/- half the home edge. Used to turn
+// a projected margin into a projected score, and to explain a matchup.
+export function odRatings(games, { prior = {}, priorWeight = 6, iters = 60, cap = 63 } = {}) {
+  const done = games.filter(g => g[G.hp] != null && g[G.ap] != null), key = (id, div) => (div === 'fbs' ? String(id) : FCS);
+  const O = {}, Dd = {}; let mean = 27;
+  for (const g of done) for (const [id, div] of [[g[G.hid], g[G.hdiv]], [g[G.aid], g[G.adiv]]]) { const k = key(id, div); O[k] = prior.o?.[k] ?? (k === FCS ? -10 : 0); Dd[k] = prior.d?.[k] ?? (k === FCS ? -12 : 0); }
+  if (done.length) mean = done.reduce((a, g) => a + Math.min(cap, g[G.hp]) + Math.min(cap, g[G.ap]), 0) / (2 * done.length);
+  for (let it = 0; it < iters; it++) {
+    const no = {}, nd = {}, c = {};
+    for (const g of done) {
+      const h = key(g[G.hid], g[G.hdiv]), a = key(g[G.aid], g[G.adiv]), e = g[G.neutral] ? 0 : HFA / 2;
+      const ph = Math.min(cap, g[G.hp]), pa = Math.min(cap, g[G.ap]);
+      no[h] = (no[h] || 0) + ph - mean - e + Dd[a]; no[a] = (no[a] || 0) + pa - mean + e + Dd[h];
+      nd[a] = (nd[a] || 0) + mean + e + O[h] - ph; nd[h] = (nd[h] || 0) + mean - e + O[a] - pa;
+      c[h] = (c[h] || 0) + 1; c[a] = (c[a] || 0) + 1;
+    }
+    for (const k of Object.keys(c)) { if (k === FCS) continue; O[k] = (no[k] + priorWeight * (prior.o?.[k] ?? 0)) / (c[k] + priorWeight); Dd[k] = (nd[k] + priorWeight * (prior.d?.[k] ?? 0)) / (c[k] + priorWeight); }
+  }
+  return { o: O, d: Dd, mean };
 }
 
 // The rest of the regular season, played out `sims` times. Each sim also nudges every team's rating (shock, in points)
