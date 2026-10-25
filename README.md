@@ -408,3 +408,23 @@ A "Schedule strength" tab on `/ap`, computed by `sosTable` in `api/apmodel.mjs`.
 - **Agreement with voters:** on the last AP poll before November, 2014–2025, strength-of-record order matches the voters slightly better than power order (rank correlation 0.764 vs 0.744).
 - **The page:** a sortable table with a weekly trend for each team, lists of who the polls over- or under-rate vs. their résumé, and the hardest remaining schedules. Each team page has rank-over-time lines plus game-by-game tables (opponent rating at kickoff → now, difficulty, a top-25 team's win chance, result, game score). The season simulator's team view links to it.
 - **API:** `/api/ap/sos` for the table, `/api/ap/sos?id=ID` for one team.
+
+## Model zoo, the tree model, and the Model lab
+
+`node tools/ap/zoo.mjs games.json` tests other algorithms with the same walk-forward setup and writes `api/zoodata.json` and `public/mllab.json`.
+
+- **AP poll (spots off, 2014–2026):**
+
+  | Model | Spots off |
+  |---|---|
+  | Poll unchanged | 4.67 |
+  | Losers drop 8 | 4.00 |
+  | Linear, no interactions | 3.15 |
+  | Ridge with interactions | 2.86 |
+  | Gradient-boosted trees | 2.59 (better than ridge in 12 of 13 seasons) |
+  | **Average of ridge and trees** | **2.59, and the most top-25 teams picked (89.7%)** |
+
+  The live poll model is now that average (`gbmFit` / `gbmPredict` in `api/apmodel.mjs`): 160 depth-3 trees, learning rate 0.08, at least 40 rows per leaf, up to 24 histogram bins, not tuned on the test seasons. The build ships the fitted trees in `apdata.json` and every training row in `api/aprows.json`. When the server learns a new poll it refits the ridge from sufficient statistics and the trees from all rows (about 2 seconds), and saves both. The AP page backtest is now 2.62 spots off and 89.2% of the top 25. Poll simulations only score teams that can plausibly reach the top 25 (ranked now, or top 45 if favorites win), about 0.3 seconds per projection.
+- **Game winners (log loss on 8,583 FBS games, 2014–2025):** coin flip 0.693, home team 0.680, Elo 0.554, **ridge ratings 0.531**, ratings and Elo averaged 0.537. The ratings stay alone.
+- **Model lab (`/ml#lab`):** the browser refits the ridge half from per-season sufficient statistics with any input groups switched off, any λ, and any history window, then backtests 2014–2026. With everything on and λ = 2 it reproduces 2.86 exactly.
+- **`/ml` also gained:** a strength-of-record step-by-step (each game's benchmark win chance, the exact distribution of benchmark records, and the tail that is strength of record), and the playground now shows the ridge score, the trees' score and their average.

@@ -2,7 +2,7 @@
 // week's next poll from the current poll and that week's results. Compared with two simple baselines.
 //   node tools/ap/backtest.mjs games.json
 import fs from 'node:fs';
-import { G, stats, addStats, fitStats, ratings, rebuildPolls, teamsOf, features, fit, samplesFor, predictValues, rankFrom } from '../../api/apmodel.mjs';
+import { G, stats, addStats, fitStats, gbmFit, ratings, rebuildPolls, teamsOf, features, fit, samplesFor, predictValues, rankFrom } from '../../api/apmodel.mjs';
 const games = JSON.parse(fs.readFileSync(process.argv[2] || 'games.json', 'utf8'));
 const seasons = [...new Set(games.map(g => g[G.season]))].sort();
 const priors = {}; // season -> prior ratings (last season's final ratings, shrunk)
@@ -25,6 +25,8 @@ for (const s of seasons) {
   if (s < 2014) continue;
   const train = seasons.filter(t => t < s).flatMap(t => S[t]); if (train.length < 500) continue;
   const model = fit(train);
+  // the live model also averages in gradient-boosted trees, fit at the start of each test season
+  const trees = process.env.NO_TREES ? null : gbmFit(seasons.filter(t => t < s && t !== 2020).flatMap(t => S[t]));
   const polls = rebuildPolls(games, s), teams = teamsOf(games, s), weeks = Object.keys(polls).map(Number).sort((a, b) => a - b);
   const A = { model: agg(), same: agg(), simple: agg(), learn: agg() };
   let carry = {}; // team -> last week's miss in rank-value units
@@ -35,7 +37,7 @@ for (const s of seasons) {
     const X = features(games, s, w, polls[w].poll, R, teams), P = polls[w].poll;
     const pred = rankFrom(predictValues(model, X, P));
     const cur = S[s].filter(x => x.week < w), learned = cur.length ? fitStats({ R: addStats(base.R, stats(cur.filter(x => x.ranked)), LW), U: addStats(base.U, stats(cur.filter(x => !x.ranked)), LW) }) : model;
-    const vals = predictValues(learned, X, P), vC = Object.fromEntries(Object.entries(vals).map(([id, v]) => [id, v + KC * (carry[id] || 0)]));
+    const vals = predictValues(trees ? { ...learned, gbm: trees } : learned, X, P), vC = Object.fromEntries(Object.entries(vals).map(([id, v]) => [id, v + KC * (carry[id] || 0)]));
     const predL = rankFrom(vC);
     // what was missed this week, for teams seen in the next poll (ranked) or surely unranked
     const nextC = {}; for (const id of Object.keys(vals)) { const r1 = polls[nx].poll[id]; if (r1 && !polls[nx].observed.has(id)) continue; const y = r1 ? 26 - r1 : 0; if (!r1 && vals[id] < 0) continue; nextC[id] = y - vals[id]; }

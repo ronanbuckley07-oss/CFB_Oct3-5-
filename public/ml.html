@@ -102,6 +102,7 @@ dl.gl dt{font-weight:700}dl.gl dd{margin:0;color:var(--muted)}
 @media (max-width:560px){dl.gl{grid-template-columns:1fr}dl.gl dd{margin-bottom:6px}.ctl{grid-template-columns:1fr 70px}.ctl label{grid-column:1 / 3}.hb{grid-template-columns:minmax(90px,130px) 1fr 52px}}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--card);font:600 13px Barlow,sans-serif;padding:5px 8px;border-radius:6px;z-index:10;white-space:nowrap}
 .skel{height:200px;border-radius:12px;background:var(--card);border:1px solid var(--line);opacity:.6}
+.labg{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 12px;margin:10px 0}.chk{display:flex;gap:6px;align-items:center;font-size:14px}.chk input{accent-color:var(--gold);width:16px;height:16px}
 .note{background:var(--goldsoft);border-radius:10px;padding:10px 12px;font-size:14px;margin:10px 0}
 </style></head>
 <body><div class="wrap">
@@ -114,7 +115,7 @@ dl.gl dt{font-weight:700}dl.gl dd{margin:0;color:var(--muted)}
 <div class="bar">
   <div class="lvl" role="group" aria-label="Reading level"><button data-lvl="simple" aria-pressed="false">Simply</button><button data-lvl="deep" aria-pressed="true">In depth</button></div>
   <nav class="toc" id="toc" aria-label="Contents">
-    <a href="#map">Big picture</a><a href="#game">Game simulator</a><a href="#bets">Bets</a><a href="#ratings">Team ratings</a><a href="#poll">AP poll model</a><a href="#sims">Simulations</a><a href="#learn">How it learns</a><a href="#limits">Limits</a><a href="#words">Words</a>
+    <a href="#map">Big picture</a><a href="#game">Game simulator</a><a href="#bets">Bets</a><a href="#ratings">Team ratings</a><a href="#sos">Schedule strength</a><a href="#poll">AP poll model</a><a href="#zoo">Model zoo</a><a href="#lab">Model lab</a><a href="#sims">Simulations</a><a href="#learn">How it learns</a><a href="#limits">Limits</a><a href="#words">Words</a>
   </nav>
 </div>
 <div id="err" class="note" hidden></div>
@@ -168,8 +169,8 @@ async function load(){
 }
 function render(){
   const E=D.exp||{poll:{},ratings:{}};
-  $('main').innerHTML=[secMap(), secGame(), secBets(), secRatings(E), secPoll(E), secSims(), secLearn(), secLimits(), secWords()].join('');
-  wireFair(); wireWin(E); wirePlay(); wireMC(); setLvl(LVL); spy();
+  $('main').innerHTML=[secMap(), secGame(), secBets(), secRatings(E), secSos(), secPoll(E), secZoo(E), secLab(), secSims(), secLearn(), secLimits(), secWords()].join('');
+  wireFair(); wireWin(E); wirePlay(); wireMC(); wireSos(); wireLab(); setLvl(LVL); spy();
 }
 
 // 1. The big picture
@@ -179,9 +180,9 @@ function secMap(){
   <p class="lead">Data comes in, models turn it into chances, simulations play those chances out thousands of times, and the results feed back so the models can check themselves.</p>
   <div class="map">
     <div class="col"><div class="hd">Data →</div>${n('game','Live plays','ESPN, every few seconds')}${n('ratings','Final scores','every FBS game, 2010 on')}${n('bets','Market prices','Kalshi and Polymarket order books')}${n('poll','AP polls','every poll since 2010')}</div>
-    <div class="col"><div class="hd">Models →</div>${n('game','Play simulator','what happens next, from 700k+ real plays')}${n('ratings','Team ratings','how good each team is, in points')}${n('poll','Poll model','how AP voters move teams')}${n('bets','Fair price','model and market, averaged')}</div>
+    <div class="col"><div class="hd">Models →</div>${n('game','Play simulator','what happens next, from 700k+ real plays')}${n('ratings','Team ratings','how good each team is, in points')}${n('sos','Schedule strength','what a record is really worth')}${n('poll','Poll model','how AP voters move teams: ridge + trees')}${n('bets','Fair price','model and market, averaged')}</div>
     <div class="col"><div class="hd">Simulations →</div>${n('sims','25,000 games','per live play')}${n('sims','300 polls','per projection')}${n('sims','4,000 seasons','per season view')}${n('sims','100 matchups','per dream game')}</div>
-    <div class="col"><div class="hd">What you see</div>${n('game','Win probability','on every game page')}${n('bets','Bets','only when the price is wrong and buyable')}${n('poll','Projected poll','live, plus what-ifs')}${n('ratings','Season and matchups','final records, scores, why')}</div>
+    <div class="col"><div class="hd">What you see</div>${n('game','Win probability','on every game page')}${n('bets','Bets','only when the price is wrong and buyable')}${n('poll','Projected poll','live, plus what-ifs')}${n('ratings','Season and matchups','final records, scores, why')}${n('sos','Adjusted ranking','by strength of record')}</div>
   </div>
   <div class="loop"><b>The feedback loop.</b> Every graded bet, every final score and every new AP poll goes back in: ratings update after each game, losing kinds of bets get blocked, and the poll model refits every Sunday. <a href="#learn">See how it learns ›</a></div>
   <div class="x" style="margin-top:12px"><span class="xtag">In depth</span><p class="sub" style="margin:0">Three model families: a <b>play-by-play Monte Carlo engine</b> (empirical distributions resampled from historical plays, conditioned on game state), <b>regularized linear models</b> (ridge-regressed team ratings from score margins, and a ridge regression of AP poll movement), and <b>decision rules</b> layered on top (a 50/50 model–market blend for pricing, edge thresholds, order-book fill checks). Every one was tested walk-forward: fit on the past, scored on seasons it never saw.</p></div>
@@ -314,7 +315,7 @@ function secPoll(E){
   <p class="lead">It learned from every AP poll since 2010 how voters react: how far a #5 team falls after losing to an unranked team on the road, how much an unbeaten Group of 5 team climbs, and dozens of other patterns. Then it applies them to this week.</p>
   <ol class="steps">
     <li><b>Describe each team's week</b> as about 20 numbers: last week's rank, won or lost, the opponent's rank, the margin, home or road, record, conference, strength rating.</li>
-    <li><b>Score each team.</b> Each number has a learned weight; multiply and add up to get a poll score.</li>
+    <li><b>Two models score each team.</b> A ridge model gives each number a learned weight and adds them up; a gradient-boosted tree model asks a few hundred yes/no questions ("lost <i>and</i> was top 10?"). The two scores are averaged.</li>
     <li><b>Sort.</b> The 25 highest scores are the projected poll. If a team above you loses, you move up automatically.</li>
     <li><b>Simulate the uncertainty.</b> Unfinished games are played out 300 times, each run through the model, to get each team's range.</li>
   </ol>
@@ -359,11 +360,11 @@ function wirePlay(){
   setFrom(0);
   const result=()=>{
     const t=T[PL.i], x=featRow(t,PL), w=t.prev?D.model.R:D.model.U, parts=D.feats.map((f,i)=>({f,c:w[i]*x[i],x:x[i],w:w[i]})).filter(p=>Math.abs(p.c)>0.005);
-    const score=parts.reduce((a,p)=>a+p.c,0), rank=1+Object.entries(D.values).filter(([id,v])=>id!==t.id&&v>score).length;
+    const ridgeS=parts.reduce((a,p)=>a+p.c,0), treeS=D.model.gbm?gbmPredict(D.model.gbm,x,t.prev?1:0):null, score=treeS==null?ridgeS:(ridgeS+treeS)/2, rank=1+Object.entries(D.values).filter(([id,v])=>id!==t.id&&v>score).length;
     if($('pOo')) $('pOo').textContent=PL.fcs?'FCS':PL.opp?'#'+PL.opp:'unranked'; if($('pMo')) $('pMo').textContent=PL.mov;
-    $('pOut').innerHTML=`<div class="kpis"><div><b>${rank>25?'NR':'#'+rank}</b><span>projected spot${t.prev?` (was #${t.prev})`:' (unranked now)'}</span></div><div><b>${score.toFixed(1)}</b><span>poll score (#1 ≈ 25, #25 ≈ 1)</span></div></div>
+    $('pOut').innerHTML=`<div class="kpis"><div><b>${rank>25?'NR':'#'+rank}</b><span>projected spot${t.prev?` (was #${t.prev})`:' (unranked now)'}</span></div><div><b>${score.toFixed(1)}</b><span>poll score (#1 ≈ 25, #25 ≈ 1)</span></div>${treeS!=null?`<div><b>${ridgeS.toFixed(1)}</b><span>ridge says (broken down below)</span></div><div><b>${treeS.toFixed(1)}</b><span>trees say</span></div>`:''}</div>
       ${hbars(parts.sort((a,b)=>Math.abs(b.c)-Math.abs(a.c)).map(p=>({label:esc(FNAME[p.f]||p.f),v:+p.c.toFixed(2),c:p.c>=0?'--ta':'--tb',tip:`input ${+p.x.toFixed(2)} × weight ${p.w.toFixed(3)}`})),{f:v=>(v>0?'+':'')+v.toFixed(2)})}
-      <p class="sub x" style="margin-top:8px">Using the ${t.prev?'ranked':'unranked'}-team weights, live from the server${D.learned.length?`, refit after week${D.learned.length>1?'s':''} ${D.learned.join(', ')}`:''}. Other teams stay at their most-likely result.</p>`;
+      <p class="sub x" style="margin-top:8px">The bars break down the ridge half: input × weight. The trees can't be split up that neatly (each answer runs through 160 trees of yes/no questions), which is the trade for their accuracy. Using the ${t.prev?'ranked':'unranked'}-team ridge weights, live from the server${D.learned.length?`, refit after week${D.learned.length>1?'s':''} ${D.learned.join(', ')}`:''}. Other teams stay at their most-likely result.</p>`;
     setLvl(LVL);
   };
   const draw=()=>{
@@ -385,6 +386,121 @@ function wirePlay(){
     result();
   };
   draw();
+}
+
+// gradient-boosted trees, evaluated in the browser (same format the server ships: api/apmodel.mjs gbmPredict)
+function gbmPredict(m,x,ranked){ const F=m.cuts.length, b=new Uint8Array(F); for(let f=0;f<F;f++){ const v=f<x.length?x[f]:ranked, c=m.cuts[f]; let k=0; while(k<c.length&&v>=c[k]) k++; b[f]=k; }
+  let s=m.base; for(const nodes of m.trees){ let nd=nodes[0]; while(nd[0]>=0) nd=nodes[b[nd[0]]<=nd[1]?nd[2]:nd[3]]; s+=nd[1]; } return s; }
+
+// Schedule strength
+function secSos(){
+  return `<section class="sec" id="sos"><h2>Strength of schedule and record</h2>
+  <p class="lead">A 6–0 record against cupcakes and a 6–0 record against top-20 teams aren't the same. This measures how hard each schedule is, and what a record is really worth against it.</p>
+  <ol class="steps">
+    <li><b>How hard is each game?</b> The opponent's rating, plus 2.5 if it's on the road (minus 2.5 at home). A road game at a +10 team counts as 12.5.</li>
+    <li><b>Schedule strength</b> is the average over the games played, the games left, or the whole season.</li>
+    <li><b>Imagine a typical top-25 team</b> (the average of this week's top 25 ratings) playing this exact schedule.</li>
+    <li><b>Strength of record</b> = the chance that team would do at least as well. If a top-25 team would go 6–0 here only 13% of the time, 6–0 is impressive. The schedule-adjusted ranking sorts by it.</li>
+    <li><b>Re-figured every week.</b> Opponents keep playing, so a win over a team that turns out to be good counts for more as the season goes on.</li>
+  </ol>
+  <h3>Watch it: strength of record, step by step</h3>
+  <div class="card"><select id="sosT" aria-label="Team"><option>Loading…</option></select><div id="sosOut"></div></div>
+  <div class="x" style="margin-top:12px"><span class="xtag">In depth</span>
+    <p>For each game i, the benchmark's win chance is p<sub>i</sub> = Φ((B − d<sub>i</sub>) / σ), with B the top-25 average rating, d<sub>i</sub> the game's difficulty and σ = 12.5. The number of wins is then a <b>Poisson-binomial</b> random variable (independent games with different chances), whose exact distribution comes from a short dynamic program: start with P(0 wins) = 1 and fold in one game at a time. Strength of record is the upper tail P(wins ≥ actual wins). Ties are broken by <b>wins above benchmark</b>, actual wins − Σp<sub>i</sub>.</p>
+    <p><b>Does it match how voters think?</b> On the last AP poll before November, 2014–2025, the order by strength of record agrees with the AP top 25 (Spearman rank correlation 0.764) a little better than the order by power rating (0.744). Voters reward résumés, not just strength. That's also why the poll model has inputs for record and opponent rank, not just the rating.</p>
+    <p><b>A bug this surfaced.</b> The first version showed FCS opponents rated −4, barely below an average FBS team. The shared FCS rating had never been estimated from games; it was carried over at 90% each year and had shrunk from −22. It's now estimated each season (about −20), which also improved the win-probability and poll models.</p>
+  </div></section>`;
+}
+async function wireSos(){
+  let list; try{ const r=await fetch('/api/ap/sos'); list=(await r.json()).teams.filter(t=>t.brand||t.ap); }catch(e){ $('sosOut').innerHTML='<p class="sub">Unavailable right now.</p>'; return; }
+  const sel=$('sosT'); sel.innerHTML=list.map(t=>`<option value="${t.id}">#${t.sorRank} ${esc(t.name)} (${t.w}–${t.l})</option>`).join('');
+  const show=async id=>{ const t=await fetch('/api/ap/sos?id='+id).then(r=>r.json()), g=t.played;
+    let dp=[1]; for(const x of g){ const n=new Array(dp.length+1).fill(0); dp.forEach((p,k)=>{ n[k]+=p*(1-x.pBench); n[k+1]+=p*x.pBench; }); dp=n; }
+    const tail=dp.slice(t.w).reduce((a,b)=>a+b,0), mx=Math.max(...dp);
+    const games=hbars(g.map(x=>({label:`${x.site>0?'vs':x.site<0?'at':'vs'} ${esc(x.opName)} <span class="sub">${x.won?'W':'L'}</span>`,v:+(x.pBench*100).toFixed(0),c:x.pBench<0.6?'--tb':'--ta',tip:`Difficulty ${x.diff>0?'+':''}${x.diff}: a top-25 team wins ${pct(x.pBench)}`})),{f:v=>v+'%'});
+    const bars=`<svg class="chart" viewBox="0 0 640 190" role="img" aria-label="Benchmark wins distribution">${dp.map((p,k)=>{ const bw=600/dp.length, h=p/mx*130, x=20+k*bw; return `<rect x="${x+2}" y="${150-h}" width="${bw-4}" height="${Math.max(h,0.5)}" rx="4" fill="var(${k>=t.w?'--gold':'--base'})" data-tip="${k}–${g.length-k}: ${pct(p,1)}"/><text x="${x+bw/2}" y="168" text-anchor="middle">${k}–${g.length-k}</text><text x="${x+bw/2}" y="${144-h}" text-anchor="middle">${p>=0.005?pct(p):''}</text>`; }).join('')}</svg>`;
+    $('sosOut').innerHTML=`<p class="sub" style="margin:8px 0 4px"><b>1. Each game:</b> the chance a typical top-25 team (rating ${t.bench>0?'+':''}${t.bench}) wins it.</p>${games}
+      <p class="sub" style="margin:14px 0 4px"><b>2. Every possible record</b> that team could have, from those chances. Gold = as good as ${esc(t.name)}'s ${t.w}–${t.l} or better.</p>${bars}
+      <div class="kpis"><div><b>${pct(tail,1)}</b><span>strength of record: gold bars added up</span></div><div><b>#${t.sorRank}</b><span>schedule-adjusted rank</span></div><div><b>${t.wab>0?'+':''}${t.wab.toFixed(2)}</b><span>wins above what a top-25 team expects</span></div><div><b>#${t.sosRank}</b><span>hardest schedule so far</span></div></div>`; };
+  sel.onchange=()=>show(sel.value); show(list[0].id);
+}
+
+// Model zoo: the same test for several algorithms
+function secZoo(E){
+  const Z=E.zoo||{poll:[],games:[]}, P=Z.poll, Gm=Z.games, mxP=Math.max(...P.map(x=>x.avgMiss),1);
+  const seasons=P.length?Object.keys(P[0].bySeason):[], ridge=P.find(x=>/^Ridge/.test(x.name)), live=P.find(x=>x.live);
+  return `<section class="sec" id="zoo"><h2>Model zoo: why these models</h2>
+  <p class="lead">Before settling on a model, try several and test them all the same honest way. Here's the lineup for both prediction problems.</p>
+  <h3>Projecting the AP poll</h3><p class="sub">Spots off on average, 2014–2026, each season predicted only from earlier seasons. Shorter is better. ★ = what runs live.</p>
+  ${hbars(P.map(x=>({label:`${x.live?'★ ':''}${esc(x.name)}`,v:x.avgMiss,c:x.live?'--ta':'--base',tip:`${x.what} ${x.avgMiss.toFixed(2)} spots off, ${pct(x.top25,1)} of the top 25 picked.`})),{f:v=>v.toFixed(2)})}
+  <div class="cols" style="margin-top:10px">
+    <div class="card"><h4>What changed because of this</h4><p class="sub" style="margin:0">Gradient-boosted trees beat the ridge model in <b>${ridge&&P.find(x=>/^Gradient/.test(x.name))?seasons.filter(s=>P.find(x=>/^Gradient/.test(x.name)).bySeason[s]<ridge.bySeason[s]).length:'–'} of ${seasons.length}</b> seasons. The live projection is now the <b>average of the two</b>: as accurate as trees, steadier in the seasons where trees slipped, and it picks the most top-25 teams (${live?pct(live.top25,1):'–'}). The ridge half stays because you can see exactly why it says what it says.</p></div>
+    <div class="card"><h4>Why trees help here</h4><p class="sub" style="margin:0">Voters aren't linear. A loss drops a #3 team ~8 spots but a #22 team out of the poll; an unbeaten Group of 5 team stalls around #10. Ridge needs hand-made interaction terms for each of those; trees find thresholds like "lost <i>and</i> was top 10" on their own.</p></div>
+  </div>
+  <div class="x"><span class="xtag">In depth</span>
+    <p>Trees: 160 depth-3 regression trees, learning rate 0.08, ≥40 rows per leaf, inputs binned into up to 24 histogram buckets, with "ranked going in" as an extra input; textbook settings, not tuned on the test seasons (tuning them there would flatter the result). Live, the trees refit from every training row whenever a new poll is learned; ridge refits from its sufficient statistics.</p>
+    <div class="scroll"><table><thead><tr><th>Season</th>${P.map(x=>`<th class="r">${esc(x.name)}</th>`).join('')}</tr></thead><tbody>${seasons.map(s=>{ const best=Math.min(...P.map(x=>x.bySeason[s])); return `<tr><td>${s}</td>${P.map(x=>`<td class="r" style="${x.bySeason[s]===best?'font-weight:800':''}">${x.bySeason[s].toFixed(2)}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>
+    <p class="sub">Bold = best that season. 2020 (COVID) is hard for everything.</p></div>
+  <h3>Predicting who wins a game</h3><p class="sub">Log loss on ${(Z.gamesN||0).toLocaleString()} FBS-vs-FBS games, 2014–2025, every prediction made before kickoff from earlier games only. Lower is better.</p>
+  ${hbars(Gm.map(x=>({label:`${x.live?'★ ':''}${esc(x.name)}`,v:x.ll,c:x.live?'--ta':'--base',tip:`${x.what} Log loss ${x.ll}${x.name==='Coin flip'?'':', picks '+pct(x.acc,1)+' right'}.`})),{f:v=>v.toFixed(3)})}
+  <p class="sub">The point ratings beat Elo (the classic chess-style system), and averaging the two didn't help, so the ratings run alone. Elo only learns from who won and by roughly how much, one game at a time; the ratings re-fit every margin at once, so early results get re-judged as opponents' strength becomes clear.</p>
+  </section>`;
+}
+
+// Model lab: retrain the poll model in the browser
+const LAB_GROUPS=[['Last week\'s rank',['v0','v0sq','L*v0','B*v0','W*v0']],['Won, lost or bye',['W','L','B']],['Who they played',['W*oppv','L*oppv','L*oppUnr','W*fcs','L*fcs']],['Margin',['W*mov','L*mov']],['Home or road',['W*road','L*home']],['Season record',['wins','losses','unbeaten']],['Power conference',['p4']],['Strength rating',['rating']]];
+let LAB=null, LABCFG={on:LAB_GROUPS.map(()=>true),lam:2,hist:0};
+function secLab(){
+  return `<section class="sec" id="lab"><h2>Model lab: train it yourself</h2>
+  <p class="lead">Pick which inputs the model gets, how strongly to hold it back, and how much history to learn from. Press Train, and your browser fits the model and tests it on every season from 2014 to 2026, each from earlier seasons only, just like the real one.</p>
+  <div class="card">
+    <div class="btns" id="labPre"><button class="btn" data-p="all">Everything</button><button class="btn" data-p="rank">Only last week's rank</button><button class="btn" data-p="noint">No interactions</button><button class="btn" data-p="resume">Résumé only (no rank)</button></div>
+    <div id="labG" class="labg"></div>
+    <div class="ctl"><label for="labL">Hold-back (λ)</label><input id="labL" type="range" min="-2" max="4" step="0.1" value="0.3"><output id="labLo"></output></div>
+    <div class="ctl"><label for="labH">History used</label><input id="labH" type="range" min="0" max="10" step="1" value="0"><output id="labHo"></output></div>
+    <div class="btns"><button class="btn on" id="labGo">Train and test</button></div>
+    <div id="labOut"><p class="sub">Loads ~340 KB of training data the first time.</p></div>
+  </div>
+  <div class="x" style="margin-top:12px"><span class="xtag">In depth</span><p>The lab ships each season's <b>sufficient statistics</b> (XᵀX, Xᵀy for ranked and unranked teams) and every test week's candidate teams (ranked going in, ranked coming out, or in the live model's top 45). Training = add up the chosen seasons' statistics, drop the switched-off inputs' rows and columns, add λ to the diagonal, and solve with Gaussian elimination. That's the same ridge math as the server. It's the ridge half only (trees need every row and much longer to fit), so compare against the ridge line: with everything on and λ = 2 it should land near ${'2.86'}.</p></div>
+  </section>`;
+}
+function wireLab(){
+  const g=$('labG');
+  const drawG=()=>{ g.innerHTML=LAB_GROUPS.map(([n],i)=>`<label class="chk"><input type="checkbox" data-g="${i}" ${LABCFG.on[i]?'checked':''}> ${esc(n)}</label>`).join(''); g.querySelectorAll('[data-g]').forEach(c=>c.onchange=()=>{ LABCFG.on[+c.dataset.g]=c.checked; }); };
+  drawG();
+  const L=$('labL'), H=$('labH'), lamOf=()=>Math.round(10**+L.value*100)/100;
+  const upd=()=>{ $('labLo').textContent=lamOf(); $('labHo').textContent=+H.value?'last '+H.value:'all'; }; L.oninput=H.oninput=upd; upd();
+  $('labPre').querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{ const p=b.dataset.p; LABCFG.on=LAB_GROUPS.map((_,i)=>p==='all'?true:p==='rank'?i===0:p==='noint'?true:i!==0); LABCFG.noint=p==='noint'; drawG(); runLab(); });
+  $('labGo').onclick=()=>{ LABCFG.noint=false; runLab(); };
+}
+async function runLab(){
+  const out=$('labOut'); out.innerHTML='<p class="sub">Training…</p>';
+  try{ if(!LAB){ const r=await fetch('/mllab.json'); LAB=await r.json(); } }catch(e){ out.innerHTML='<p class="sub">Couldn\'t load the training data.</p>'; return; }
+  const feats=LAB.feats, lam=Math.round(10**+$('labL').value*100)/100, hist=+$('labH').value, INTER=['W*oppv','L*oppv','W*mov','L*mov','W*road','L*home','W*fcs','L*fcs','L*v0','B*v0','L*oppUnr','v0sq','W*v0'];
+  const off=new Set(); LAB_GROUPS.forEach(([,fs],i)=>{ if(!LABCFG.on[i]) fs.forEach(f=>off.add(f)); }); if(LABCFG.noint) INTER.forEach(f=>off.add(f));
+  const keep=feats.map((f,i)=>i).filter(i=>!off.has(feats[i])), seasons=Object.keys(LAB.seasons).map(Number).sort();
+  const solve=(st)=>{ const k=keep.length, M=keep.map((i,a)=>[...keep.map((j,b)=>st.A[i][j]+(a===b&&a>0?lam:0)),st.b[i]]);
+    for(let c=0;c<k;c++){ let p=c; for(let r=c+1;r<k;r++) if(Math.abs(M[r][c])>Math.abs(M[p][c])) p=r; [M[c],M[p]]=[M[p],M[c]]; const d=M[c][c]||1e-9; for(let r=0;r<k;r++) if(r!==c){ const f=M[r][c]/d; for(let j=c;j<=k;j++) M[r][j]-=f*M[c][j]; } }
+    const w=new Array(feats.length).fill(0); keep.forEach((i,a)=>{ w[i]=M[a][k]/(M[a][a]||1e-9); }); return w; };
+  const add=(a,b)=>a?{A:a.A.map((r,i)=>r.map((v,j)=>v+b.A[i][j])),b:a.b.map((v,i)=>v+b.b[i])}:{A:b.A.map(r=>r.slice()),b:b.b.slice()};
+  const bySeason={}; let n=0,abs=0,top=0, lastW=null;
+  for(const s of [...new Set(LAB.weeks.map(w=>w.s))].sort()){
+    let tr=seasons.filter(t=>t<s&&t!==2020); if(hist) tr=tr.slice(-hist); if(!tr.length) continue;
+    let SR=null,SU=null; for(const t of tr){ SR=add(SR,LAB.seasons[t].R); SU=add(SU,LAB.seasons[t].U); }
+    const wR=solve(SR), wU=solve(SU); lastW={s,wR}; let sn=0,sa=0;
+    for(const wk of LAB.weeks.filter(w=>w.s===s)){
+      const v=wk.t.map(r=>{ const x=r.slice(2), w=r[0]?wR:wU; let d=0; for(let i=0;i<x.length;i++) d+=w[i]*x[i]; return d; });
+      const order=v.map((d,i)=>[d,i]).sort((a,b)=>b[0]-a[0]), rk=new Array(v.length); order.forEach(([,i],k)=>{ rk[i]=k+1; });
+      wk.t.forEach((r,i)=>{ if(!r[1]) return; const e=Math.min(15,Math.abs(rk[i]-r[1])); n++; abs+=e; sn++; sa+=e; if(rk[i]<=25) top++; });
+    }
+    bySeason[s]=sa/sn;
+  }
+  const am=abs/n, Z=(D.exp&&D.exp.zoo&&D.exp.zoo.poll)||[], ref=Z.find(x=>/^Ridge/.test(x.name)), live=Z.find(x=>x.live);
+  const ss=Object.keys(bySeason);
+  out.innerHTML=`<div class="kpis"><div><b>${am.toFixed(2)}</b><span>spots off, your model</span></div><div><b>${pct(top/n,1)}</b><span>of the real top 25 picked</span></div>${ref?`<div><b style="color:var(${am<=ref.avgMiss+0.005?'--good':'--bad'})">${am-ref.avgMiss>0?'+':''}${(am-ref.avgMiss).toFixed(2)}</b><span>vs. ridge with everything (${ref.avgMiss.toFixed(2)})</span></div>`:''}${live?`<div><b>${live.avgMiss.toFixed(2)}</b><span>the live model (ridge + trees)</span></div>`:''}</div>
+    ${line({pts:ss.map(s=>({x:+s,y:bySeason[s],tip:`${s}: ${bySeason[s].toFixed(2)} spots off${ref?' (ridge, everything: '+ref.bySeason[s].toFixed(2)+')':''}`})),ref:ref?ss.map(s=>({x:+s,y:ref.bySeason[s]})):null,xl:'Test season (dashed: ridge with everything)',yl:'Spots off',yf:v=>v.toFixed(1),xticks:ss.filter((_,i)=>i%2===0).map(Number),label:'Your model by season',w:900,h:240})}
+    ${lastW?`<details><summary>Your model's weights (trained for ${lastW.s}, ranked teams)</summary>${hbars(feats.map((f,i)=>({f,w:lastW.wR[i]})).filter(x=>x.f!=='1'&&Math.abs(x.w)>1e-6).sort((a,b)=>Math.abs(b.w)-Math.abs(a.w)).map(x=>({label:esc(FNAME[x.f]||x.f),v:+x.w.toFixed(3),c:x.w>=0?'--ta':'--tb'})),{f:v=>(v>0?'+':'')+v.toFixed(3)})}</details>`:''}
+    <p class="sub">${am<(ref?ref.avgMiss:9)-0.01?'You beat the ridge baseline. Nice. Is it real, or did you tune on the test? Every setting you try and keep is a little bit of peeking.':'Try switching groups off one at a time: the one that hurts most is the one the model leans on.'}</p>`;
 }
 
 // 6. Simulations
@@ -435,7 +551,7 @@ function secLearn(){
   ${L.length?line({pts:L.map(x=>({x:x.week,y:x.avgMiss,tip:`Week ${x.week} poll (${x.src}): ${x.avgMiss.toFixed(2)} spots off, ${pct(x.top25)} of the top 25`})),ref:D.backtest&&D.backtest.model?[{x:L[0].week,y:D.backtest.model.avgMiss},{x:L[L.length-1].week,y:D.backtest.model.avgMiss}]:null,xl:'Poll week (dashed: long-run average)',yl:'Spots off',yf:v=>v.toFixed(1),label:'Report card',w:900,h:260}):'<p class="sub">Nothing yet.</p>'}
   <h3>Weights moving as it learns</h3>${drift}
   <div class="x"><span class="xtag">In depth</span>
-    <p><b>Online learning without forgetting.</b> New weeks are added to the sufficient statistics at weight 1, the same as history. The backtest tried weighting this season 3× and 6× (2.93 and 2.96 spots off vs 2.91) and carrying each team's last miss forward (3.3–3.9): all worse. Voter behavior is stable across years, so recent data gets no extra weight, and the model can't be pulled off course by one strange week.</p>
+    <p><b>Online learning without forgetting.</b> New weeks are added to the ridge model's sufficient statistics at weight 1, the same as history, and the tree model is refit from every row (about two seconds), right after each new poll. The backtest tried weighting this season 3× and 6× (2.93 and 2.96 spots off vs 2.91) and carrying each team's last miss forward (3.3–3.9): all worse. Voter behavior is stable across years, so recent data gets no extra weight, and the model can't be pulled off course by one strange week.</p>
     <p><b>What doesn't learn live, on purpose:</b> the play-by-play tables and the bet thresholds. Refitting them on a few weeks of results would chase noise; the accuracy study showed reweighting fit on one season made the next season worse.</p>
   </div></section>`;
 }

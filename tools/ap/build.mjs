@@ -6,7 +6,7 @@
 //   node tools/ap/build.mjs games.json
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { G, PRIOR_SHRINK, ratings, odRatings, sosTable, rebuildPolls, teamsOf, samplesFor, stats, fitStats, FEATS } from '../../api/apmodel.mjs';
+import { G, PRIOR_SHRINK, ratings, odRatings, sosTable, gbmFit, rebuildPolls, teamsOf, samplesFor, stats, fitStats, FEATS } from '../../api/apmodel.mjs';
 const src = process.argv[2] || 'games.json', games = JSON.parse(fs.readFileSync(src, 'utf8'));
 const seasons = [...new Set(games.map(g => g[G.season]))].sort(), season = seasons[seasons.length - 1];
 const priors = {};
@@ -15,7 +15,9 @@ for (const s of seasons) { const R = ratings(games.filter(g => g[G.season] === s
 const shrinkOD = (od, k) => ({ o: Object.fromEntries(Object.entries(od.o).map(([t, v]) => [t, +(v * k).toFixed(2)])), d: Object.fromEntries(Object.entries(od.d).map(([t, v]) => [t, +(v * k).toFixed(2)])) });
 const priorsOD = {}; for (const s of seasons) priorsOD[s + 1] = shrinkOD(odRatings(games.filter(g => g[G.season] === s), { prior: priorsOD[s] || {} }), 0.8);
 const all = seasons.filter(s => s !== 2020).flatMap(s => samplesFor(games, s, { prior: priors[s] || {} }));
-const st = { R: stats(all.filter(x => x.ranked)), U: stats(all.filter(x => !x.ranked)) }, model = fitStats(st);
+const st = { R: stats(all.filter(x => x.ranked)), U: stats(all.filter(x => !x.ranked)) }, model = { ...fitStats(st), gbm: gbmFit(all) };
+// every training row, so the server can refit the trees when it learns a new week: [ranked, y, ...x]
+fs.writeFileSync(new URL('../../api/aprows.json', import.meta.url).pathname, JSON.stringify(all.map(r => [r.ranked ? 1 : 0, r.y, ...r.x.map(v => +v.toFixed(4))])));
 const cur = all.filter(x => x.season === season), trainedWeek = cur.length ? Math.max(...cur.map(x => x.week)) : 0;
 const out = `${process.env.TMPDIR || '/tmp'}/ap_backtest.json`;
 execFileSync('node', [new URL('./backtest.mjs', import.meta.url).pathname, src], { env: { ...process.env, OUT: out }, stdio: ['ignore', 'ignore', 'inherit'] });
@@ -27,7 +29,7 @@ const brand = Object.values(teams).filter(t => t.p4 || ranked.has(t.id)).map(t =
 const round = a => a.map(v => +v.toFixed(5));
 const data = {
   built: new Date().toISOString(), season, trained: { season, week: trainedWeek, rows: all.length },
-  feats: FEATS, model: { R: round(model.R), U: round(model.U), sdR: +model.sdR.toFixed(3), sdU: +model.sdU.toFixed(3) },
+  feats: FEATS, model: { R: round(model.R), U: round(model.U), sdR: +model.sdR.toFixed(3), sdU: +model.sdU.toFixed(3), gbm: model.gbm },
   stats: { R: { A: st.R.A.map(round), b: round(st.R.b), yy: +st.R.yy.toFixed(2), n: st.R.n }, U: { A: st.U.A.map(round), b: round(st.U.b), yy: +st.U.yy.toFixed(2), n: st.U.n } },
   prior: priors[season], priorOD: priorsOD[season], teams, brand,
   polls: Object.fromEntries(Object.entries(polls).map(([w, p]) => [w, p.poll])),

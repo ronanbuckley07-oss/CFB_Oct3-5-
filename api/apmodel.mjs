@@ -116,11 +116,55 @@ export function ridge(rows, lambda = 1) {
 }
 const dot = (w, x) => { let s = 0; for (let i = 0; i < w.length; i++) s += w[i] * x[i]; return s; };
 
-// The model: separate weights for teams that were ranked going in (R) and teams that weren't (U)
+// The model: separate ridge weights for teams that were ranked going in (R) and teams that weren't (U), averaged with a
+// gradient-boosted tree model when there is one (model.gbm). Walk-forward 2014-2026 (tools/ap/zoo.mjs): ridge alone
+// 2.86 spots off, trees alone 2.59 (better in 12 of 13 seasons), the average 2.59 with the most top-25 teams picked.
+export function ridgeValue(model, x, ranked) { return dot(ranked ? model.R : model.U, x); }
 export function predictValues(model, X, poll) {
   const out = {};
-  for (const [id, x] of Object.entries(X)) out[id] = dot(poll[id] ? model.R : model.U, x);
+  for (const [id, x] of Object.entries(X)) { const r = dot(poll[id] ? model.R : model.U, x); out[id] = model.gbm ? (r + gbmPredict(model.gbm, x, poll[id] ? 1 : 0)) / 2 : r; }
   return out;
+}
+
+// ---------- gradient-boosted regression trees ----------
+// Depth-3 trees on histogram bins (up to 24 per input), squared error, learning rate 0.08, 160 trees, at least 40 rows a
+// leaf. Not tuned on the test seasons: these are textbook defaults. Input = the feature row + "ranked going in" (0/1).
+// Serialized as { base, cuts, trees } with each tree a flat node list: [feature, bin, left, right] or [-1, value].
+export function gbmFit(rows, { trees = 160, depth = 3, lr = 0.08, minLeaf = 40, bins = 24 } = {}) {
+  const X = rows.map(r => [...r.x, r.ranked ? 1 : 0]), y = rows.map(r => r.y), N = X.length, F = X[0].length;
+  const cuts = [];
+  for (let f = 0; f < F; f++) { const v = [...new Set(X.map(r => r[f]))].sort((a, b) => a - b), c = [];
+    if (v.length > 1) for (let k = 1; k < bins; k++) { const q = v[Math.floor(k * v.length / bins)]; if (!c.includes(q) && q > v[0]) c.push(q); } cuts.push(c); }
+  const binOf = (v, f) => { const c = cuts[f]; let k = 0; while (k < c.length && v >= c[k]) k++; return k; };
+  const B = X.map(r => r.map(binOf)), base = y.reduce((a, b) => a + b, 0) / N, pred = new Float64Array(N).fill(base), out = [];
+  for (let t = 0; t < trees; t++) {
+    const res = y.map((v, i) => v - pred[i]), nodes = [];
+    const grow = (idx, d) => {
+      const at = nodes.length; nodes.push(null);
+      const sum = idx.reduce((a, i) => a + res[i], 0);
+      let best = null;
+      if (d < depth && idx.length >= 2 * minLeaf) for (let f = 0; f < F; f++) {
+        const nb = cuts[f].length + 1; if (nb < 2) continue; const hs = new Float64Array(nb), hc = new Uint32Array(nb);
+        for (const i of idx) { hs[B[i][f]] += res[i]; hc[B[i][f]]++; }
+        let ls = 0, lc = 0;
+        for (let k = 0; k < nb - 1; k++) { ls += hs[k]; lc += hc[k]; const rc = idx.length - lc; if (lc < minLeaf || rc < minLeaf) continue; const rs = sum - ls, gain = ls * ls / lc + rs * rs / rc; if (!best || gain > best.gain) best = { gain, f, k }; }
+      }
+      if (!best) { nodes[at] = [-1, +((sum / idx.length) * lr).toFixed(5)]; return at; }
+      const l = grow(idx.filter(i => B[i][best.f] <= best.k), d + 1), r = grow(idx.filter(i => B[i][best.f] > best.k), d + 1);
+      nodes[at] = [best.f, best.k, l, r]; return at;
+    };
+    grow([...Array(N).keys()], 0); out.push(nodes);
+    for (let i = 0; i < N; i++) { let n = 0; while (nodes[n][0] >= 0) n = B[i][nodes[n][0]] <= nodes[n][1] ? nodes[n][2] : nodes[n][3]; pred[i] += nodes[n][1]; }
+  }
+  return { base: +base.toFixed(5), cuts, trees: out };
+}
+export function gbmPredict(m, x, ranked) {
+  // bin every input once, then each tree is a few integer comparisons
+  const F = m.cuts.length, b = new Uint8Array(F);
+  for (let f = 0; f < F; f++) { const v = f < x.length ? x[f] : ranked, c = m.cuts[f]; let k = 0; while (k < c.length && v >= c[k]) k++; b[f] = k; }
+  let s = m.base;
+  for (const nodes of m.trees) { let n = 0, nd = nodes[0]; while (nd[0] >= 0) { n = b[nd[0]] <= nd[1] ? nd[2] : nd[3]; nd = nodes[n]; } s += nd[1]; }
+  return s;
 }
 export function rankFrom(values) {
   return Object.fromEntries(Object.entries(values).sort((a, b) => b[1] - a[1]).map(([id], i) => [id, i + 1]));
@@ -207,19 +251,22 @@ export function projectPoll({ games, season, week, poll, R, teams, model, live =
   const top10 = Object.entries(poll).filter(([, x]) => x <= 10).map(([id]) => id), top5 = new Set(top10.filter(id => poll[id] <= 5));
   const lostIn = row => { const out = []; if (row[G.hp] == null || row[G.hp] === row[G.ap]) return out; out.push(String(row[G.hp] > row[G.ap] ? row[G.aid] : row[G.hid])); return out; };
   const chaos = { anyTop5: 0, top10Losses: new Array(11).fill(0) };
-  const ids = Object.keys(teams), N = {}, P25 = {}, P10 = {}, sum = {}, hist = {};
-  for (const id of ids) { N[id] = 0; P25[id] = 0; P10[id] = 0; sum[id] = 0; hist[id] = new Array(27).fill(0); }
-  const one = override => { const X = features(games, season, week, poll, R, teams, override); return predictValues(model, X, poll); };
+  let ids = Object.keys(teams); const N = {}, P25 = {}, P10 = {}, sum = {}, hist = {};
+  const one = (override, only) => { const X = features(games, season, week, poll, R, teams, override); if (only) for (const id of Object.keys(X)) if (!only.has(id)) delete X[id]; return predictValues(model, X, poll); };
   // the single most likely outcome: every open game goes to the team that's ahead or favored
   const fav = { ...fixed }; for (const g of open) { const m = outlook[g[G.id]].mu; const t = g.slice(); const mm = Math.round(m) || (m >= 0 ? 1 : -1); t[G.hp] = Math.max(0, mm); t[G.ap] = Math.max(0, -mm); fav[g[G.id]] = t; }
-  const likely = rankFrom(one(fav));
+  const likelyValues = one(fav), likely = rankFrom(likelyValues);
+  // Only teams that can plausibly reach the top 25 are simulated: ranked now, or top 45 if the favorites all win.
+  // Everyone else is far enough back that voter noise can't lift them in (and keeping them out keeps each run fast).
+  const cand = new Set(ids.filter(id => poll[id] || likely[id] <= 45)); ids = [...cand];
+  for (const id of ids) { N[id] = 0; P25[id] = 0; P10[id] = 0; sum[id] = 0; hist[id] = new Array(27).fill(0); }
   for (let k = 0; k < sims; k++) {
     const ov = { ...fixed };
     for (const g of open) { const o = outlook[g[G.id]]; let m = Math.round(o.mu + o.s * gauss(r)); if (!m) m = r() < o.p ? 1 : -1; const t = g.slice(); t[G.hp] = Math.max(0, m); t[G.ap] = Math.max(0, -m); ov[g[G.id]] = t; }
     { let n = 0, t5 = false; const T10 = new Set(top10);
       for (const g of wk) { const row = ov[g[G.id]] || g; for (const id of lostIn(row)) if (T10.has(id)) { n++; if (top5.has(id)) t5 = true; } }
       chaos.top10Losses[Math.min(10, n)]++; if (t5) chaos.anyTop5++; }
-    const v = one(ov); for (const id of ids) v[id] += gauss(r) * (poll[id] ? model.sdR : Math.min(model.sdU, model.sdR)) * 0.5;
+    const v = one(ov, cand); for (const id of ids) v[id] += gauss(r) * (poll[id] ? model.sdR : Math.min(model.sdU, model.sdR)) * 0.5;
     const rk = rankFrom(v);
     for (const id of ids) { const x = rk[id]; sum[id] += Math.min(x, 26); hist[id][Math.min(x, 26)]++; if (x <= 25) P25[id]++; if (x <= 10) P10[id]++; }
   }
@@ -228,7 +275,6 @@ export function projectPoll({ games, season, week, poll, R, teams, model, live =
   // The projected poll: teams in order of their average simulated rank
   out.sort((a, b) => a.mean - b.mean || a.likely - b.likely);
   chaos.anyTop5 /= sims; chaos.top10Losses = chaos.top10Losses.map(c => c / sims);
-  const likelyValues = one(fav);
   return { teams: out.filter(t => t.p25 > 0.02 || t.prev || t.likely <= 30), outlook, open: open.length, total: wk.length, sims, chaos, likely, likelyValues, fixed };
 }
 

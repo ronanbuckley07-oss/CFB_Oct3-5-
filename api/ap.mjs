@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { G, ratings, odRatings, features, fitStats, stats, addStats, projectPoll, swingGames, seasonSim, gameOutlook, rankFrom, predictValues, p4Of, Phi, SIGMA, HFA, rng, sosTable } from './apmodel.mjs';
+import { G, ratings, odRatings, features, fitStats, stats, addStats, projectPoll, swingGames, seasonSim, gameOutlook, rankFrom, predictValues, p4Of, Phi, SIGMA, HFA, rng, sosTable, gbmFit } from './apmodel.mjs';
 
 const BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/college-football';
 const CORE = 'https://sports.core.api.espn.com/v2/sports/football/leagues/college-football';
@@ -29,7 +29,15 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
   let st = { season, polls: {}, live: null, learned: [], log: [], weightHist: [] };
   try { if (file) { const s = JSON.parse(fs.readFileSync(file, 'utf8')); if (s.season === season) st = { ...st, ...s }; } } catch {}
   const save = () => { if (!file) return; try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file + '.tmp', JSON.stringify(st)); fs.renameSync(file + '.tmp', file); } catch (e) { console.error('ap: save failed', e.message); } };
-  const modelNow = () => (st.live ? fitStats({ R: addStats(D.stats.R, st.live.R), U: addStats(D.stats.U, st.live.U) }) : D.model);
+  // Ridge refits from sufficient statistics; the trees refit from every training row (shipped rows + rows learned live).
+  // A tree refit takes a couple of seconds, so it runs only when a new week is learned, and the result is saved.
+  const shippedRows = () => { try { return JSON.parse(fs.readFileSync(path.join(here, 'aprows.json'), 'utf8')).map(r => ({ ranked: !!r[0], y: r[1], x: r.slice(2) })); } catch { return null; } };
+  const modelNow = (refitTrees = false) => {
+    if (!st.live) return D.model;
+    const ridge = fitStats({ R: addStats(D.stats.R, st.live.R), U: addStats(D.stats.U, st.live.U) });
+    if (refitTrees) { const base = shippedRows(); if (base) { const t0 = Date.now(); st.gbm = gbmFit([...base, ...(st.rows || []).map(r => ({ ranked: !!r[0], y: r[1], x: r.slice(2) }))]); console.log(`ap: trees refit on ${base.length + (st.rows || []).length} rows in ${Date.now() - t0} ms`); } }
+    return { ...ridge, gbm: st.gbm || D.model.gbm };
+  };
   let model = modelNow();
 
   // ---------- ESPN ----------
@@ -128,12 +136,13 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
       const proj = rankFrom(predictValues(model, X, prev)), rows = [];
       for (const [id, x] of Object.entries(X)) { if (!prev[id] && x[16] > 3) continue; rows.push({ x, y: val(next[id]), ranked: !!prev[id] }); }
       const add = { R: stats(rows.filter(r => r.ranked)), U: stats(rows.filter(r => !r.ranked)) };
+      (st.rows ||= []).push(...rows.map(r => [r.ranked ? 1 : 0, r.y, ...r.x.map(v => +v.toFixed(4))]));
       st.live = st.live ? { R: addStats(st.live.R, add.R), U: addStats(st.live.U, add.U) } : add;
       const act = Object.entries(next), predTop = new Set(Object.entries(proj).filter(([, r]) => r <= 25).map(([id]) => id));
       const miss = act.reduce((a, [id, r]) => a + Math.min(15, Math.abs((proj[id] || 40) - r)), 0) / act.length;
       st.log = st.log.filter(l => l.week !== w + 1).concat([{ week: w + 1, avgMiss: +miss.toFixed(2), top25: +(act.filter(([id]) => predTop.has(id)).length / act.length).toFixed(3), n: act.length,
         rows: act.sort((a, b) => a[1] - b[1]).map(([id, r]) => ({ id, name: teams[id]?.name || id, actual: r, proj: proj[id] ?? null, prev: prev[id] || null })) }]).sort((a, b) => a.week - b.week);
-      st.learned.push(w); model = modelNow();
+      st.learned.push(w); model = modelNow(true);
       // keep the weights after each lesson, for the How it works page
       (st.weightHist ||= []).push({ week: w + 1, R: model.R.map(v => +v.toFixed(4)), U: model.U.map(v => +v.toFixed(4)), sdR: +model.sdR.toFixed(3), at: new Date().toISOString() }); save();
       console.log(`ap: learned from week ${w} -> ${w + 1}: projection missed by ${miss.toFixed(2)} spots`);
@@ -285,6 +294,7 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
 
   // ---------- How it works (/ml): the experiments, the live weights, and what the playground needs ----------
   let ML = null; try { ML = JSON.parse(fs.readFileSync(path.join(here, 'mldata.json'), 'utf8')); } catch {}
+  try { if (ML) ML.zoo = JSON.parse(fs.readFileSync(path.join(here, 'zoodata.json'), 'utf8')); } catch {}
   function ml() {
     return memoOut('ml', 30000, () => {
       const P = currentPoll(), W = P.week, R = rate(), G0 = all(), od = odNow();
@@ -300,7 +310,7 @@ export function createAP({ dataDir, fetchImpl = fetch } = {}) {
       const topR = Object.entries(R).filter(([k]) => teams[k]).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([id, r]) => ({ id, name: nameOf(id), r: +r.toFixed(1), o: +(od.o[id] ?? 0).toFixed(1), d: +(od.d[id] ?? 0).toFixed(1), prior: +(D.prior[id] ?? 0).toFixed(1) }));
       const played = G0.filter(g => g[G.hp] != null).length;
       return {
-        season, week: W, feats: D.feats, model: { R: model.R, U: model.U, sdR: model.sdR, sdU: model.sdU }, shipped: D.model, trained: D.trained,
+        season, week: W, feats: D.feats, model: { R: model.R, U: model.U, sdR: model.sdR, sdU: model.sdU, gbm: model.gbm }, shipped: { R: D.model.R, U: D.model.U, sdR: D.model.sdR }, trained: D.trained,
         weightHist: [{ week: D.trained.week + 1, R: D.model.R, U: D.model.U, sdR: D.model.sdR, shipped: true }, ...(st.weightHist || [])],
         learned: st.learned.slice().sort((a, b) => a - b), log: st.log.map(l => ({ week: l.week, avgMiss: l.avgMiss, top25: l.top25 })), latest: (D.backtest.latest || []).map(l => ({ week: l.week, avgMiss: l.avgMiss, top25: l.top25 })),
         backtest: D.backtest.all, play, values: Object.fromEntries(Object.entries(sim.likelyValues).map(([k, v]) => [k, +v.toFixed(3)])), topRatings: topR, gamesPlayed: played, ptsMean: +od.mean.toFixed(1),
