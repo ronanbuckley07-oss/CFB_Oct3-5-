@@ -259,15 +259,17 @@ function drawForm(summary){
       <label>Sell when a position is down (%)<input type="number" id="f_sl" min="1" max="99" step="1" placeholder="off: hold to the final" value="${c.stopLossPct??''}"></label>
       <label>Games<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_one" ${c.oneGame?'checked':''}> Only one game (the first one it bets on)</span></span></label>
       <label>Picks<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_steady" ${c.steadyOnly!==false?'checked':''}> Steady picks only (the rule that held up on past games)</span></span></label>
+      <label>Follow<select id="f_follow"><option value="mc" ${(c.follow||'mc')==='mc'?'selected':''}>Monte Carlo system (tested)</option><option value="ml" ${c.follow==='ml'?'selected':''}>ML system (experimental)</option><option value="both" ${c.follow==='both'?'selected':''}>Both systems</option></select></label>
+      <label>ML check<span class="row" style="color:var(--ink);font-weight:500"><span><input type="checkbox" id="f_mlagree" ${c.mlAgree?'checked':''}> Only buy Monte Carlo picks the ML model agrees with</span></span></label>
     </div>
-    <p class="small" style="margin:4px 0 0">Return is what selling the position right now would bring, fees out, against what it cost. Example: bought for $1.00, sells now for $1.30 = up 30%. Leave a box empty to hold to the final. Steady picks also sell at 90¢.</p>
+    <p class="small" style="margin:4px 0 0">Return is what selling the position right now would bring, fees out, against what it cost. Example: bought for $1.00, sells now for $1.30 = up 30%. Leave a box empty to hold to the final. Steady picks also sell at 90¢. The ML system and the ML check are experimental: replaying 2025-26 NFL games, steady picks chosen by the ML model lost 7%, and requiring ML agreement cut the bets by 60% for about the same return. See How it works › Monte Carlo vs ML.</p>
     <p class="small" id="apSum">${esc(summary||'')}</p>
     <div class="row"><button class="primary" id="apStart">Start autopilot</button><button id="apCancel">Cancel</button></div>`;
   $('apCancel').onclick=()=>{ apDraft=null; $('apForm').innerHTML=''; };
   $('apStart').onclick=async()=>{
     const cfg={budget:+$('f_budget').value,maxPerBet:+$('f_max').value,stopLoss:+$('f_stop').value,risk:$('f_risk').value,start:new Date($('f_start').value).toISOString(),end:new Date($('f_end').value).toISOString(),
       leagues:[$('f_cfb').checked&&'cfb',$('f_nfl').checked&&'nfl'].filter(Boolean),mode:$('f_mode').value,
-      takeProfit:+$('f_tp').value||null,stopLossPct:+$('f_sl').value||null,oneGame:$('f_one').checked,steadyOnly:$('f_steady').checked};
+      takeProfit:+$('f_tp').value||null,stopLossPct:+$('f_sl').value||null,oneGame:$('f_one').checked,steadyOnly:$('f_steady').checked,follow:$('f_follow').value,mlAgree:$('f_mlagree').checked};
     if(cfg.mode==='live'&&!confirm(`Start LIVE autopilot with up to $${cfg.budget} of real money?`)) return;
     const r=await post('/autopilot/start',{config:cfg}); const j=await r.json(); if(!r.ok){ $('apSum').innerHTML=`<span class="bad">${esc(j.error)}</span>`; return; }
     apDraft=null; load(); };

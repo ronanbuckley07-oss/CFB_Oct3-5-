@@ -79,7 +79,10 @@ export function clampConfig(c, limits, live) {
     // exits, per position: sell when its return reaches +takeProfit% or falls to -stopLossPct% (null = hold to the final)
     takeProfit: +c.takeProfit > 0 ? Math.min(500, +c.takeProfit) : null, stopLossPct: +c.stopLossPct > 0 ? Math.min(99, +c.stopLossPct) : null, oneGame: !!c.oneGame,
     // steady picks only: the one rule that held up on the replay; on by default for live money
-    steadyOnly: c.steadyOnly != null ? !!c.steadyOnly : c.mode === 'live' };
+    steadyOnly: c.steadyOnly != null ? !!c.steadyOnly : c.mode === 'live',
+    // which system's picks to buy: the Monte Carlo system (default), the ML system, or both; and whether a Monte Carlo
+    // pick also needs the ML model to agree. Off by default: in the 2025-26 replay, ML-driven steady picks lost money.
+    follow: ['mc', 'ml', 'both'].includes(c.follow) ? c.follow : 'mc', mlAgree: !!c.mlAgree };
   if (!out.leagues.length) out.leagues = ['cfb', 'nfl'];
   if (out.mode === 'live') { out.maxPerBet = Math.min(out.maxPerBet, limits.maxOrder); out.budget = Math.min(out.budget, limits.maxDaily); }
   out.maxPerBet = Math.min(out.maxPerBet, out.budget); out.stopLoss = Math.min(out.stopLoss, out.budget);
@@ -90,13 +93,13 @@ export function clampConfig(c, limits, live) {
 export const describe = c => `${c.mode === 'live' ? 'LIVE money' : 'PAPER (no real orders)'}: up to $${c.budget} total, $${c.maxPerBet} a bet, `
   + `${RISK[c.risk].label}, ${c.leagues.map(l => l === 'nfl' ? 'NFL' : 'college').join(' and ')}, from ${new Date(c.start).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} `
   + `to ${new Date(c.end).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} ET, stop after losing $${c.stopLoss}.`
-  + `${c.oneGame ? ' One game only.' : ''}${c.steadyOnly ? ' Steady picks only.' : ''} Sell a position ${c.takeProfit || c.stopLossPct ? [c.takeProfit ? `when it's up ${c.takeProfit}%` : '', c.stopLossPct ? `when it's down ${c.stopLossPct}%` : ''].filter(Boolean).join(' or ') : 'only at the final'}${' (steady picks also at 90¢)'}.`;
+  + `${c.oneGame ? ' One game only.' : ''}${c.steadyOnly ? ' Steady picks only.' : ''}${c.follow === 'ml' ? ' Following the ML system.' : c.follow === 'both' ? ' Following both systems.' : ''}${c.mlAgree ? ' Only when the ML model agrees.' : ''} Sell a position ${c.takeProfit || c.stopLossPct ? [c.takeProfit ? `when it's up ${c.takeProfit}%` : '', c.stopLossPct ? `when it's down ${c.stopLossPct}%` : ''].filter(Boolean).join(' or ') : 'only at the final'}${' (steady picks also at 90¢)'}.`;
 
 // ---------- learning how much to trust the model ----------
 export function learnTrust(picks) {
   const out = {};
   for (const tier of ['low', 'medium', 'high']) {
-    const S = picks.filter(p => p.tier === tier && (p.status === 'won' || p.status === 'lost') && p.why && p.why.mid != null && p.model != null);
+    const S = picks.filter(p => !p.mlSys && p.tier === tier && (p.status === 'won' || p.status === 'lost') && p.why && p.why.mid != null && p.model != null);
     let best = PRIOR_W, bestLL = -Infinity;
     for (let w = 0; w <= 1.0001; w += 0.05) {
       let ll = -PRIOR_STRENGTH * 2 * (w - PRIOR_W) ** 2; // Gaussian-ish prior around 0.5
@@ -194,17 +197,19 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
       // Candidates: steady picks first (the rule that held up on the replay), then the model's tier bets
       // Candidates: every pick the model logs (steady picks, tier bets; small edges too on the High setting), copied
       // within 2 minutes on Polymarket US at no more than the logged price
-      const kindOf = p => p.steady ? 'steady' : p.lean ? 'lean' : 'model';
+      const kindOf = p => p.mlSys ? 'ml-' + p.mlSys : p.steady ? 'steady' : p.lean ? 'lean' : 'model';
+      const follow = c.follow || 'mc', isSteady = p => p.steady || p.mlSys === 'steady';
+      const sysOk = p => (p.mlSys ? follow !== 'mc' : follow !== 'ml') && (!c.mlAgree || p.mlSys || p.mlAgrees === true);
       const cands = api.picksAll().filter(p => p.status === 'open' && !p.cashOut && p.venue === 'Polymarket US' && p.trade && p.trade.slug && c.leagues.includes(p.league)
-          && Date.now() - Date.parse(p.at) < PICK_FRESH && (p.steady || (!c.steadyOnly && (p.lean ? c.risk === 'high' : tiers.includes(p.tier) && tierActive(p.tier)))))
+          && Date.now() - Date.parse(p.at) < PICK_FRESH && sysOk(p) && (isSteady(p) || (!c.steadyOnly && (p.lean ? c.risk === 'high' : tiers.includes(p.tier) && tierActive(p.tier)))))
         .map(p => ({ src: kindOf(p), league: p.league, event: p.event, matchup: p.matchup, sel: p.sel, type: p.type, teamId: p.teamId, by: p.by, line: p.line, over: p.over,
-          tier: p.steady ? 'low' : p.tier, model: p.model, mid: p.why && p.why.mid != null ? p.why.mid : p.price, fair: p.fair, logged: p.price, trade: p.trade, key: p.key }))
+          tier: isSteady(p) ? 'low' : p.tier, model: p.model, mid: p.why && p.why.mid != null ? p.why.mid : p.price, fair: p.fair, logged: p.price, trade: p.trade, key: p.key }))
         .filter(b => b.model - b.mid <= MAX_GAP)                                     // big gaps are information the model lacks
         .filter(b => !(c.oneGame && A.lockedEvent) || b.event === A.lockedEvent)     // one game only: stay on it
         .filter(b => { if (c.mode !== 'live' || b.trade.outcome === 'YES') return true;      // live: YES contracts only (see pmus.mjs)
           const k = `no-side|${b.key}`; if (!skipNoted.has(k)) { skipNoted.add(k); log(`Skipped ${b.sel}: it's a No-side contract, which isn't placed through the API yet.`); } return false; })
         .filter(b => !runTrades().some(t => t.pick === b.key || (t.qty > 0 && t.slug === b.trade.slug)))  // each pick and market once
-        .sort((a, b) => (a.src === 'steady' ? 0 : a.src === 'model' ? 1 : 2) - (b.src === 'steady' ? 0 : b.src === 'model' ? 1 : 2));
+        .sort((a, b) => (/steady$/.test(a.src) ? 0 : a.src === 'model' ? 1 : 2) - (/steady$/.test(b.src) ? 0 : b.src === 'model' ? 1 : 2));
       let bought = 0;
       const inGame = ev => db.trades.filter(t => t.qty > 0 && t.event === ev && (t.status === 'open' || t.run === A.id));
       for (const b of cands) {
@@ -215,13 +220,13 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
         if (held.some(t => t.status === 'open' && conflicts(t, b))) continue;           // never the other side of an open bet
         const gameRoom = (c.oneGame ? 1 : GAME_SHARE) * c.budget - held.filter(t => t.status === 'open').reduce((a, t) => a + t.cost, 0); // one-game runs put the whole budget on that game
         if (gameRoom < 1) continue;                                                       // this game already has its share
-        const w = b.src === 'steady' ? 0.5 : trust[b.tier].w, p = w * b.model + (1 - w) * b.mid;
+        const w = /steady$/.test(b.src) ? 0.5 : trust[b.tier].w, p = w * b.model + (1 - w) * b.mid;
         const bk = await api.book(b.league, b.trade.slug);
         const probe = simulateFill(bk, b.trade.outcome, Math.min(c.maxPerBet, room));
         if (!probe.qty) continue;
         const cost1 = probe.cost / probe.qty, edge = p - cost1;
         if (cost1 > b.logged + 0.01) continue; // the price moved past what the pick was logged at: don't chase it
-        if (b.src === 'steady') { // the steady rule itself: 65-85c, fair at or above the price
+        if (/steady$/.test(b.src)) { // the steady rule itself: 65-85c, fair at or above the price
           if (cost1 < STEADY.min || cost1 > STEADY.max || edge < 0) continue;
         } else if (edge < 0.01) continue; // after the learned trust, still at least 1 point of value per contract
         // Flat stake: every bet uses your per-bet amount (the steady rule's own advice: the same amount every time), limited
@@ -233,7 +238,7 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
         let qty = f.qty; while (qty > 1 && qty * limitSide + takerFee(qty, limitSide) > stake + 0.01) qty--;
         const plan = { slug: b.trade.slug, outcome: b.trade.outcome, qty, limitSide, limitYesPx: b.trade.outcome === 'YES' ? limitSide : +(1 - limitSide).toFixed(2),
           maxCost: +(qty * limitSide + takerFee(qty, limitSide)).toFixed(2), league: b.league, event: b.event, matchup: b.matchup, sel: b.sel, type: b.type,
-          teamId: b.teamId, by: b.by, line: b.line, over: b.over, model: b.model, fair: +p.toFixed(3), tier: b.tier, trust: w, src: b.src, steady: b.src === 'steady', pick: b.key };
+          teamId: b.teamId, by: b.by, line: b.line, over: b.over, model: b.model, fair: +p.toFixed(3), tier: b.tier, trust: w, src: b.src, steady: /steady$/.test(b.src), pick: b.key };
         let t;
         if (c.mode === 'paper') {
           t = { ...plan, at: new Date().toISOString(), day: new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }), mode: 'paper', run: A.id,

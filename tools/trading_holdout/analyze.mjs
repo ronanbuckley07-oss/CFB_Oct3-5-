@@ -63,7 +63,8 @@ export function bets(cfg) {
   }
   return out;
 }
-let seed = 12345; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+// mulberry32: the old (seed * 1103515245 + 12345) overflowed double precision and could cycle through a few hundred values
+let seed = 9; const rnd = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 export function stats(B) {
   if (!B.length) return { n: 0 };
   const n = B.length, st = B.reduce((a, b) => a + b.cost, 0), pl = B.reduce((a, b) => a + (b.y - b.cost), 0);

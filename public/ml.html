@@ -115,7 +115,7 @@ dl.gl dt{font-weight:700}dl.gl dd{margin:0;color:var(--muted)}
 <div class="bar">
   <div class="lvl" role="group" aria-label="Reading level"><button data-lvl="simple" aria-pressed="false">Simply</button><button data-lvl="deep" aria-pressed="true">In depth</button></div>
   <nav class="toc" id="toc" aria-label="Contents">
-    <a href="#map">Big picture</a><a href="#game">Game simulator</a><a href="#bets">Bets</a><a href="#ratings">Team ratings</a><a href="#sos">Schedule strength</a><a href="#poll">AP poll model</a><a href="#zoo">Model zoo</a><a href="#lab">Model lab</a><a href="#sims">Simulations</a><a href="#learn">How it learns</a><a href="#limits">Limits</a><a href="#words">Words</a>
+    <a href="#map">Big picture</a><a href="#game">Game simulator</a><a href="#duel">MC vs ML</a><a href="#bets">Bets</a><a href="#ratings">Team ratings</a><a href="#sos">Schedule strength</a><a href="#poll">AP poll model</a><a href="#zoo">Model zoo</a><a href="#lab">Model lab</a><a href="#sims">Simulations</a><a href="#learn">How it learns</a><a href="#limits">Limits</a><a href="#words">Words</a>
   </nav>
 </div>
 <div id="err" class="note" hidden></div>
@@ -169,8 +169,8 @@ async function load(){
 }
 function render(){
   const E=D.exp||{poll:{},ratings:{}};
-  $('main').innerHTML=[secMap(), secGame(), secBets(), secRatings(E), secSos(), secPoll(E), secZoo(E), secLab(), secSims(), secLearn(), secLimits(), secWords()].join('');
-  wireFair(); wireWin(E); wirePlay(); wireMC(); wireSos(); wireLab(); setLvl(LVL); spy();
+  $('main').innerHTML=[secMap(), secGame(), secDuel(), secBets(), secRatings(E), secSos(), secPoll(E), secZoo(E), secLab(), secSims(), secLearn(), secLimits(), secWords()].join('');
+  wireFair(); wireWin(E); wirePlay(); wireMC(); wireSos(); wireLab(); wireDuel(); setLvl(LVL); spy();
 }
 
 // 1. The big picture
@@ -180,12 +180,12 @@ function secMap(){
   <p class="lead">Data comes in, models turn it into chances, simulations play those chances out thousands of times, and the results feed back so the models can check themselves.</p>
   <div class="map">
     <div class="col"><div class="hd">Data →</div>${n('game','Live plays','ESPN, every few seconds')}${n('ratings','Final scores','every FBS game, 2010 on')}${n('bets','Market prices','Kalshi and Polymarket order books')}${n('poll','AP polls','every poll since 2010')}</div>
-    <div class="col"><div class="hd">Models →</div>${n('game','Play simulator','what happens next, from 700k+ real plays')}${n('ratings','Team ratings','how good each team is, in points')}${n('sos','Schedule strength','what a record is really worth')}${n('poll','Poll model','how AP voters move teams: ridge + trees')}${n('bets','Fair price','model and market, averaged')}</div>
+    <div class="col"><div class="hd">Models →</div>${n('game','Play simulator','what happens next, from 700k+ real plays')}${n('duel','ML win model','no simulation: learned from 2.5M past plays')}${n('ratings','Team ratings','how good each team is, in points')}${n('sos','Schedule strength','what a record is really worth')}${n('poll','Poll model','how AP voters move teams: ridge + trees')}${n('bets','Fair price','model and market, averaged')}</div>
     <div class="col"><div class="hd">Simulations →</div>${n('sims','25,000 games','per live play')}${n('sims','300 polls','per projection')}${n('sims','4,000 seasons','per season view')}${n('sims','100 matchups','per dream game')}</div>
     <div class="col"><div class="hd">What you see</div>${n('game','Win probability','on every game page')}${n('bets','Bets','only when the price is wrong and buyable')}${n('poll','Projected poll','live, plus what-ifs')}${n('ratings','Season and matchups','final records, scores, why')}${n('sos','Adjusted ranking','by strength of record')}</div>
   </div>
   <div class="loop"><b>The feedback loop.</b> Every graded bet, every final score and every new AP poll goes back in: ratings update after each game, losing kinds of bets get blocked, and the poll model refits every Sunday. <a href="#learn">See how it learns ›</a></div>
-  <div class="x" style="margin-top:12px"><span class="xtag">In depth</span><p class="sub" style="margin:0">Three model families: a <b>play-by-play Monte Carlo engine</b> (empirical distributions resampled from historical plays, conditioned on game state), <b>regularized linear models</b> (ridge-regressed team ratings from score margins, and a ridge regression of AP poll movement), and <b>decision rules</b> layered on top (a 50/50 model–market blend for pricing, edge thresholds, order-book fill checks). Every one was tested walk-forward: fit on the past, scored on seasons it never saw.</p></div>
+  <div class="x" style="margin-top:12px"><span class="xtag">In depth</span><p class="sub" style="margin:0">Four model families: a <b>machine-learned win-probability model</b> (gradient-boosted trees + logistic regression trained on past plays, a second opinion on every game), a <b>play-by-play Monte Carlo engine</b> (empirical distributions resampled from historical plays, conditioned on game state), <b>regularized linear models</b> (ridge-regressed team ratings from score margins, and a ridge regression of AP poll movement), and <b>decision rules</b> layered on top (a 50/50 model–market blend for pricing, edge thresholds, order-book fill checks). Every one was tested walk-forward: fit on the past, scored on seasons it never saw.</p></div>
   </section>`;
 }
 
@@ -230,7 +230,7 @@ function secBets(){
   ${hbars([{label:'At the logged (stale) price',v:18,tip:'+18% return on paper'},{label:'At the real price then',v:-4.6,c:'--tb',tip:'−4.6% at the price an order would have paid'}],{f:v=>(v>0?'+':'')+v+'%'})}
   <p class="sub">Fixes: prices are refreshed every 10 seconds, every bet is checked against the live order book, and anything older than 30 seconds is marked OLD.</p>
   <div class="cols" style="margin-top:12px">
-    <div class="card"><h4>Steady picks</h4><p class="sub" style="margin:0">One narrow rule that held up on unseen games: a favorite priced 65–85¢, already leading by 4+, from the 2nd quarter on, when the model agrees with the price; sell at 90¢. Replay: 64 bets, +12.9% (plausible range +3% to +21%), about the same in 2025 and 2026. The same spots without the model's agreement lost 5%.</p></div>
+    <div class="card"><h4>Steady picks</h4><p class="sub" style="margin:0">One narrow rule that held up on unseen games: a favorite priced 65–85¢, already leading by 4+, from the 2nd quarter on, when the model agrees with the price; sell at 90¢. Replay: 64 bets, +12.9% (plausible range +4% to +21%), about the same in 2025 and 2026. The same spots without the model's agreement lost 5%.</p></div>
     <div class="card"><h4>Learning from bad bets</h4><p class="sub" style="margin:0">Every graded bet is grouped by how far the model was from the market, time in the game, bet type and price. A group with 25+ results that loses 15%+ and does 15 points worse than the rest gets blocked automatically, re-checked every 30 minutes, and unblocked if it recovers.</p></div>
   </div>
   <div class="x" style="margin-top:12px"><span class="xtag">In depth</span>
@@ -501,6 +501,77 @@ async function runLab(){
     ${line({pts:ss.map(s=>({x:+s,y:bySeason[s],tip:`${s}: ${bySeason[s].toFixed(2)} spots off${ref?' (ridge, everything: '+ref.bySeason[s].toFixed(2)+')':''}`})),ref:ref?ss.map(s=>({x:+s,y:ref.bySeason[s]})):null,xl:'Test season (dashed: ridge with everything)',yl:'Spots off',yf:v=>v.toFixed(1),xticks:ss.filter((_,i)=>i%2===0).map(Number),label:'Your model by season',w:900,h:240})}
     ${lastW?`<details><summary>Your model's weights (trained for ${lastW.s}, ranked teams)</summary>${hbars(feats.map((f,i)=>({f,w:lastW.wR[i]})).filter(x=>x.f!=='1'&&Math.abs(x.w)>1e-6).sort((a,b)=>Math.abs(b.w)-Math.abs(a.w)).map(x=>({label:esc(FNAME[x.f]||x.f),v:+x.w.toFixed(3),c:x.w>=0?'--ta':'--tb'})),{f:v=>(v>0?'+':'')+v.toFixed(3)})}</details>`:''}
     <p class="sub">${am<(ref?ref.avgMiss:9)-0.01?'You beat the ridge baseline. Nice. Is it real, or did you tune on the test? Every setting you try and keep is a little bit of peeking.':'Try switching groups off one at a time: the one that hurts most is the one the model leans on.'}</p>`;
+}
+
+// Monte Carlo vs machine learning
+const FN_WP={diff:'Score difference',tl:'Time left',posH:'Who has the ball',ytg:'Yards to the end zone',down:'Down',dist:'Yards to go',toH:'Home timeouts',toA:'Away timeouts',spread:'Pregame spread',total:'Pregame total',h2:'Who gets the 2nd-half kickoff',em:'Expected final margin',z:'Margin vs. time left',fp:'Field position'};
+function secDuel(){
+  return `<section class="sec" id="duel"><h2>Monte Carlo vs machine learning</h2>
+  <p class="lead">There are now two separate systems for "who wins?". The <b>Monte Carlo</b> plays the rest of the game out 25,000 times. The <b>ML model</b> never simulates anything: it learned from how 1.8 million college and 750,000 NFL real plays turned out which situations become wins, and answers in a millisecond.</p>
+  <div class="cols">
+    <div class="card"><h4>Monte Carlo</h4><p class="sub" style="margin:0">Builds the future play by play from real outcomes in similar spots. Knows the clock, timeouts, field goal range and 4th-down decisions because it plays them out. Slow (seconds per answer), and only as good as its picture of each team's strength.</p></div>
+    <div class="card"><h4>ML model</h4><p class="sub" style="margin:0">Gradient-boosted trees plus a logistic regression, averaged, trained only on <i>past seasons</i> and tested on seasons it never saw. Learns the shape of win probability straight from results. Fast, but it only knows the 14 inputs it's given, and it's weakest in the last few minutes.</p></div>
+  </div>
+  <div class="btns" id="duelLg" style="margin-top:12px"><button class="btn on" data-lg="cfb">College</button><button class="btn" data-lg="nfl">NFL</button></div>
+  <div id="duelOut"><p class="sub">Loading the head-to-head…</p></div>
+  <h3>Graded live this season</h3><div id="duelLive"><p class="sub">Loading…</p></div>
+  <h3>What runs live because of this</h3>
+  <ul class="why">
+    <li><b>Both systems run in every game.</b> The ML number is on every game page next to the Monte Carlo line, and every Monte Carlo moneyline bet is tagged with whether the ML model agrees.</li>
+    <li><b>The ML system makes its own paper bets</b>, the same rules judged on the ML model, with its own record that never mixes into the Monte Carlo record. That's the live head-to-head.</li>
+    <li><b>The Monte Carlo stays in charge of the tested bets.</b> In the replay, steady picks chosen by the ML model lost money and a three-way fair price turned +15% into −4%, so neither replaced the Monte Carlo there.</li>
+    <li><b>The autopilot can follow either system</b>, or require ML agreement, if you choose to; both are off by default.</li>
+  </ul>
+  <div class="x"><span class="xtag">In depth</span><div id="duelDeep"></div></div>
+  </section>`;
+}
+let DUEL=null, DUEL_LG='cfb';
+async function wireDuel(){
+  try{ const [cp,lc,ln]=await Promise.all([fetch('/api/ml/compare').then(r=>r.json()),fetch('/api/ml/live?league=cfb').then(r=>r.json()),fetch('/api/ml/live?league=nfl').then(r=>r.json())]); DUEL={cp,live:{cfb:lc,nfl:ln}}; }
+  catch(e){ $('duelOut').innerHTML='<p class="sub">Unavailable right now.</p>'; return; }
+  document.querySelectorAll('#duelLg [data-lg]').forEach(b=>b.onclick=()=>{ DUEL_LG=b.dataset.lg; document.querySelectorAll('#duelLg [data-lg]').forEach(x=>x.classList.toggle('on',x===b)); drawDuel(); });
+  drawDuel();
+}
+function drawDuel(){
+  const lg=DUEL_LG, T=DUEL.cp[lg], E=DUEL.cp.eval&&DUEL.cp.eval[lg], L=DUEL.live[lg]; if(!T){ $('duelOut').innerHTML='<p class="sub">No results yet.</p>'; return; }
+  const mkt=lg==='nfl'?'Vegas':'ESPN', M=k=>T.models.find(x=>x.k===k)||{};
+  const col={mc:'--ta',ml:'--tb'}, order=['mc','ml','trees','lr','mkt','mcml','mcmkt','all3','stack'];
+  const rows=order.map(k=>M(k)).filter(x=>x.k).sort((a,b)=>a.ll-b.ll), best=rows[0].ll;
+  const bars=hbars(rows.map(x=>({label:esc(x.name),v:+x.ll.toFixed(4),c:col[x.k]||'--base',tip:`log loss ${x.ll}, Brier ${x.brier}`})),{f:v=>v.toFixed(4)});
+  // calibration: Monte Carlo and ML against the diagonal
+  const W=460,H=260,Lm=44,B=34,Tp=12,R=12, X=v=>Lm+v*(W-Lm-R), Y=v=>Tp+(1-v)*(H-Tp-B);
+  let cal=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Calibration"><line x1="${X(0)}" y1="${Y(0)}" x2="${X(1)}" y2="${Y(1)}" class="ln2"/>`;
+  for(const v of [0,.25,.5,.75,1]) cal+=`<line class="ax" x1="${Lm}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${Lm-6}" y="${Y(v)+4}" text-anchor="end">${pct(v)}</text><text x="${X(v)}" y="${H-B+16}" text-anchor="middle">${pct(v)}</text>`;
+  cal+=`<text x="${(Lm+W-R)/2}" y="${H-2}" text-anchor="middle">Model said (home team)</text>`;
+  for(const c of T.calib.filter(c=>c.k!=='mkt')){ const pts=c.bins.filter(b=>b.n>40);
+    cal+=`<path d="${pts.map((b,i)=>(i?'L':'M')+X(b.said)+' '+Y(b.won)).join('')}" fill="none" stroke="var(${col[c.k]})" stroke-width="2.5"/>`+pts.map(b=>`<circle cx="${X(b.said)}" cy="${Y(b.won)}" r="4.5" fill="var(${col[c.k]})" stroke="var(--card)" stroke-width="1.5" data-tip="${c.k==='mc'?'Monte Carlo':'ML'}: said ${pct(b.said)}, home won ${pct(b.won)} (${b.n} plays)"/>`).join(''); }
+  cal+='</svg>';
+  const ph=`<div class="scroll"><table><thead><tr><th>When</th><th class="r">Plays</th><th class="r">Monte Carlo</th><th class="r">ML</th><th class="r">${mkt}</th><th class="r">MC + ML</th></tr></thead><tbody>${T.phase.map(p=>{ const b=Math.min(p.mc,p.ml,p.mkt,p.mcml), c=v=>`<td class="r" style="${v===b?'font-weight:800':''}">${v.toFixed(3)}</td>`; return `<tr><td>${esc(p.name)}</td><td class="r">${p.n.toLocaleString()}</td>${c(p.mc)}${c(p.ml)}${c(p.mkt)}${c(p.mcml)}</tr>`; }).join('')}</tbody></table></div>`;
+  const dis=`<div class="scroll"><table><thead><tr><th>They disagree by</th><th class="r">Share of plays</th><th class="r">Monte Carlo</th><th class="r">ML</th><th class="r">${mkt}</th><th class="r">ML closer</th></tr></thead><tbody>${T.disagree.filter(d=>d.n).map(d=>`<tr><td>${Math.round(d.t*100)}+ points</td><td class="r">${pct(d.share,1)}</td><td class="r">${d.mc.toFixed(3)}</td><td class="r">${d.ml.toFixed(3)}</td><td class="r">${d.mkt.toFixed(3)}</td><td class="r">${pct(d.mlCloser)}</td></tr>`).join('')}</tbody></table></div>`;
+  const bets=T.bets?`<h4 style="margin-top:14px">Would it have made better bets? (NFL replay, ${mkt} as the price, held to the final)</h4><div class="scroll"><table><thead><tr><th>Rule</th><th class="r">Bets</th><th class="r">Hit</th><th class="r">Return</th><th class="r">Plausible range</th></tr></thead><tbody>${T.bets.map(b=>`<tr><td>${esc(b.name)}</td><td class="r">${b.n}</td><td class="r">${b.hit==null?'–':pct(b.hit)}</td><td class="r" style="color:var(${b.roi>0?'--good':b.roi<0?'--bad':'--muted'})">${b.roi==null?'–':(b.roi>0?'+':'')+(b.roi*100).toFixed(1)+'%'}</td><td class="r">${b.lo==null?'–':`${(b.lo*100).toFixed(0)}% to ${(b.hi*100).toFixed(0)}%`}</td></tr>`).join('')}</tbody></table></div>
+    <p class="sub">With prices in sync with the game, the main-tier rules almost never fire on moneylines for either system: the edge has to be ~10 points while the sanity check caps the model's gap at 10. The steady rule is where it matters, and there the Monte Carlo is clearly better.</p>`:`<p class="sub">No bet replay for college: ESPN's win probability isn't a price you could have traded at.</p>`;
+  $('duelOut').innerHTML=`<div class="kpis"><div><b style="color:var(--ta)">${M('mc').ll}</b><span>Monte Carlo log loss</span></div><div><b style="color:var(--tb)">${M('ml').ll}</b><span>ML log loss</span></div><div><b>${M('mkt').ll}</b><span>${mkt}</span></div><div><b>${pct(1-T.mlBeatsMc)}</b><span>of game resamples where the Monte Carlo beats ML</span></div></div>
+    <p class="sub">${T.plays.toLocaleString()} plays from ${T.games} ${lg==='nfl'?'2025-26 NFL':'2025 college'} games that neither system trained on. Lower log loss is better; the gold bar is the Monte Carlo, the blue one the ML model.</p>
+    ${bars}
+    <p class="sub">${lg==='nfl'?'In the NFL the Monte Carlo is a little better than ML and about even with Vegas; averaging the two models doesn\'t beat Vegas reliably.':'In college the Monte Carlo edges ML, and averaging the two beats ESPN\'s own win probability in '+pct(T.blendBeatsMkt)+' of resamples.'} The two are different enough that their average is better than either alone.</p>
+    <div class="cols"><div><h4>Are their chances honest?</h4><div class="key"><span><i style="background:var(--ta)"></i>Monte Carlo</span><span><i style="background:var(--tb)"></i>ML model</span><span>dashed: perfect</span></div>${cal}</div>
+      <div><h4>By part of the game</h4><p class="sub">Log loss, lower is better, bold = best. The ML model's weak spot is the end of the game, where the clock and timeouts decide everything and the simulation plays them out.</p>${ph}</div></div>
+    <h4>When they disagree</h4><p class="sub">How often each is closer to the truth when the two are far apart.</p>${dis}
+    ${bets}`;
+  // live grading
+  const o=L&&L.overall||{};
+  $('duelLive').innerHTML=o.n?`<div class="kpis"><div><b>${L.games}</b><span>${lg==='nfl'?'NFL':'college'} games graded</span></div><div><b style="color:var(--ta)">${o.mc}</b><span>Monte Carlo</span></div><div><b style="color:var(--tb)">${o.ml}</b><span>ML</span></div><div><b>${o.avg}</b><span>averaged</span></div>${o.mkt!=null?`<div><b>${o.mkt}</b><span>market (${o.nMkt.toLocaleString()} reads)</span></div>`:''}</div>
+    <p class="sub">${o.n.toLocaleString()} live reads scored after the final. The ML model did better in ${L.mlWins} of ${L.games} games.</p>
+    <div class="scroll"><table><thead><tr><th>Game</th><th>Final</th><th class="r">Reads</th><th class="r">Monte Carlo</th><th class="r">ML</th></tr></thead><tbody>${L.recent.slice(0,12).map(g=>`<tr><td>${esc(g.matchup||g.event)}</td><td>${esc(g.final||'')}</td><td class="r">${g.plays}</td><td class="r" style="${g.mc<=g.ml?'font-weight:800':''}">${g.mc.toFixed(3)}</td><td class="r" style="${g.ml<g.mc?'font-weight:800':''}">${g.ml.toFixed(3)}</td></tr>`).join('')}</tbody></table></div>`
+    :`<p class="sub">Starts with the next finished ${lg==='nfl'?'NFL':'college'} game: every live read from both systems is saved, then scored against who won.</p>`;
+  // in depth
+  if(E){ const imp=E.importance.slice(0,10);
+    $('duelDeep').innerHTML=`<p><b>Training.</b> ${lg==='nfl'?'NFL: nflverse play-by-play, trained on 2006–2023, tuned on 2024, tested on 2025–26.':'College: every ESPN play 2014–2025 (sportsdataverse), trained on 2014–2023, tuned on 2024, tested on 2025.'} One row per scrimmage play from the home team's side: 14 inputs and whether the home team won. LightGBM (gradient-boosted trees) with monotone constraints (more points ahead, or a bigger pregame favorite, can only help), and a logistic regression on the same inputs plus three interactions; the live ML number is their average. The live model is refit on every season through the latest (${E.model.seasons}, ${E.model.plays.toLocaleString()} plays, ${E.model.games.toLocaleString()} games, ${E.model.trees} trees).</p>
+      <p><b>Choosing the tree settings on the validation season only.</b> ${E.grid.map(g=>`${g.g.num_leaves} leaves × ${g.trees} trees: ${g.valid_ll}`).join(' · ')}. A million plays are only a few thousand independent results (every play in a game shares one outcome), so the small, heavily regularized trees generalized best. Even so, on the test seasons the logistic regression beat the trees (${E.overall.lr.ll} vs ${E.overall.ml.ll}); averaging them is safer than picking one.</p>
+      <h4>What the trees lean on</h4>${hbars(imp.map(i=>({label:esc(FN_WP[i.f]||i.f),v:+(i.gain*100).toFixed(1),tip:`${(i.gain*100).toFixed(1)}% of the trees' total split gain`})),{f:v=>v.toFixed(1)+'%'})}
+      <p><b>Same answer in the browser, the server and Python.</b> The model is trained in Python and runs in JavaScript; on 2,000 sample plays the two agree to within 0.000004. (Rounding the split thresholds broke this by up to 0.13 at first: LightGBM splits at ±1e-35 around zero.)</p>
+      <p><b>Tried and rejected:</b> a learned "stacking" model that weighs Monte Carlo, ML and the market by game time. Cross-validated by game it was worse than a plain average in both leagues (it fits noise across a few hundred games). And a bug worth knowing about: the first bootstrap used a random-number generator that cycled through only 280 values, so its "x% of resamples" numbers were meaningless; it's replaced (the steady-pick range moved from +3% to +21% to +4% to +21%).</p>`;
+  }
 }
 
 // 6. Simulations

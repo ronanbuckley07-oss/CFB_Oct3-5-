@@ -1,6 +1,7 @@
 // Render web service: serves /public and runs the ESPN proxy at /api/espn. No dependencies, Node 20+.
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
@@ -19,6 +20,10 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
 const LIVE = createLive({ api: API, pages: { cfb: path.join(ROOT, 'game.html'), nfl: path.join(ROOT, 'nfl', 'game.html') }, dataDir: DATA_DIR });
 // Private one-tap trading on Polymarket US (off unless TRADE_PASSWORD is set; see api/trade.mjs)
+// The offline head-to-head (tools/ml/compare.mjs + train_wp.py), read once
+let mlCompareJson = null;
+const MLCOMPARE = () => mlCompareJson ||= (() => { const rd = f => { try { return JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'api', f), 'utf8')); } catch { return null; } };
+  return JSON.stringify({ cfb: rd('mlcompare_cfb.json'), nfl: rd('mlcompare_nfl.json'), eval: rd('mleval.json') }); })();
 // AP poll projection and season simulator (see api/ap.mjs)
 const AP = createAP({ dataDir: DATA_DIR });
 const TRADE = createTrading({ api: API, dir: DATA_DIR, leading: l => LIVE.leadingFor(l), picks: LIVE.picks });
@@ -86,6 +91,9 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/picks/steady') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.steadyNow(u.searchParams.get('league') || 'all'))); return; }
     if (u.pathname === '/api/picks') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(TRADE.isOwner(req) ? LIVE.picks.report(u.searchParams.get('league') || 'all') : publicReport(LIVE.picks.report(u.searchParams.get('league') || 'all')))); return; }
     if (u.pathname.startsWith('/api/ap/')) return await AP.handle(req, res, u);
+    // Monte Carlo vs machine learning: live grading of both win-probability systems, and the offline head-to-head
+    if (u.pathname === '/api/ml/live') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.grader.summary(u.searchParams.get('league') || 'all'))); return; }
+    if (u.pathname === '/api/ml/compare') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' }); res.end(MLCOMPARE()); return; }
     if (u.pathname.startsWith('/api/trade')) return await TRADE.handle(req, res, u);
     if (u.pathname === '/api/live') return LIVE.handle(req, res, u, TRADE.isOwner(req));
     if (u.pathname === '/api/live/status') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.status())); return; }

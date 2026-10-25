@@ -7,6 +7,15 @@
 import { readFileSync } from 'node:fs';
 import { createPool } from './simpool.mjs';
 import { createPicks, inWindow, WINDOW } from './picks.mjs';
+import { loadWp, wpAll, fromEngine } from './wpml.mjs';
+import { createGrader } from './mlgrade.mjs';
+
+// The ML win-probability model's read of a state, from the ND team's side: { nd (trees + logistic averaged), trees, lr }.
+// No simulation: a few hundred tree lookups and a dot product (api/wpml.mjs).
+function mlFor(g, S) {
+  const m = loadWp(g.league); if (!m || !g.homeSlot || !(S.qtr >= 1)) return null;
+  try { const p = wpAll(m, fromEngine(S, g.homeSlot, S.edge)), f = x => +(g.homeSlot === 'ND' ? x : 1 - x).toFixed(4); return { nd: f(p.ml), trees: f(p.trees), lr: f(p.lr) }; } catch { return null; }
+}
 
 const POLL_MS = 1000, IDLE_STOP_MS = 60000, FORGET_MS = 20 * 60000;
 const N_QUICK = 3000, N_FULL = 25000, N_OPT = 8000, N_BACKFILL = 1500, N_SCAN = 3000;
@@ -25,6 +34,9 @@ function readPage(file) {
 
 export function createLive({ api, pages, dataDir }) {
   const picks = createPicks({ api, dir: dataDir });
+  const grader = createGrader({ api, dataDir });
+  // every live read is noted for grading at the final: Monte Carlo, ML, and the market's moneyline when there is one
+  const noteRead = (g, S, A) => { try { const an = g.mk ? picks.anchorAgg(g, A, g.mk) : null; grader.note(g, S, { mc: A.win / A.n, ml: A.ml, mkt: an && an.market != null ? an.market : null }); } catch {} };
   // A missing or broken page disables live mode for that league instead of taking the whole site down
   const load = f => { try { return readPage(f); } catch (e) { console.error(`live: couldn't read ${f}: ${e.message}`); return null; } };
   const cfb = load(pages.cfb), nfl = load(pages.nfl);
@@ -54,7 +66,8 @@ export function createLive({ api, pages, dataDir }) {
   // betting window it gets a full 25,000-sim run and the one automatic bet. Lowest priority in the pool.
   const scans = new Map(), scanning = {}, leading = { cfb: [], nfl: [] }, leadingLeans = { cfb: [], nfl: [] };
   const slimBet = league => e => ({ league, event: e.event, matchup: e.matchup, sel: e.sel, type: e.type, venue: e.venue, url: e.url, cost: +e.cost.toFixed(3),
-    model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier || null, clock: e.clock, score: e.score, at: e.at, book: e.book || null, how: e.how || null });
+    model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), tier: e.tier || null, clock: e.clock, score: e.score, at: e.at, book: e.book || null, how: e.how || null,
+    ml: e.ml != null ? +e.ml.toFixed(3) : null, mlAgrees: e.mlAgrees ?? null });
   const watched = (league, event) => [...games.values()].find(g => g.league === league && g.event === String(event) && g.viewers.size && g.last.edges);
   class ScanGame {
     constructor(league, card) { Object.assign(this, { league, event: String(card.id), card, pk: null, lastScan: 0, mkAt: 0, noMk: false, edges: [], cands: [], leans: [], leanCands: [] }); }
@@ -110,6 +123,7 @@ export function createLive({ api, pages, dataDir }) {
       this.pk = pk; this.lastScan = now;
       const A = await pool.run(this.league, this.rosters, this.tk, prepS0(S, S.edge, S.total, LGS[this.league].cal), autoDue ? N_FULL : N_SCAN, { prio: autoDue ? 2 : 0 });
       if (!A) return; this.lastSims = A.n;
+      { const mlx = mlFor(this, S); if (mlx) { A.ml = mlx.nd; this.ml = mlx; } noteRead(this, S, A); }
       this.cands = picks.edges(this, A, this.mk); this.edgesPk = pk; this.verAt = Date.now();
       const found = await picks.verifyList(this, this.cands, picks.MAX_CHECK); this.lastA = A;
       picks.logFound(this, A, S, found); // every bet found in every game is logged, watched or not
@@ -117,7 +131,8 @@ export function createLive({ api, pages, dataDir }) {
       this.leanCands = picks.leanCands(this, A, this.mk);
       this.leans = this.tag((await picks.considerLeans(this, A, this.mk, S, this.leanCands)).slice(0, 3), S, Date.now(), A.n);
       await picks.autoPick(this, A, this.mk, S);
-      if (playKey(o) === this.pkSeen) await picks.steadyPick(this, A, this.mk, S, Date.now() - this.pkAt);
+      picks.mlConsider(this, A, this.mk, S).catch(() => {}); // the ML system's own bets
+      if (playKey(o) === this.pkSeen) { await picks.steadyPick(this, A, this.mk, S, Date.now() - this.pkAt); picks.mlSteadyPick(this, A, this.mk, S, Date.now() - this.pkAt).catch(() => {}); }
     }
     tag(list, S, at, sims) { return list.map(e => ({ ...e, at, clock: clockOf(S), score: `${this.abbr.ND} ${S.nd}, ${this.abbr.UNC} ${S.unc}`, sims: sims || this.lastSims || null })); }
     finish() { if (!picks.autoDone(this.league, this.event)) picks.autoPick(this, null, null, { qtr: 5, secs: 0 }); }
@@ -248,6 +263,7 @@ export function createLive({ api, pages, dataDir }) {
         this.recheck(pkNow);
         if (o.state === 'in' && this.mk && R && R.final && R.pk === pkNow && !picks.steadyDone(this.league, this.event))
           picks.steadyPick(this, R.A, this.mk, this.S, Date.now() - this.pkAt).catch(() => {});
+        if (o.state === 'in' && this.mk && R && R.final && R.pk === pkNow) picks.mlSteadyPick(this, R.A, this.mk, this.S, Date.now() - this.pkAt).catch(() => {});
         if (o.state === 'post') { clearInterval(this.timer); this.timer = setInterval(() => this.poll(), 30000); }
       } catch (e) {
         if (++this.fails % 5 === 0) this.broadcast('warn', { error: String(e.message || e) });
@@ -281,15 +297,17 @@ export function createLive({ api, pages, dataDir }) {
       const fields = { edge: S.edge, esd: S.esd, total: S.total, half2Recv: S.half2Recv };
       try {
         const a1 = await sim(N_QUICK, 3); if (!a1 || !alive()) return;
-        this.last.result = { key, A: a1, final: false, S: fields }; this.broadcast('result', this.last.result);
+        const mlx = mlFor(this, S); if (mlx) a1.ml = mlx.nd;
+        this.last.result = { key, A: a1, final: false, S: fields, ml: mlx }; this.broadcast('result', this.last.result);
         const a2 = await sim(N_FULL - N_QUICK, 3); if (!a2 || !alive()) return;
-        const A = pool.mergeAgg(a1, a2);
-        this.last.result = { key, A, final: true, S: fields, pk: playKey(S) }; this.last.fourth = null; this.broadcast('result', this.last.result);
-        const pt = { k: JSON.stringify([S.poss, S.pos, S.down, S.dist, S.qtr, S.secs, S.nd, S.unc, S.edge]), wp: A.win / A.n, t: elapsed(S) };
+        const A = pool.mergeAgg(a1, a2); if (mlx) A.ml = mlx.nd; noteRead(this, S, A);
+        this.last.result = { key, A, final: true, S: fields, pk: playKey(S), ml: mlx }; this.last.fourth = null; this.broadcast('result', this.last.result);
+        const pt = { k: JSON.stringify([S.poss, S.pos, S.down, S.dist, S.qtr, S.secs, S.nd, S.unc, S.edge]), wp: A.win / A.n, ml: mlx ? mlx.nd : null, t: elapsed(S) };
         const at = this.hist.findIndex(h => h.k === pt.k); if (at >= 0) this.hist[at] = pt; else this.hist.push(pt);
         this.broadcast('hist', { pts: [pt] });
         if (this.mk && this.state !== 'post') {
           const ed = await picks.consider(this, A, this.mk, S); await picks.autoPick(this, A, this.mk, S); this.lastAgg = A; this.lastS = S;
+          picks.mlConsider(this, A, this.mk, S).catch(() => {});
           this.cands = picks.edges(this, A, this.mk); this.leanCands = picks.leanCands(this, A, this.mk);
           const leans = await picks.considerLeans(this, A, this.mk, S, this.leanCands);
           const logged = picks.forEvent(this.league, this.event);
@@ -320,7 +338,8 @@ export function createLive({ api, pages, dataDir }) {
           const st = Object.assign({}, x.st, { esd: this.S.esd });
           const A = await pool.run(this.league, this.rosters, this.tk, prepS0(st, this.S.edge, this.S.total, LGS[this.league].cal), N_BACKFILL, { prio: 1, alive: () => this.viewers.size > 0 });
           if (!A) break;
-          const pt = { k: JSON.stringify([st.poss, st.pos, st.down, st.dist, st.qtr, st.secs, st.nd, st.unc, this.S.edge]), wp: A.win / A.n, t: x.t, bf: true };
+          const mlb = mlFor(this, { ...this.S, ...st, edge: this.S.edge, total: this.S.total });
+          const pt = { k: JSON.stringify([st.poss, st.pos, st.down, st.dist, st.qtr, st.secs, st.nd, st.unc, this.S.edge]), wp: A.win / A.n, ml: mlb ? mlb.nd : null, t: x.t, bf: true };
           this.hist.push(pt); batch.push(pt);
           if (batch.length >= 6) { this.broadcast('hist', { pts: batch.splice(0) }); }
         }
@@ -329,7 +348,7 @@ export function createLive({ api, pages, dataDir }) {
       } catch {} finally { this.backfilling = false; }
     }
   }
-  return { handle, status, leagues: Object.keys(datas), picks, leadingFor, scanStats: () => ({ scanning: scans.size }) };
+  return { handle, status, leagues: Object.keys(datas), picks, grader, leadingFor, scanStats: () => ({ scanning: scans.size }) };
 }
 
 // A new play changes the down, spot, possession, score or ESPN's play text. The clock alone only counts once 30 seconds

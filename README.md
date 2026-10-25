@@ -108,7 +108,7 @@ moneyline, Q2 through Q4, a team priced 65-85¢ (fees in) that already leads by 
 you pay. Then **cash out at 90¢**: once that team's price reaches 90¢ the pick is sold at the bid (fees out) and listed
 under "Cash out now"; the steady record counts the cash-out.
 
-Replay (`tools/trading_holdout/strat.mjs`): 64 bets at 76¢ on average, +12.9% (90% range +3% to +21%), +13% in 2025
+Replay (`tools/trading_holdout/strat.mjs`): 64 bets at 76¢ on average, +12.9% (90% range +4% to +21%), +13% in 2025
 and +12% in 2026, 61% reached 90¢, and a third less swing per bet than holding every bet to the final. Variations that
 did worse: a second or third bet per game, stop-losses, selling at the two-minute warning, a 7-point lead minimum,
 only betting right after scores. The same spots without the model's agreement lost 5%. The band and cash-out were
@@ -428,3 +428,43 @@ A "Schedule strength" tab on `/ap`, computed by `sosTable` in `api/apmodel.mjs`.
 - **Game winners (log loss on 8,583 FBS games, 2014–2025):** coin flip 0.693, home team 0.680, Elo 0.554, **ridge ratings 0.531**, ratings and Elo averaged 0.537. The ratings stay alone.
 - **Model lab (`/ml#lab`):** the browser refits the ridge half from per-season sufficient statistics with any input groups switched off, any λ, and any history window, then backtests 2014–2026. With everything on and λ = 2 it reproduces 2.86 exactly.
 - **`/ml` also gained:** a strength-of-record step-by-step (each game's benchmark win chance, the exact distribution of benchmark records, and the tail that is strength of record), and the playground now shows the ridge score, the trees' score and their average.
+
+## Second system: machine-learning win probability (Monte Carlo vs ML)
+
+A win-probability model that never simulates, runs next to the Monte Carlo in every game, makes its own paper bets, and is graded live.
+
+- **Data:** `tools/ml/states.py` turns play-by-play into home-perspective game states. College uses every ESPN play 2014–2025 from the sportsdataverse `espn_cfb_pbp` releases (1.8M plays, 10,294 games). NFL uses nflverse 2006–2026 (747k plays). Inputs: score difference, time left, possession, yards to the end zone, down, distance, timeouts, pregame spread and total, who gets the 2nd-half kickoff, plus expected final margin, margin vs. time left, and field position.
+- **Model:** `tools/ml/train_wp.py` fits LightGBM trees with monotone constraints and a logistic regression; the live ML number is their average.
+  - Train on seasons before the validation season (2024), pick tree settings on 2024 only, and test on 2025 (college) or 2025–26 (NFL).
+  - The live model is then refit on everything and shipped as `api/wpml_<league>.json`, run by `api/wpml.mjs`.
+  - Python and JavaScript predictions agree to within 0.000004. Split thresholds must not be rounded: LightGBM splits at ±1e-35 around zero.
+- **Head-to-head on unseen plays** (`tools/ml/mc_run.mjs` runs the site's own Monte Carlo engine; `tools/ml/compare.mjs` scores everything). Log loss, lower is better:
+
+  | | College 2025 (11,337 plays, 450 games) | NFL 2025–26 (24,388 plays, 342 games) |
+  |---|---|---|
+  | Monte Carlo | 0.3189 | 0.4605 |
+  | ML | 0.3197 | 0.4621 |
+  | Market | ESPN 0.3194 | Vegas 0.4598 |
+  | Monte Carlo + ML | 0.3182 | 0.4599 |
+  | All three averaged | 0.3181 | 0.4594 |
+
+  - **ML vs. Monte Carlo:** ML beats the Monte Carlo in 32% (college) and 36% (NFL) of game resamples. The Monte Carlo's edge is the last 5 minutes.
+  - **Averaging the two:** beats ESPN in 81% of college resamples.
+  - **Stacking:** a learned blend of the three was worse than plain averages in both leagues.
+- **NFL bet replay (steady rule, held to the final):**
+
+  | Rule | Bets | Return | Range |
+  |---|---|---|---|
+  | Monte Carlo | 64 | +14.8% | +5% to +23% |
+  | ML | 86 | −7.4% | |
+  | Three-way fair price | 83 | −3.8% | |
+  | Both must agree | 24 | +15.5% | −1% to +29% |
+- **What runs live** (`api/live.mjs`, `api/picks.mjs`):
+  - every simulation carries the ML probability (`A.ml`), and the game page charts it as a dashed purple line next to the Monte Carlo;
+  - every Monte Carlo moneyline is tagged `ml` / `mlAgrees`, with records split by agreement (`report().agreement`, owner-only);
+  - the ML system logs its own bets (`mlSys: 'edge' | 'steady'`, same bars, gap check and order-book checks, 90¢ cash-outs) with its own record (`report().mlSystem`), kept out of every other record and out of the learning;
+  - the Monte Carlo stays in charge of the tested rules;
+  - the autopilot can follow the Monte Carlo system, the ML system or both, and can require ML agreement. Defaults: Monte Carlo, no requirement.
+- **Live grading** (`api/mlgrade.mjs`, `/api/ml/live`, public): every live read from both systems (and the market's moneyline when there is one) is saved per play and scored after the final. `/api/ml/compare` serves the offline head-to-head. Both show on the home page ("Model duel") and on `/ml#duel`.
+- **Fixed along the way:** the bootstrap random-number generator (`seed * 1103515245` overflowed double precision and could cycle through about 280 values). It's now mulberry32, in `tools/ml/compare.mjs` and `tools/trading_holdout/analyze.mjs`. The steady-pick range moved from +3%–+21% to +4%–+21%.
+- **Tests:** `node tools/ml/test_wpml.mjs` (model sanity, orientation, grader) and `node tools/ml/test_mlpicks.mjs` (ML bets, gap check, steady and cash-out, agreement tag, autopilot settings).

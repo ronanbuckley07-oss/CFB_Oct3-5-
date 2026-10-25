@@ -168,6 +168,7 @@ tr.howrow td{border-top:0;padding-top:0}
 
 <section class="rec steady" id="steady" hidden></section>
 <section class="rec" id="rec" hidden></section>
+<section class="rec duel" id="duel" hidden></section>
 <section class="rec lead" id="lead" hidden></section>
 <main id="board">
   <div class="grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
@@ -343,7 +344,7 @@ function betCard(b,o={}){
   else steps.push(`Buy ${yn}${h.limit!=null?` at <b class="bc-big">${bcC(h.limit)}</b> or less`:b.cost!=null?` at about <b class="bc-big">${bcC(b.cost)}</b>`:''}`);
   const qty=b.book&&b.book.qty, stake=b.book&&b.book.stake;
   const pays=h.pays&&!sell?`<div class="bc-pays">Wins if <b>${hEsc(h.pays)}</b>.${qty&&stake&&!sell?` <span class="bc-money">$${stake} buys ${qty} shares → <b>$${qty}</b> back if it hits.</span>`:''}</div>`:'';
-  const nums=sell?'':`<div class="bc-nums">${b.model!=null?`<span>Model ${bcP(b.model)}</span>`:''}${b.fair!=null?`<span>Fair ${bcP(b.fair)}</span>`:''}${b.cost!=null?`<span>Cost ${bcC(b.cost)} w/ fee</span>`:''}${b.fairEdge!=null?`<span class="bc-edge">Edge +${(b.fairEdge*100).toFixed(1)}</span>`:''}${!stale&&o.at?`<span class="age" data-at="${o.at}"></span>`:''}</div>`;
+  const nums=sell?'':`<div class="bc-nums">${b.model!=null?`<span>Model ${bcP(b.model)}</span>`:''}${b.fair!=null?`<span>Fair ${bcP(b.fair)}</span>`:''}${b.cost!=null?`<span>Cost ${bcC(b.cost)} w/ fee</span>`:''}${b.fairEdge!=null?`<span class="bc-edge">Edge +${(b.fairEdge*100).toFixed(1)}</span>`:''}${b.ml!=null?`<span title="The ML model's chance (no simulation). Agrees = its own fair price is at least the cost.">ML ${bcP(b.ml)}${b.mlAgrees===true?' agrees':b.mlAgrees===false?' disagrees':''}</span>`:''}${!stale&&o.at?`<span class="age" data-at="${o.at}"></span>`:''}</div>`;
   const game=o.game?`<div class="bc-game">${o.game}</div>`:'';
   return `<div class="bcard${stale?' stale':''}${o.lean?' lean':''}${sell?' sell':''}">
     <div class="bc-top"><div class="bc-sel">${hEsc(b.sel)}</div><div>${bcTier(b.tier,o.lean)}${o.extraTag||''}</div></div>${game}
@@ -390,6 +391,16 @@ async function loadPicks(){
           <table>${head}<tbody>${past.map(row).join('')}</tbody></table></details>
         ${phases.length?`<details><summary>When our bets hit</summary><table><thead><tr><th>When the bet was taken</th><th>Record</th><th>Win rate</th><th>Model said</th><th>Return</th></tr></thead><tbody>${phases.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v.w}–${v.l}</td><td>${pc(v.pct)}</td><td>${pc(v.expected)}</td><td>${v.roi==null?'–':(v.roi>0?'+':'')+(v.roi*100).toFixed(1)+'%'}</td></tr>`).join('')}</tbody></table>
           <p class="sub" style="margin-top:8px">The window comes from replaying 2023 to 2025 NFL games against Vegas win probability: between Q3 7:30 and Q4 8:00 the model's disagreements hit 57.5% of the time when it said 58.2%, a +9% return over 269 bets. This table shows whether our own bets agree.</p></details>`:''}`;
+      // Owner only: the ML system's own bets next to the Monte Carlo system's, and Monte Carlo bets split by ML agreement
+      if(d.mlSystem){ const M=d.mlSystem, Ag=d.agreement||{}, ln=(lab,r,note)=>{ const n=(r&&(r.w+r.l))||0; return `<tr><td>${lab}</td><td>${n?`${r.w}–${r.l}`:'–'}</td><td class="${r&&r.roi>0?'won':r&&r.roi<0?'lost':''}">${r&&r.roi!=null?(r.roi>0?'+':'')+(r.roi*100).toFixed(1)+'%':'–'}</td><td class="sub">${note||''}</td></tr>`; };
+        el.insertAdjacentHTML('beforeend',`<details ${window.__duelOpen?'open':''} id="duelBox"><summary>Monte Carlo system vs ML system</summary>
+          <table><thead><tr><th>Bets</th><th>Record</th><th>Return</th><th></th></tr></thead><tbody>
+            ${ln('Monte Carlo: main bets',d.record)}${ln('ML system: main bets',M.edge.paper,M.edge.open?`${M.edge.open} open`:'')}
+            ${ln('Monte Carlo: steady',d.steady&&d.steady.paper)}${ln('ML system: steady',M.steady.paper,M.steady.open?`${M.steady.open} open`:'')}
+            ${ln('Monte Carlo bets the ML model agreed with',Ag.main&&Ag.main.agrees,'moneylines only')}${ln('…and disagreed with',Ag.main&&Ag.main.disagrees)}
+            ${ln('Steady picks the ML model agreed with',Ag.steady&&Ag.steady.agrees)}${ln('…and disagreed with',Ag.steady&&Ag.steady.disagrees)}
+          </tbody></table><p class="sub" style="margin-top:6px">The ML system bets on its own (moneylines, same bars and checks, judged on the ML model) and is kept out of every other record. Replaying 2025-26 NFL games, ML-chosen steady picks lost 7% while Monte Carlo ones made 15%, so the Monte Carlo system stays in charge; these rows show whether that holds live. <a href="/ml#duel">Details ›</a></p></details>`);
+        const db=$('duelBox'); if(db) db.ontoggle=()=>{ window.__duelOpen=db.open; }; }
       // What the model learned: voided bets and why, kinds of bets now blocked, and the record by feature
       try{ const au=await fetch('/api/picks/audit',{cache:'no-store'}).then(r=>r.ok?r.json():null);
         if(au){ const L={gap:'Model vs market gap',phase:'When in the game',type:'Bet type',price:'Price',venue:'Exchange',kind:'List'};
@@ -451,15 +462,30 @@ async function renderSteady(d, RP, lg){
     <p class="warn">Prices are what $10 fills at on the live Polymarket US or Kalshi order book, fee included. Red OLD means the check is over 30 seconds old: don't buy at that price without checking. Why it's not foolproof: the rule and the 90¢ cash-out were picked from hundreds of variations tried on past games, so some of its replay record is luck, and 2026 has only a few weeks of games in it. It only works when the price and the game are in sync, which is why a pick appears only once a play has settled. Prices move fast; if yours is worse than the one shown, the edge is gone. Only bet money you can afford to lose.</p>`;
   el.hidden=false; tickAges();
 }
+// ===== Model duel: the Monte Carlo and the ML model, graded live on every finished game (public: predictions, not bets) =====
+async function loadDuel(){
+  const el=$('duel'), lg=NFL?'nfl':'cfb';
+  try{ const [lv,cp]=await Promise.all([fetch(`/api/ml/live?league=${lg}`).then(r=>r.json()),fetch('/api/ml/compare').then(r=>r.json())]);
+    const T=(cp&&cp[lg])||null, m=k=>T&&T.models.find(x=>x.k===k), o=lv.overall||{};
+    const live=o.n?`<div class="recnums"><div><b>${lv.games}</b><span>games graded this season</span></div><div><b>${o.mc}</b><span>Monte Carlo log loss</span></div><div><b>${o.ml}</b><span>ML model log loss</span></div><div><b>${o.avg}</b><span>the two averaged</span></div></div>
+      <p class="sub">${o.ml<o.mc?'The ML model is ahead so far.':'The Monte Carlo is ahead so far.'} Lower is better; it scores every live read against who won. The ML model was better in ${lv.mlWins} of ${lv.games} games.</p>`
+      :`<p class="sub">Live grading starts with the next finished game: every live read from both systems is scored against who won.</p>`;
+    el.innerHTML=`<h2>Model duel <small>Two ways to say who wins: simulate the rest of the game 25,000 times, or ask a machine-learning model trained on ${lg==='nfl'?'every NFL play since 2006':'every college play since 2014'}.</small></h2>
+      ${live}
+      ${T?`<p class="sub">Tested on ${T.plays.toLocaleString()} plays from ${T.games} ${lg==='nfl'?'2025-26':'2025'} games neither had seen (log loss, lower is better): Monte Carlo ${m('mc').ll}, ML ${m('ml').ll}, ${lg==='nfl'?'Vegas':'ESPN'} ${m('mkt').ll}, Monte Carlo and ML averaged ${m('mcml').ll}. <a href="/ml#duel">How they compare ›</a></p>`:''}`;
+    el.hidden=false;
+  }catch(e){ el.hidden=true; }
+}
+loadDuel(); setInterval(()=>{ if(!document.hidden) loadDuel(); },60000);
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },10000); // 10s: steady picks and cash-outs are time-sensitive
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-25.4';
+const BUILD='2026-10-25.5';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-25.4'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-25.5'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>
