@@ -158,6 +158,7 @@ header.top{align-items:center}
 .back{font:600 14px Barlow,sans-serif;color:var(--muted);text-decoration:none}
 .back::before{content:"‹ "}
 .back:hover{color:var(--ink)}
+#insideMl::before{content:none}
 /* Start screen */
 .gate{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px 20px 24px;text-align:center;max-width:760px;margin:24px auto}
 .gate-match{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:16px}
@@ -305,11 +306,16 @@ tr.howrow td{border-top:0;padding-top:0}
 .sched td.res{font-weight:700;white-space:nowrap}.sched td.res.w{color:var(--good)}.sched td.res.l{color:var(--bad)}
 .sched td .src{font-size:11px;color:var(--muted);margin-left:4px;font-weight:600}
 .buildwarn{background:#7a2e2e;color:#fff;padding:10px 14px;border-radius:10px;margin:0 0 12px;font:600 14px Barlow,sans-serif}
+.engsw{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;margin-left:auto}
+.engsw button{border:0;background:transparent;color:var(--ink);padding:6px 12px;font:700 13px Barlow,sans-serif;cursor:pointer}
+.engsw button+button{border-left:1px solid var(--line)}
+.engsw button[aria-pressed="true"]{background:#B05FD3;color:#fff}
+.engsw button[data-eng="mc"][aria-pressed="true"]{background:var(--gold);color:#0C2340}
 </style></head>
 <body><div class="wrap">
 <header class="top">
   <div class="titles">
-    <div class="brandrow"><a class="brand" href="/" aria-label="CFB Live Sim home"><img src="/logo.svg" alt="" width="30" height="30"><span>CFB Live Sim</span></a><a class="back" href="/">All games</a><nav class="lgnav" aria-label="League"><a href="/cfb" id="lgC">College</a><a href="/nfl" id="lgN">NFL</a></nav></div>
+    <div class="brandrow"><a class="brand" href="/" aria-label="CFB Live Sim home"><img src="/logo.svg" alt="" width="30" height="30"><span>CFB Live Sim</span></a><a class="back" href="/">All games</a><nav class="lgnav" aria-label="League"><a href="/cfb" id="lgC">College</a><a href="/nfl" id="lgN">NFL</a></nav><div class="engsw" role="group" aria-label="Which model"><button type="button" data-eng="mc">Monte Carlo</button><button type="button" data-eng="mix">Mixed</button><button type="button" data-eng="ml">ML</button></div><a class="back" id="insideMl" href="/ml/model">Inside the ML</a></div>
     <h1><span id="gameTitle">Loading game</span><span class="tvtag" id="gameTv" hidden></span><small id="meta">Live Monte Carlo built on real play-by-play</small></h1>
   </div>
   <div class="board" aria-live="polite">
@@ -1068,8 +1074,20 @@ async function runSimsInner(){
 let wpPrev=null, wpPrevKey=null; window.addEventListener('resize',()=>{clearTimeout(window._rz);window._rz=setTimeout(()=>{if(lastProj!==undefined)drawField(lastProj);},150);});
 let lastProj=null;
 function tile(label,val,sub,cls){return `<div class="tile ${cls||''}"><span class="tl">${label}</span><span class="tv">${val}</span><span class="ts">${sub||''}</span></div>`;}
+// ===== Engine switch: Monte Carlo (simulate 25,000 games), ML (a model trained on past games, no simulation), or Mixed
+// (the two averaged). Saved per browser and shared with the home page. Changes the headline win probability, the chart's
+// main line and the bets listed; the play-by-play detail below always comes from the simulation.
+let ENGINE='mc'; try{ ENGINE=localStorage.getItem('engine')||'mc'; }catch(e){}
+const ENG_NAME={mc:'Monte Carlo',mix:'Mixed',ml:'ML model'};
+function engWP(A){ const mc=A.win/A.n, ml=A.ml; if(ml==null||ENGINE==='mc') return mc; return ENGINE==='ml'?ml:(mc+ml)/2; }
+let lastRender=null, lastPicksMsg=null;
+function setEngine(e){ ENGINE=e; try{ localStorage.setItem('engine',e); }catch(x){}
+  document.querySelectorAll('[data-eng]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.eng===e)));
+  if(lastRender) render(lastRender[0],lastRender[1]); if(lastPicksMsg) renderPicks(lastPicksMsg); drawChart(); }
+document.querySelectorAll('[data-eng]').forEach(b=>b.addEventListener('click',()=>setEngine(b.dataset.eng)));
+document.querySelectorAll('[data-eng]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.eng===ENGINE)));
 function renderDash(A,final){
-  const N=A.n, P=k=>(k||0)/N, pr=projFrom(A), wp=A.win/N, key=coreKey(S);
+  const N=A.n, P=k=>(k||0)/N, pr=projFrom(A), wp=engWP(A), key=coreKey(S);
   if(final&&key!==wpPrevKey){wpPrev=lastWP; wpPrevKey=key;}
   const ref=key===wpPrevKey?wpPrev:lastWP, d=ref==null?null:wp-ref;
   const lead=S.nd===S.unc?`Tied ${S.nd}–${S.unc}`:S.nd>S.unc?`${TA('ND')} leads ${S.nd}–${S.unc}`:`${TA('UNC')} leads ${S.unc}–${S.nd}`;
@@ -1084,7 +1102,8 @@ function renderDash(A,final){
   if(pr) proj+=` If they run a play, the middle half of outcomes runs from ${pr.p25>=0?'+':''}${pr.p25} to ${pr.p75>=0?'+':''}${pr.p75} yards.`;
   $('pdProj').textContent=proj;
   const goalTo=S.dist>=100-S.pos;
-  let t=tile('Win probability',(wp*100).toFixed(1)+'%',d==null?TN('ND'):Math.abs(d)<0.0005?'no change since last play':`${d>=0?'+':''}${(d*100).toFixed(1)} pts since last play`,d==null?'':d>0.0005?'up':d<-0.0005?'down':'');
+  const others=A.ml!=null?` · Monte Carlo ${(A.win/N*100).toFixed(1)}%, ML ${(A.ml*100).toFixed(1)}%`:(ENGINE!=='mc'?' · ML number arrives with the server read':'');
+  let t=tile(`Win probability${ENGINE!=='mc'&&A.ml!=null?` (${ENG_NAME[ENGINE]})`:''}`,(wp*100).toFixed(1)+'%',(d==null?TN('ND'):Math.abs(d)<0.0005?'no change since last play':`${d>=0?'+':''}${(d*100).toFixed(1)} pts since last play`)+others,d==null?'':d>0.0005?'up':d<-0.0005?'down':'');
   t+=tile(goalTo?'Scores on this play':'Moves the chains',Math.round(A.fd/N*100)+'%',goalTo?'touchdown':'first down or touchdown');
   t+=tile('Touchdown this play',pct(P(A.out.Touchdown)),'');
   if(S.down!==4) t+=tile('Turnover this play',pct(P(A.out.Turnover)),'interception or lost fumble');
@@ -1097,6 +1116,7 @@ function renderDash(A,final){
   $('tiles').innerHTML=t;
 }
 function render(A,final){
+  lastRender=[A,final];
   renderDash(A,final);
   const N=A.n, P=k=>(k||0)/N;
   $('nFD').textContent=Math.round(A.fd/N*100)+'%';
@@ -1111,7 +1131,7 @@ function render(A,final){
   $('dEPs').textContent=`expected net points for ${TA(S.poss)} on this drive`;
   const d=A.drv; bars('dOut',[['Touchdown',P(d.TD),'good'],['Field goal',P(d.FG),'gold'],['Missed FG',P(d['Missed FG']),'bad'],['Punt',P(d.Punt)],['Turnover',P(d.Turnover),'bad'],['On downs',P(d.Downs),'bad'],['Safety',P(d.Safety),'bad'],['Half/game ends',P(d['End of half'])+P(d['End of game'])]]);
   $('dPlays').textContent=(A.dpl/N).toFixed(1);
-  const wp=A.win/N; $('gWP').textContent=(wp*100).toFixed(1)+'%'; $('gA').style.width=(wp*100)+'%';
+  const wp=engWP(A); $('gWP').textContent=(wp*100).toFixed(1)+'%'; $('gA').style.width=(wp*100)+'%';
   const med=h=>{let c=0;for(let i=0;i<h.length;i++){c+=h[i];if(c>=N/2)return i;}return 0;};
   $('gProj').textContent=`Median final: ${TA('ND')} ${med(A.ndH)}, ${TA('UNC')} ${med(A.ucH)}. Average margin ${TA('ND')} ${A.marSum/N>=0?'+':''}${(A.marSum/N).toFixed(1)}. Goes to overtime in ${pct(A.ot/N)} of sims.`;
   bars('gMar',['ND by 15+','ND by 8–14','ND by 1–7','UNC by 1–7','UNC by 8–14','UNC by 15+'].map(k=>[tmLbl(k),P(A.mar[k]),k.startsWith('ND')?'':'bad']));
@@ -1158,9 +1178,10 @@ const tLabel=t=>{const q=Math.min(4,Math.floor(Math.min(t,3599.9)/900)+1); retur
 function chartSeries(){
   const sort=a=>a.filter(h=>h.t!=null&&h.v!=null).sort((x,y)=>x.t-y.t);
   return [
-    {k:'model',name:'Monte Carlo',color:'var(--gold)',w:3.2,pts:sort(wpHist.map(h=>({t:h.t,v:h.wp})))},
+    {k:'model',name:'Monte Carlo',color:'var(--gold)',w:ENGINE==='mc'?3.2:2,pts:sort(wpHist.map(h=>({t:h.t,v:h.wp})))},
     // the ML model: no simulation, learned from how past games ended (How it works › Monte Carlo vs ML)
-    {k:'ml',name:'ML model',color:'#B05FD3',w:2.4,dash:'7 4',pts:sort(wpHist.filter(h=>h.ml!=null).map(h=>({t:h.t,v:h.ml})))},
+    {k:'ml',name:'ML model',color:'#B05FD3',w:ENGINE==='ml'?3.2:2.2,dash:ENGINE==='ml'?'':'7 4',pts:sort(wpHist.filter(h=>h.ml!=null).map(h=>({t:h.t,v:h.ml})))},
+    ...(ENGINE==='mix'?[{k:'mix',name:'Mixed',color:'#E07B39',w:3.2,pts:sort(wpHist.filter(h=>h.ml!=null&&h.wp!=null).map(h=>({t:h.t,v:(h.wp+h.ml)/2})))}]:[]),
     {k:'espn',name:'ESPN',color:'#9AA8BA',w:1.8,pts:sort(espnWP.map(h=>({t:h.t,v:h.wp})))},
     {k:'kalshi',name:'Kalshi',color:'#2FA36B',w:2.2,pts:MKH.k.length?MKH.k.slice():sort(mkHist.map(h=>({t:h.t,v:h.k})))},
     {k:'poly',name:'Polymarket',color:'#5B8DEF',w:2.2,pts:MKH.p.length?MKH.p.slice():sort(mkHist.map(h=>({t:h.t,v:h.p})))},
@@ -1692,6 +1713,7 @@ TABS.forEach((b,i)=>{
 const QS=new URLSearchParams(location.search);
 const EVENT=(((location.pathname.match(/\/game\/(\d+)/)||[])[1])||QS.get('event')||'').replace(/\D/g,'')||(SAVED_GAME&&SAVED_GAME.LIVE&&SAVED_GAME.LIVE.event)||'';
 if(!EVENT) location.replace(LG.home);
+{ const a=document.getElementById('insideMl'); if(a) a.href=`/ml/model?event=${EVENT}`; }
 document.querySelectorAll('a[href="/"]').forEach(a=>a.setAttribute('href',LG.home));
 $(LG.id==='nfl'?'lgN':'lgC').setAttribute('aria-current','page');
 let CARD=null, gateTimer=null, sidePick=null, gateBusy=false;
@@ -2056,7 +2078,8 @@ function renderPicks(m){
   const ctx=liveCtx(), nowOf=Object.fromEntries((m.now||[]).map(x=>[x.key,x]));
   const whyD=e=>ctx?`<details class="bc-why"><summary>Why the model likes this</summary><div class="why">${explainBet(e,Object.assign({},ctx,{trend:trendFor(e)}))}</div></details>`:'';
   const card=(e,lean)=>betCard(e,{stale:m.stale,lean,at:(e.book&&e.book.at)||m.at,after:m.stale?'':whyD(e)});
-  const main=m.edges||[], leans=m.leans||[];
+  lastPicksMsg=m;
+  const main=ENGINE==='mc'?(m.edges||[]):((m.engines&&m.engines[ENGINE])||[]), leans=ENGINE==='mc'?(m.leans||[]):[];
   const none=m.stale?'<p class="bc-none"><b>New play.</b> Simulating it now; bets show up here in a few seconds.</p>'
     :'<p class="bc-none"><b>No main bets right now.</b> Nothing on Polymarket US or Kalshi beats the price a $10 order can actually get by the main bar (2.5 points for favorites, 3 near coin flips).</p>';
   // Logged bets: still buyable at the logged price? Open ones get the current $10 buy price from the order book.
@@ -2074,7 +2097,7 @@ function renderPicks(m){
       <span class="l-meta">${hEsc(p.type)} · ${hEsc(p.clock||'')} · ${hEsc(p.score||'')} · ${hEsc(p.venue)} · logged ${bcC(p.price)} · model ${bcP(p.model)}</span>
       <span>${buyNow(p)}</span><span class="l-res">${res(p)}</span>
       ${still(p)?`<details class="l-how" style="flex-basis:100%"><summary>Still a bet now: how to buy it</summary>${betCard({...p,cost:p.price,book:null},{at:(nowOf[p.key]||{}).at})}</details>`:''}</div>`).join('');
-  el.innerHTML=`<h3 class="sh">Bets you can buy right now</h3>
+  el.innerHTML=`<h3 class="sh">Bets you can buy right now${ENGINE!=='mc'?` <span class="bc-tag lean">${ENG_NAME[ENGINE]}</span>`:''}</h3>${ENGINE!=='mc'?`<p class="small" style="margin:0 0 6px">${ENGINE==='ml'?'Judged on the ML model alone (moneylines; it predicts who wins, not margins).':'Judged on the Monte Carlo and ML model averaged (moneylines).'} The Monte Carlo system is the one that held up in testing; switch back with the buttons at the top.</p>`:''}
     ${main.length&&m.stale?'<p class="small" style="margin:0 0 6px"><b>New play.</b> These were for the last play and can\'t be counted on; new numbers in a few seconds.</p>':''}
     ${main.length?`<div class="bcards">${main.map(e=>card(e,false)).join('')}</div>`:none}
     <h3 class="sh" style="margin-top:14px">Small edges <span class="small" style="font-weight:500">(more lines, lower confidence)</span></h3>
@@ -2124,12 +2147,12 @@ if(EVENT){ gateRefresh(); gateTimer=setInterval(gateRefresh,5000); }
 
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-25.6';
+const BUILD='2026-10-26.1';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-25.6'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-26.1'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script></body></html>

@@ -434,7 +434,7 @@ A "Schedule strength" tab on `/ap`, computed by `sosTable` in `api/apmodel.mjs`.
 A win-probability model that never simulates, runs next to the Monte Carlo in every game, makes its own paper bets, and is graded live.
 
 - **Data:** `tools/ml/states.py` turns play-by-play into home-perspective game states. College uses every ESPN play 2014–2025 from the sportsdataverse `espn_cfb_pbp` releases (1.8M plays, 10,294 games). NFL uses nflverse 2006–2026 (747k plays). Inputs: score difference, time left, possession, yards to the end zone, down, distance, timeouts, pregame spread and total, who gets the 2nd-half kickoff, plus expected final margin, margin vs. time left, and field position.
-- **Model:** `tools/ml/train_wp.py` fits LightGBM trees with monotone constraints and a logistic regression; the live ML number is their average.
+- **Model:** `tools/ml/train_wp.py` fits LightGBM trees with monotone constraints, a logistic regression and a small neural network (inputs → 16 → 8 → 1); the live ML number is the average of the three.
   - Train on seasons before the validation season (2024), pick tree settings on 2024 only, and test on 2025 (college) or 2025–26 (NFL).
   - The live model is then refit on everything and shipped as `api/wpml_<league>.json`, run by `api/wpml.mjs`.
   - Python and JavaScript predictions agree to within 0.000004. Split thresholds must not be rounded: LightGBM splits at ±1e-35 around zero.
@@ -443,12 +443,12 @@ A win-probability model that never simulates, runs next to the Monte Carlo in ev
   | | College 2025 (11,337 plays, 450 games) | NFL 2025–26 (24,388 plays, 342 games) |
   |---|---|---|
   | Monte Carlo | 0.3189 | 0.4605 |
-  | ML | 0.3197 | 0.4621 |
+  | ML | 0.3194 | 0.4613 |
   | Market | ESPN 0.3194 | Vegas 0.4598 |
-  | Monte Carlo + ML | 0.3182 | 0.4599 |
+  | Monte Carlo + ML | 0.3182 | 0.4597 |
   | All three averaged | 0.3181 | 0.4594 |
 
-  - **ML vs. Monte Carlo:** ML beats the Monte Carlo in 32% (college) and 36% (NFL) of game resamples. The Monte Carlo's edge is the last 5 minutes.
+  - **ML vs. Monte Carlo:** ML beats the Monte Carlo in 38% (college) and 43% (NFL) of game resamples. The Monte Carlo's edge is the last 5 minutes.
   - **Averaging the two:** beats ESPN in 81% of college resamples.
   - **Stacking:** a learned blend of the three was worse than plain averages in both leagues.
 - **NFL bet replay (steady rule, held to the final):**
@@ -456,7 +456,7 @@ A win-probability model that never simulates, runs next to the Monte Carlo in ev
   | Rule | Bets | Return | Range |
   |---|---|---|---|
   | Monte Carlo | 64 | +14.8% | +5% to +23% |
-  | ML | 86 | −7.4% | |
+  | ML | 86 | −5.2% | |
   | Three-way fair price | 83 | −3.8% | |
   | Both must agree | 24 | +15.5% | −1% to +29% |
 - **What runs live** (`api/live.mjs`, `api/picks.mjs`):
@@ -468,3 +468,26 @@ A win-probability model that never simulates, runs next to the Monte Carlo in ev
 - **Live grading** (`api/mlgrade.mjs`, `/api/ml/live`, public): every live read from both systems (and the market's moneyline when there is one) is saved per play and scored after the final. `/api/ml/compare` serves the offline head-to-head. Both show on the home page ("Model duel") and on `/ml#duel`.
 - **Fixed along the way:** the bootstrap random-number generator (`seed * 1103515245` overflowed double precision and could cycle through about 280 values). It's now mulberry32, in `tools/ml/compare.mjs` and `tools/trading_holdout/analyze.mjs`. The steady-pick range moved from +3%–+21% to +4%–+21%.
 - **Tests:** `node tools/ml/test_wpml.mjs` (model sanity, orientation, grader) and `node tools/ml/test_mlpicks.mjs` (ML bets, gap check, steady and cash-out, agreement tag, autopilot settings).
+
+## Pick the engine: Monte Carlo, Mixed or ML
+
+- **The switch:** the home page and the game page have a switch at the top: **Monte Carlo**, **Mixed** (the two averaged) or **ML**. The choice is remembered per browser.
+  - It changes the win probability shown, the chart emphasis, and the live bet lists ("leading" and steady picks).
+  - Each engine keeps its own paper bets and record: `mlSys` is `edge`/`steady` for ML and `mix-edge`/`mix-steady` for Mixed. The record stays owner-only.
+  - The Monte Carlo stays in charge of the tested rules. The autopilot can follow `mc`, `ml`, `mix`, `both` or `all`.
+  - API: `/api/picks/leading?engine=` and `/api/picks/steady?engine=`.
+- **Inside the ML (`/ml/model`):** pick a live game (or open it from a game page) or build any state with sliders.
+  - It shows each model's answer: trees, logistic, network, the ensemble, the live-learned correction, Monte Carlo and Mixed.
+  - Per-input explanations: tree path attribution, logistic weight × input, and network occlusion.
+  - The neural network drawn with live activations, and the first tree's decision path.
+  - A win-probability map over score margin × time left, plus the live-learning and live-grading panels.
+  - Everything is computed in the browser from `/api/ml/model?league=`. Other endpoints: `/api/ml/games` (live states), `/api/ml/online` and `/api/ml/live`.
+- **Momentum:** `tools/ml/states.py` computes four inputs from plays strictly before each snap: the scoring run (last 10 game-minutes), who scored last, yards per play (last 16 snaps) and turnovers (last 10 minutes). Live, `momentumFrom()` in `api/wpml.mjs` computes the same four from ESPN's play list every 45 seconds.
+  - Trained as a second feature set, momentum added nothing on the validation season in either league, so the main models don't use it.
+- **Learning as games finish (`api/wponline.mjs`):** a correction layer on top of the ML:
+  - corrected log-odds = b + a·ML + w·[run/10, last, ypp/5, tov]
+  - It starts at "no correction" and takes 8 small gradient steps per graded game, pulled back toward the start.
+  - Prequential: each game is scored before it's learned from. The layer only switches on after 5 games, once that score beats the plain ML.
+  - Anchor guard: an update that worsens 2,500 held-out past plays by more than 0.002 log loss is rejected.
+  - Saved to `DATA_DIR/wponline.json`. The grader scores both the plain and the corrected ML.
+- **Tests:** `node tools/ml/test_online.mjs`.

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inside the ML</title>
+<meta name="description" content="See what the machine-learning win-probability model is doing: its inputs, its neural network, its trees, and what it has learned from this season's games.">
+<link rel="icon" href="/logo.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#F3F5F8;--card:#FFFFFF;--ink:#0C2340;--muted:#5A6A80;--line:#D8DEE7;--gold:#B8902A;--goldsoft:#F1E6C6;--good:#2E7D4F;--bad:#B23A3A;--home:#2F6DB5;--away:#C0612B;--base:#C9D1DC;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0A1626;--card:#10213A;--ink:#E8EDF4;--muted:#93A3B8;--line:#22385A;--goldsoft:#3A3220;--good:#4FB27A;--bad:#E26A6A;--home:#5B8FD9;--away:#E08A55;--base:#3A5276}}
+:root[data-theme="dark"]{--paper:#0A1626;--card:#10213A;--ink:#E8EDF4;--muted:#93A3B8;--line:#22385A;--goldsoft:#3A3220;--good:#4FB27A;--bad:#E26A6A;--home:#5B8FD9;--away:#E08A55;--base:#3A5276}
+*,*::before,*::after{box-sizing:inherit}
+[hidden]{display:none!important}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 Barlow,system-ui,-apple-system,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:20px 16px 60px}
+h1,h2,h3{font-family:"Barlow Condensed",Barlow,system-ui,sans-serif}
+a{color:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.mast{padding-bottom:14px;border-bottom:3px solid var(--ink);margin-bottom:14px}
+.brand{display:inline-flex;align-items:center;gap:9px;text-decoration:none;margin-bottom:10px;font:800 21px/1 "Barlow Condensed",sans-serif}
+.brand img{border-radius:8px;display:block}
+.leaguebar{display:flex;gap:6px;margin:4px 0 12px;flex-wrap:wrap}
+.leaguebar a{padding:8px 16px;border:1px solid var(--line);border-radius:999px;font:700 16px Barlow,sans-serif;text-decoration:none;color:var(--ink);background:var(--card)}
+.leaguebar a:hover{border-color:var(--gold)}
+.leaguebar a[aria-current="page"]{background:var(--gold);border-color:var(--gold);color:#0C2340}
+.mast h1{font-size:clamp(34px,6vw,56px);line-height:.92;margin:0;font-weight:800}
+.mast p{margin:8px 0 0;color:var(--muted);max-width:68ch}
+.bar{position:sticky;top:0;z-index:5;background:var(--paper);padding:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:16px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.seg button{border:0;background:transparent;color:var(--ink);padding:8px 14px;font:700 15px Barlow,sans-serif;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--card)}
+select{font:600 15px Barlow,sans-serif;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-width:100%}
+section.sec{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:18px;min-width:0}
+section.sec>h2{font-size:30px;line-height:1;margin:0 0 4px}
+.sub{color:var(--muted);font-size:14px}
+.num{font-variant-numeric:tabular-nums}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:820px){.grid2{grid-template-columns:1fr}}
+.ctl{display:grid;grid-template-columns:minmax(120px,160px) 1fr 74px;gap:6px 12px;align-items:center;font-size:14px;margin:4px 0}
+.ctl input[type=range]{width:100%;accent-color:var(--gold)}
+.ctl output{font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.grp{font:800 13px Barlow,sans-serif;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:14px 0 2px}
+.outs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:12px 0}
+.out{border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.out b{display:block;font:800 34px/1 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums}
+.out span{font-size:13px;color:var(--muted)}
+.out.main{border:2px solid var(--gold)}
+.meter{height:6px;border-radius:3px;background:var(--away);margin-top:6px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--home)}
+.hb{display:grid;grid-template-columns:minmax(120px,190px) 1fr 58px;gap:5px 10px;align-items:center;font-size:14px}
+.hb .tr{position:relative;height:16px}
+.hb .tr i{position:absolute;top:1px;height:14px;border-radius:3px}
+.hb .tr .z{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--muted)}
+.hb .v{text-align:right;font-variant-numeric:tabular-nums}
+.hb .tot{font-weight:700;border-top:1px solid var(--line);padding-top:4px}
+.key{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:8px 0}
+.key i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:5px}
+.svgw{width:100%;overflow-x:auto}
+svg text{fill:var(--muted);font:500 11px Barlow,sans-serif}
+svg .lbl{fill:var(--ink);font-weight:600}
+.path{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px}
+.path li{border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:14px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.path li b{font-variant-numeric:tabular-nums}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600;font-size:13px}
+td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+.note{background:var(--goldsoft);border-radius:10px;padding:10px 12px;font-size:14px;margin:10px 0}
+.pill{display:inline-block;font:700 12px Barlow,sans-serif;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.pill.on{border-color:var(--good);color:var(--good)}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--card);font:600 13px Barlow,sans-serif;padding:5px 8px;border-radius:6px;z-index:10;white-space:nowrap}
+canvas{display:block;width:100%;image-rendering:pixelated;border-radius:8px}
+@media (max-width:560px){.ctl{grid-template-columns:1fr 70px}.ctl label{grid-column:1 / 3}.hb{grid-template-columns:minmax(90px,120px) 1fr 50px}section.sec{padding:14px}}
+</style></head>
+<body><div class="wrap">
+<header class="mast">
+  <a class="brand" href="/" aria-label="Home"><img src="/logo.svg" alt="" width="34" height="34"><span>CFB Live Sim</span></a>
+  <nav class="leaguebar" aria-label="Sections"><a href="/cfb">College football</a><a href="/nfl">NFL</a><a href="/ap">AP poll & seasons</a><a href="/ml">How it works</a><a href="/ml/model" aria-current="page">Inside the ML</a></nav>
+  <h1>Inside the ML</h1>
+  <p>The machine-learning win-probability model, opened up. Pick a live game or build any game state, and watch the three models (gradient-boosted trees, a logistic regression and a small neural network) work out who wins. Everything on this page is computed in your browser from the same model file the server uses.</p>
+</header>
+<div class="bar">
+  <div class="seg" role="group" aria-label="League"><button data-lg="cfb" aria-pressed="true">College</button><button data-lg="nfl" aria-pressed="false">NFL</button></div>
+  <select id="gamePick" aria-label="Game state"><option value="">Build your own state</option></select>
+  <span class="sub" id="liveNote"></span>
+</div>
+<div id="err" class="note" hidden></div>
+<main id="main">
+
+<section class="sec" id="state">
+  <h2>The game state</h2>
+  <div class="sub" id="stateSub">Everything the model knows about the game, from the home team's side. Move anything and every chart below updates.</div>
+  <div class="grid2">
+    <div id="ctlA"></div>
+    <div id="ctlB"></div>
+  </div>
+</section>
+
+<section class="sec" id="answer">
+  <h2>What it says</h2>
+  <div class="sub" id="ansSub">Chance the home team wins.</div>
+  <div class="outs" id="outs"></div>
+  <div class="sub" id="ansNote"></div>
+</section>
+
+<section class="sec" id="why">
+  <h2>Why it says that</h2>
+  <div class="sub">Each model's answer broken into pieces, one per input, in log-odds (the scale the models add things up on; +0.4 is roughly +10 percentage points near 50%). Blue pushes toward the home team, orange toward the away team.</div>
+  <div class="bar" style="position:static;border:0;margin:6px 0 4px;padding:0;background:transparent">
+    <div class="seg" role="group" aria-label="Model"><button data-why="trees" aria-pressed="true">Trees</button><button data-why="lr" aria-pressed="false">Logistic</button><button data-why="nn" aria-pressed="false">Network</button></div>
+  </div>
+  <div id="whyHow" class="sub"></div>
+  <div id="whyBars" class="hb" style="margin-top:10px"></div>
+</section>
+
+<section class="sec" id="net">
+  <h2>The neural network, live</h2>
+  <div class="sub">The inputs on the left (standardized: 0 is a typical value), two hidden layers of 16 and 8 neurons, and one output. A neuron's fill shows how strongly it's firing for this game state; a line's color shows whether that connection is pushing toward the home team (blue) or the away team (orange) right now, and its thickness shows how much. Hover a neuron for its value.</div>
+  <div class="svgw"><svg id="netSvg" viewBox="0 0 900 520" style="min-width:640px;width:100%"></svg></div>
+</section>
+
+<section class="sec" id="tree">
+  <h2>One tree's decision path</h2>
+  <div class="sub" id="treeSub"></div>
+  <ol class="path" id="treePath"></ol>
+</section>
+
+<section class="sec" id="heat">
+  <h2>The whole map</h2>
+  <div class="sub">The ML chance the home team wins for every score margin (up and down) and time left, keeping the rest of the state above fixed. The ring marks the current state. Watch how the same lead is worth more and more as the clock runs out, and how the pregame spread tilts the early game.</div>
+  <div class="key"><span><i style="background:var(--away)"></i>Away favored</span><span><i style="background:var(--base)"></i>Toss-up</span><span><i style="background:var(--home)"></i>Home favored</span></div>
+  <div style="display:grid;grid-template-columns:44px 1fr;gap:4px;align-items:stretch">
+    <div style="display:flex;flex-direction:column;justify-content:space-between;font-size:12px;color:var(--muted);text-align:right;padding:2px 0">
+      <span>+21</span><span>+14</span><span>+7</span><span>0</span><span>−7</span><span>−14</span><span>−21</span></div>
+    <div style="position:relative"><canvas id="heatC" width="61" height="43" style="aspect-ratio:61/30" aria-label="Win probability by score margin and time left"></canvas><svg id="heatO" viewBox="0 0 61 43" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"></svg></div>
+    <span></span>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)"><span>Kickoff (60 min left)</span><span>Halftime</span><span>Final whistle</span></div>
+  </div>
+  <div class="sub" style="margin-top:4px">Vertical: home margin. Horizontal: game clock.</div>
+</section>
+
+<section class="sec" id="learn">
+  <h2>Learning as the season goes</h2>
+  <div id="learnBody" class="sub">Loading…</div>
+</section>
+
+<section class="sec" id="mom">
+  <h2>Momentum</h2>
+  <div id="momBody"></div>
+</section>
+
+<section class="sec" id="scores">
+  <h2>How it's doing live</h2>
+  <div id="liveBody" class="sub">Loading…</div>
+</section>
+
+</main>
+<div class="tip" id="tip" hidden></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct=(v,d=0)=>v==null?'–':(v*100).toFixed(d)+'%';
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const tip=$('tip');
+document.addEventListener('pointerover',e=>{ const t=e.target.closest&&e.target.closest('[data-tip]'); if(!t){ tip.hidden=true; return; } tip.textContent=t.dataset.tip; tip.hidden=false; });
+document.addEventListener('pointermove',e=>{ if(tip.hidden) return; tip.style.left=Math.min(e.clientX+12,innerWidth-tip.offsetWidth-8)+'px'; tip.style.top=(e.clientY-34)+'px'; });
+
+// ---------- the model, ported from api/wpml.mjs (kept identical) ----------
+const sig=v=>1/(1+Math.exp(-v)), cl=p=>Math.min(0.995,Math.max(0.005,p)), logit=p=>Math.log(cl(p)/(1-cl(p)));
+function featMap(s){ const f=s.tl/3600, em=s.diff+s.spread*f;
+  return { diff:s.diff, tl:s.tl, posH:s.posH, ytg:s.ytg, down:s.down, dist:s.dist, toH:s.toH, toA:s.toA, spread:s.spread, total:s.total, h2:s.h2,
+    em, z:em/(14*Math.sqrt(f)+1), fp:s.posH*(100-s.ytg), run:s.run??0, last:s.last??0, ypp:s.ypp??0, tov:s.tov??0 }; }
+const wpFeatures=(s,F)=>{ const m=featMap(s); return F.map(f=>m[f]); };
+function wpRaw(m,x){ let s=0; for(const t of m.trees){ let n=0; for(;;){ const nd=t.n[n], c=x[nd[0]]<=nd[1]?nd[2]:nd[3]; if(c<0){ s+=t.l[-c-1]; break; } n=c; } } return s; }
+function lrInputs(m,x){ const F=m.feats, i=k=>F.indexOf(k), f=1-x[i('tl')]/3600; return [...x, x[i('em')]*f, x[i('z')]*Math.abs(x[i('z')]), x[i('fp')]*f]; }
+function lrLogit(lr,z){ let s=lr.b; for(let i=0;i<z.length;i++) s+=lr.coef[i]*(z[i]-lr.mean[i])/lr.scale[i]; return s; }
+function nnForward(nn,x){ let a=x.map((v,i)=>(v-nn.mean[i])/nn.scale[i]); const layers=[a], pre=[];
+  for(let L=0;L<nn.W.length;L++){ const W=nn.W[L], b=nn.b[L], out=new Array(b.length).fill(0);
+    for(let j=0;j<b.length;j++){ let s=b[j]; for(let i=0;i<a.length;i++) s+=a[i]*W[i][j]; out[j]=L<nn.W.length-1?Math.max(0,s):s; }
+    a=out; layers.push(a); }
+  return { p:sig(a[0]), logit:a[0], layers }; }
+function wpAll(m,s){ const x=wpFeatures(s,m.feats), trees=sig(wpRaw(m,x)), lr=sig(lrLogit(m.lr,lrInputs(m,x))), nn=nnForward(m.nn,x).p; return { trees, lr, nn, ml:(trees+lr+nn)/3 }; }
+function explain(m,s){
+  const F=m.feats, x=wpFeatures(s,F), out={ feats:F, x };
+  const tc=new Array(F.length).fill(0); let base=0, path0=null;
+  m.trees.forEach((t,ti)=>{ let n=0, val=t.n[0][4]; base+=val; const steps=[];
+    for(;;){ const nd=t.n[n], left=x[nd[0]]<=nd[1], c=left?nd[2]:nd[3], nv=c<0?t.l[-c-1]:t.n[c][4];
+      tc[nd[0]]+=nv-val; if(ti===0) steps.push({ f:F[nd[0]], thr:nd[1], left, v:nv, xv:x[nd[0]] }); val=nv; if(c<0) break; n=c; }
+    if(ti===0) path0={ root:t.n[0][4], steps }; });
+  out.trees={ base, contrib:tc, logit:base+tc.reduce((a,b)=>a+b,0), firstTree:path0, n:m.trees.length };
+  const z=lrInputs(m,x), names=m.lr.feats||[], c=new Array(F.length).fill(0), parent={ em_t:'em', z2:'z', fp_t:'fp' };
+  z.forEach((v,i)=>{ const nm=names[i]||F[i], k=F.indexOf(parent[nm]||nm); c[k]+=m.lr.coef[i]*(v-m.lr.mean[i])/m.lr.scale[i]; });
+  out.lr={ base:m.lr.b, contrib:c, logit:lrLogit(m.lr,z) };
+  const full=nnForward(m.nn,x), nc=F.map((_,i)=>{ const y=x.slice(); y[i]=m.means?m.means[i]:m.nn.mean[i]; return full.logit-nnForward(m.nn,y).logit; });
+  out.nn={ contrib:nc, logit:full.logit, layers:full.layers };
+  return out; }
+// the live-learning correction layer (api/wponline.mjs)
+const xOn=(s,base)=>[1, logit(base), (s.run??0)/10, s.last??0, (s.ypp??0)/5, s.tov??0];
+const applyOn=(w,x)=>sig(w.reduce((a,wi,i)=>a+wi*x[i],0));
+
+// ---------- labels ----------
+const LAB={ diff:'Score margin', tl:'Time left', posH:'Who has the ball', ytg:'Yards to the end zone', down:'Down', dist:'Yards to go', toH:'Home timeouts', toA:'Away timeouts',
+  spread:'Pregame spread', total:'Over/under', h2:'2nd-half kickoff', em:'Expected final margin', z:'Margin vs. time left', fp:'Field position', run:'Scoring run', last:'Who scored last', ypp:'Recent yards per play', tov:'Recent turnovers' };
+const mmss=t=>{ const q=Math.min(4,Math.floor((3600-t)/900)+1), r=t-(4-q)*900; return t<=0?'Final':`Q${q} ${Math.floor(r/60)}:${String(Math.round(r%60)).padStart(2,'0')}`; };
+const fmtF=(f,v)=>{ if(f==='tl') return mmss(v); if(f==='posH') return v>0?'Home':'Away'; if(f==='h2') return v>0?'Home':v<0?'Away':'—'; if(f==='last') return v>0?'Home':v<0?'Away':'Nobody';
+  if(f==='fp') return (v>=0?'+':'')+Math.round(v); return (Math.abs(v)>=10||Number.isInteger(v))?String(Math.round(v*10)/10):v.toFixed(2); };
+
+// ---------- state + controls ----------
+const DEF={ diff:0, tl:3600, posH:1, ytg:75, down:1, dist:10, toH:3, toA:3, spread:3, total:55, h2:-1, run:0, last:0, ypp:0, tov:0 };
+let S={...DEF}, LG='cfb', M={}, ONLINE=null, GAMES=[], GKEY='', NAMES={home:'Home',away:'Away'}, LIVE=null, WHY='trees';
+const CTL=[
+  ['ctlA','The scoreboard',[['diff','Home margin',-35,35,1,v=>(v>0?'+':'')+v],['tl','Time left',0,3600,15,mmss],['spread','Pregame spread (home by)',-30,30,0.5,v=>(v>0?'+':'')+v],['total','Over/under',30,80,0.5,v=>v]]],
+  ['ctlA','The drive',[['posH','Ball',-1,1,2,v=>v>0?NAMES.home:NAMES.away],['ytg','Yards to the end zone',1,99,1,v=>v],['down','Down',1,4,1,v=>['1st','2nd','3rd','4th'][v-1]],['dist','Yards to go',1,30,1,v=>v]]],
+  ['ctlB','Clock management',[['toH','Home timeouts',0,3,1,v=>v],['toA','Away timeouts',0,3,1,v=>v],['h2','Gets the 2nd-half kickoff',-1,1,1,v=>v>0?NAMES.home:v<0?NAMES.away:'Already kicked']]],
+  ['ctlB','Momentum (home minus away)',[['run','Scoring run, last 10 min',-28,28,1,v=>(v>0?'+':'')+v],['last','Who scored last',-1,1,1,v=>v>0?NAMES.home:v<0?NAMES.away:'Nobody yet'],['ypp','Yards per play, last 16 snaps',-15,15,0.5,v=>(v>0?'+':'')+v],['tov','Turnovers forced, last 10 min',-3,3,1,v=>(v>0?'+':'')+v]]],
+];
+function buildCtl(){ for(const id of ['ctlA','ctlB']) $(id).innerHTML='';
+  for(const [col,title,items] of CTL){ const g=document.createElement('div'); g.innerHTML=`<div class="grp">${esc(title)}</div>`+items.map(([k,l,a,b,st])=>`<div class="ctl"><label for="c_${k}">${esc(l)}</label><input type="range" id="c_${k}" min="${a}" max="${b}" step="${st}"><output id="o_${k}"></output></div>`).join(''); $(col).appendChild(g); }
+  for(const [, ,items] of CTL) for(const [k] of items) $('c_'+k).oninput=e=>{ S[k]=+e.target.value; if(k==='tl'&&S.tl<=1800) S.h2=0; if(GKEY){ GKEY=''; $('gamePick').value=''; liveNote(); } syncCtl(); render(); }; }
+function syncCtl(){ for(const [, ,items] of CTL) for(const [k,,,,,fmt] of items){ $('c_'+k).value=S[k]; $('o_'+k).textContent=fmt(S[k]); } }
+
+// ---------- rendering ----------
+function render(){ const m=M[LG]; if(!m) return;
+  const A=wpAll(m,S), E=explain(m,S), on=ONLINE&&ONLINE[LG], corr=on?applyOn(on.w,xOn(S,A.ml)):A.ml;
+  renderOuts(A,corr,on); renderWhy(E); renderNet(m,E); renderTree(m,E); renderHeat(m);
+}
+function card(v,l,main){ return `<div class="out${main?' main':''}"><b>${pct(v)}</b><span>${l}</span><div class="meter"><i style="width:${(v*100).toFixed(1)}%"></i></div></div>`; }
+function renderOuts(A,corr,on){
+  const live=LIVE&&GKEY;
+  $('ansSub').textContent=`Chance ${NAMES.home} (home) wins.`;
+  $('outs').innerHTML=card(A.trees,'Gradient-boosted trees')+card(A.lr,'Logistic regression')+card(A.nn,'Neural network')+card(A.ml,'ML: the three averaged',!on||!on.on)
+    +(on?card(corr,`After live learning ${on.on?'(switched on)':'(not yet switched on)'}`,on.on):'')
+    +(live&&LIVE.mc!=null?card(LIVE.mc,'Monte Carlo (the simulator)')+card((LIVE.mc+(on&&on.on?corr:A.ml))/2,'Mixed: MC and ML averaged'):'');
+  const d=live&&LIVE.mc!=null?(on&&on.on?corr:A.ml)-LIVE.mc:null;
+  $('ansNote').innerHTML=live&&d!=null?`The ML is <b>${Math.abs(d*100).toFixed(1)} points ${d>0?'higher':'lower'}</b> on ${esc(NAMES.home)} than the Monte Carlo simulator right now. The simulator plays the rest of the game out thousands of times with the teams' ratings; the ML has never simulated anything, it has only seen how real games in this exact kind of spot ended.`
+    :'Pick a live game in the bar above to compare with the Monte Carlo simulator.'; }
+function renderWhy(E){
+  const how={ trees:`${E.trees.n} small decision trees, each nudging the answer. Every split a tree makes is credited to the input it split on, so the bars below plus the starting point add up exactly to the trees' answer.`,
+    lr:'One weight per input (plus three built-in interactions, credited to the input they come from). A bar is weight × how far that input is from a typical game.',
+    nn:'A network has no simple weights to read off, so each bar is how far the answer moves if that one input is reset to a typical value. These don\'t add up exactly, because inputs interact inside the network.' }[WHY];
+  $('whyHow').textContent=how;
+  const P=E[WHY], c=P.contrib, F=E.feats, idx=F.map((_,i)=>i).sort((a,b)=>Math.abs(c[b])-Math.abs(c[a])), mx=Math.max(0.3,...c.map(Math.abs)), w=v=>Math.abs(v)/mx*50;
+  const row=(lab,v,extra='')=>`<div${extra}>${lab}</div><div class="tr"><span class="z" style="left:50%"></span><i style="left:${v>=0?50:50-w(v)}%;width:${w(v)}%;background:${v>=0?'var(--home)':'var(--away)'}"></i></div><div class="v">${(v>=0?'+':'')+v.toFixed(2)}</div>`;
+  let h='';
+  if(P.base!=null) h+=`<div class="sub">Starting point</div><div></div><div class="v sub">${(P.base>=0?'+':'')+P.base.toFixed(2)}</div>`;
+  for(const i of idx) h+=row(`${esc(LAB[F[i]]||F[i])} <span class="sub">${esc(fmtF(F[i],E.x[i]))}</span>`,c[i]);
+  h+=`<div class="tot">Answer (log-odds)</div><div class="tot"></div><div class="v tot">${(P.logit>=0?'+':'')+P.logit.toFixed(2)}</div><div class="sub">= chance home wins</div><div></div><div class="v sub">${pct(sig(P.logit))}</div>`;
+  $('whyBars').innerHTML=h; }
+function renderNet(m,E){
+  const L=E.nn.layers, F=E.feats, W=m.nn.W, cols=[180,450,670,830], H=520, top=26;
+  const ys=n=>Array.from({length:n},(_,i)=>top+(H-top-20)*(n===1?0.5:i/(n-1)));
+  const Y=L.map(a=>ys(a.length)), home=css('--home'), away=css('--away'), line=css('--line');
+  let edges='', nodes='', mxE=1e-9;
+  const flow=[]; for(let l=0;l<W.length;l++){ const f=[]; for(let i=0;i<W[l].length;i++) for(let j=0;j<W[l][i].length;j++){ const v=L[l][i]*W[l][i][j]; f.push([i,j,v]); mxE=Math.max(mxE,Math.abs(v)); } flow.push(f); }
+  for(let l=0;l<W.length;l++) for(const [i,j,v] of flow[l]){ const a=Math.abs(v)/mxE; if(a<0.02) continue;
+    edges+=`<line x1="${cols[l]}" y1="${Y[l][i].toFixed(1)}" x2="${cols[l+1]}" y2="${Y[l+1][j].toFixed(1)}" stroke="${v>=0?home:away}" stroke-width="${(0.4+a*5).toFixed(2)}" stroke-opacity="${(0.15+a*0.75).toFixed(2)}"/>`; }
+  const r=[9,10,11,18];
+  L.forEach((a,l)=>{ const mx=Math.max(1e-9,...a.map(Math.abs)); a.forEach((v,i)=>{ const y=Y[l][i];
+    let fill, t;
+    if(l===0){ const k=Math.min(1,Math.abs(v)/2.5); fill=`color-mix(in srgb, ${v>=0?home:away} ${Math.round(k*100)}%, var(--card))`; t=`${LAB[F[i]]||F[i]}: ${fmtF(F[i],E.x[i])} (${v>=0?'+':''}${v.toFixed(2)} std)`; }
+    else if(l===L.length-1){ const p=sig(v); fill=`color-mix(in srgb, ${p>=0.5?home:away} ${Math.round(Math.abs(p-0.5)*200)}%, var(--card))`; t=`Output: ${pct(p,1)} home wins`; }
+    else { const k=v/mx; fill=`color-mix(in srgb, var(--gold) ${Math.round(k*100)}%, var(--card))`; t=`Layer ${l} neuron ${i+1}: ${v.toFixed(2)}${v===0?' (off)':''}`; }
+    nodes+=`<circle cx="${cols[l]}" cy="${y.toFixed(1)}" r="${r[l]}" fill="${fill}" stroke="${line}" stroke-width="1.5" data-tip="${esc(t)}"/>`;
+    if(l===0) nodes+=`<text x="${cols[0]-16}" y="${(y+4).toFixed(1)}" text-anchor="end" class="lbl">${esc(LAB[F[i]]||F[i])}</text>`;
+    if(l===L.length-1) nodes+=`<text x="${cols[l]+26}" y="${(y-4).toFixed(1)}" class="lbl" style="font-size:20px;font-family:'Barlow Condensed'">${pct(sig(v))}</text><text x="${cols[l]+26}" y="${(y+14).toFixed(1)}">${esc(NAMES.home)} wins</text>`; }); });
+  const hd=['Inputs','Hidden 1 (16)','Hidden 2 (8)','Output'].map((t,i)=>`<text x="${cols[i]}" y="12" text-anchor="middle" style="font-weight:700">${t}</text>`).join('');
+  const off=L.slice(1,-1).map(a=>a.filter(v=>v===0).length);
+  $('netSvg').innerHTML=hd+edges+nodes+`<text x="${cols[1]}" y="${H-2}" text-anchor="middle">${off[0]} of 16 switched off</text><text x="${cols[2]}" y="${H-2}" text-anchor="middle">${off[1]} of 8 switched off</text>`; }
+function renderTree(m,E){
+  const p=E.trees.firstTree; $('treeSub').innerHTML=`The model is ${E.trees.n} trees added together. Here is the first (the one that learned the most), asking its questions about this game state from top to bottom. Each answer moves the running score; the last row is where this tree lands.`;
+  const fv=(f,v)=>f==='tl'?mmss(v):f==='posH'?(v>0?'home':'away'):Math.round(v*100)/100;
+  let h=`<li><span>Start (every game)</span><b>${(p.root>=0?'+':'')+p.root.toFixed(3)}</b></li>`;
+  for(const s of p.steps){ const q=s.f==='tl'?`Is the clock at or past ${mmss(s.thr)}?`.replace('past Final','the end'):`Is ${LAB[s.f]||s.f} ≤ ${fv(s.f,s.thr)}?`;
+    const ans=s.f==='tl'?(s.left?'Yes':'No'):(s.left?'Yes':'No');
+    h+=`<li><span>${esc(q)} <span class="sub">(here: ${esc(fmtF(s.f,s.xv))})</span> → <b>${ans}</b></span><b>${(s.v>=0?'+':'')+s.v.toFixed(3)}</b></li>`; }
+  $('treePath').innerHTML=h; }
+let heatT=0;
+function renderHeat(m){ clearTimeout(heatT); heatT=setTimeout(()=>{
+  const c=$('heatC'), x=c.getContext('2d'), img=x.createImageData(61,43);
+  const hex=h=>{ const d=document.createElement('div'); d.style.color=h; document.body.appendChild(d); const v=getComputedStyle(d).color.match(/\d+/g).map(Number); d.remove(); return v; };
+  const H=hex(css('--home')), A=hex(css('--away')), B=hex(css('--base'));
+  for(let r=0;r<43;r++) for(let k=0;k<61;k++){ const diff=21-r, tl=3600-k*60, s={...S, diff, tl, h2:tl>1800?S.h2:0}, p=wpAll(m,s).ml;
+    const t=Math.abs(p-0.5)*2, C=p>=0.5?H:A, o=(r*61+k)*4; for(let q=0;q<3;q++) img.data[o+q]=Math.round(B[q]+(C[q]-B[q])*t); img.data[o+3]=255; }
+  x.putImageData(img,0,0);
+  const cx=(3600-S.tl)/60+0.5, cy=21-Math.max(-21,Math.min(21,S.diff))+0.5;
+  $('heatO').innerHTML=`<line x1="30.5" x2="30.5" y1="0" y2="43" stroke="var(--card)" stroke-width="1.5" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/><line x1="0" x2="61" y1="21.5" y2="21.5" stroke="var(--card)" stroke-width="1.5" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/><ellipse cx="${cx}" cy="${cy}" rx="1.4" ry="2" fill="none" stroke="var(--ink)" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`;
+},40); }
+
+// ---------- live learning + live scores ----------
+function renderLearn(){ const o=ONLINE&&ONLINE[LG]; if(!o){ $('learnBody').textContent='Not available.'; return; }
+  const mx=Math.max(0.5,...o.w.map((v,i)=>Math.abs(v-o.init[i])));
+  const rows=o.names.map((n,i)=>{ const d=o.w[i]-o.init[i], w=Math.abs(d)/mx*50; return `<div>${esc(n)}</div><div class="tr"><span class="z" style="left:50%"></span><i style="left:${d>=0?50:50-w}%;width:${w}%;background:${d>=0?'var(--home)':'var(--away)'}"></i></div><div class="v">${o.w[i].toFixed(3)}</div>`; }).join('');
+  const hist=o.history.slice(-12).reverse().map(h=>`<tr><td>${esc(h.matchup||h.event||'')}</td><td class="r">${h.reads}</td><td class="r">${h.base.toFixed(3)}</td><td class="r">${h.corr.toFixed(3)}</td><td>${h.accepted?'Learned':'Rejected (would hurt past games)'}</td></tr>`).join('');
+  $('learnBody').innerHTML=`<p style="color:var(--ink);margin:6px 0">The trees, logistic and network were trained once, on past seasons. On top of them sits a small <b>live-learning layer</b> that keeps learning from <b>this</b> season: every time a game the site followed goes final, it looks back at every live read it made during that game and nudges six numbers so it would have been closer.</p>
+    <div class="key"><span class="pill${o.on?' on':''}">${o.on?'Switched on':'Watching, not yet switched on'}</span><span>${o.games} finished game${o.games===1?'':'s'} learned from</span>${o.preq?`<span>Its score on games it hadn't learned from yet: ${o.preq.corr.toFixed(4)} vs. ${o.preq.base.toFixed(4)} for the plain ML (lower is better)</span>`:''}</div>
+    <div class="grp">The six numbers (bars show change from the start)</div><div class="hb">${rows}</div>
+    <p class="sub">It starts at "no correction": trust in the model 1, everything else 0. "Trust" above 1 means the ML has been too timid this season and should be more confident; below 1, too sure of itself. The momentum weights only grow if this season's games show momentum telling us something the score and clock don't.</p>
+    <p class="sub">Two guards keep it honest: each game is scored <i>before</i> it's learned from, and the layer only switches on after 5 games once that score beats the plain ML; and any update that would make a held-out set of past plays worse is thrown away.</p>
+    ${hist?`<div class="scroll"><table><thead><tr><th>Game</th><th class="r">Reads</th><th class="r">Plain ML</th><th class="r">With layer</th><th>Result</th></tr></thead><tbody>${hist}</tbody></table></div><p class="sub">Log loss on that game, before learning from it.</p>`:'<p class="sub">No finished games yet this season: the first one the site follows live will start it off.</p>'}`; }
+function renderMom(){ const ev=EVAL&&EVAL[LG], s=ev&&ev.sets;
+  $('momBody').innerHTML=`<p style="margin:6px 0">Momentum here means four things measured from the play-by-play, always home minus away: points scored in the last 10 game-minutes, who scored last, yards per play over the last 16 snaps, and turnovers forced in the last 10 minutes. Set them with the sliders up top.</p>
+  <p class="sub">We tested them honestly. A second full set of models was trained with the four momentum inputs added and scored on a season it never saw: ${s?`log loss ${s.momentum.valid.ml.toFixed(4)} with momentum vs. ${s.base.valid.ml.toFixed(4)} without on the check season`:'no better than without'}. Once the score, the clock, the ball and the teams' strength are known, how the points arrived adds nothing, so the main models don't use it.</p>
+  <p class="sub">But that's a claim about past seasons. So momentum lives in the live-learning layer instead, starting at weight zero: if this season's games start showing that hot teams keep winning more than the score says, those weights will grow on their own, and you'll see it in the panel above.</p>`; }
+function renderLive(d){ const o=d&&d.overall; if(!o||!o.n){ $('liveBody').innerHTML='No finished games graded yet. Every live read from the Monte Carlo and the ML is saved and scored once the game ends.'; return; }
+  const r=(l,v)=>`<tr><td>${l}</td><td class="r">${v==null?'–':v.toFixed(4)}</td></tr>`;
+  $('liveBody').innerHTML=`<p class="sub">${d.games} finished games, ${o.n} live reads. Log loss: lower is better.</p><div class="scroll"><table><tbody>${r('Monte Carlo',o.mc)}${r('ML (plain)',o.mlBase)}${r('ML (with live learning)',o.ml)}${r('Mixed (average)',o.avg)}${o.mkt!=null?r(`Market (${o.nMkt} reads)`,o.mkt):''}</tbody></table></div><p class="sub">ML was closer than MC in ${d.mlWins} of ${d.games} games. More on <a href="/ml#duel">How it works</a>.</p>`; }
+
+// ---------- data ----------
+let EVAL=null;
+const J=u=>fetch(u).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); });
+function liveNote(){ $('liveNote').textContent=GKEY?'Live: updates every 20 seconds. Move a slider to experiment from here.':''; }
+function fillGames(){ const sel=$('gamePick'), gs=GAMES.filter(g=>g.league===LG);
+  sel.innerHTML='<option value="">Build your own state</option>'+gs.map(g=>`<option value="${esc(g.league+':'+g.event)}">Live: ${esc(g.away||'')} at ${esc(g.home||'')} · ${esc(mmss(g.st.tl))}</option>`).join('');
+  if(gs.some(g=>g.league+':'+g.event===GKEY)) sel.value=GKEY; else if(GKEY){ GKEY=''; LIVE=null; } }
+function useGame(){ const g=GAMES.find(g=>g.league+':'+g.event===GKEY); if(!g){ LIVE=null; NAMES={home:'Home',away:'Away'}; return; }
+  LIVE=g; NAMES={home:g.home||'Home',away:g.away||'Away'}; S={...DEF,...g.st}; for(const k of Object.keys(DEF)) if(typeof S[k]!=='number'||isNaN(S[k])) S[k]=DEF[k]; }
+async function loadGames(){ try{ GAMES=(await J('/api/ml/games')).games||[]; }catch(e){ GAMES=[]; } fillGames(); if(GKEY){ useGame(); syncCtl(); render(); } }
+async function loadLeague(){ try{ M[LG]||=await J('/api/ml/model?league='+LG); }catch(e){ $('err').hidden=false; $('err').textContent='Could not load the model from the server.'; return; }
+  fillGames(); useGame(); syncCtl(); render(); renderLearn(); renderMom(); J('/api/ml/live?league='+LG).then(renderLive).catch(()=>renderLive(null)); }
+document.querySelectorAll('[data-lg]').forEach(b=>b.onclick=()=>{ LG=b.dataset.lg; document.querySelectorAll('[data-lg]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+  GKEY=''; LIVE=null; NAMES={home:'Home',away:'Away'}; S={...DEF, spread:LG==='nfl'?2.5:3, total:LG==='nfl'?44:55}; liveNote(); try{ localStorage.setItem('mlLg',LG); }catch(e){} loadLeague(); });
+document.querySelectorAll('[data-why]').forEach(b=>b.onclick=()=>{ WHY=b.dataset.why; document.querySelectorAll('[data-why]').forEach(x=>x.setAttribute('aria-pressed',String(x===b))); render(); });
+$('gamePick').onchange=e=>{ GKEY=e.target.value; if(!GKEY){ LIVE=null; NAMES={home:'Home',away:'Away'}; } useGame(); liveNote(); syncCtl(); render(); };
+buildCtl();
+(async()=>{
+  try{ const q=new URLSearchParams(location.search).get('league'); const saved=(()=>{ try{ return localStorage.getItem('mlLg'); }catch(e){ return null; } })(); if((q||saved)==='nfl'){ LG='nfl'; document.querySelectorAll('[data-lg]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.lg==='nfl'))); S={...DEF,spread:2.5,total:44}; } }catch(e){}
+  const ev=new URLSearchParams(location.search).get('event');
+  await Promise.all([J('/api/ml/online').then(d=>ONLINE=d).catch(()=>{}), J('/api/ml/compare').then(d=>EVAL=d.eval).catch(()=>{}), J('/api/ml/games').then(d=>GAMES=d.games||[]).catch(()=>{})]);
+  if(ev){ const g=GAMES.find(g=>String(g.event)===ev); if(g){ GKEY=g.league+':'+g.event; if(g.league!==LG){ LG=g.league; document.querySelectorAll('[data-lg]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.lg===LG))); } } }
+  liveNote(); await loadLeague();
+  setInterval(()=>{ loadGames(); J('/api/ml/online').then(d=>{ ONLINE=d; renderLearn(); if(!GKEY) render(); }).catch(()=>{}); },20000);
+})();
+</script>
+</body></html>

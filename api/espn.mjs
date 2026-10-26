@@ -681,7 +681,7 @@ function slim(p, driveTeam) {
     id: String(p.id), text: p.text || '', type: p.type?.text || '', period: p.period?.number ?? null,
     clock: p.clock?.displayValue ?? null, hs: p.homeScore ?? null, as: p.awayScore ?? null,
     down: s.down ?? null, dist: s.distance ?? null, ytez: s.yardsToEndzone ?? null,
-    team: String(s.team?.id ?? driveTeam ?? ''), wc: p.wallclock || null,
+    team: String(s.team?.id ?? driveTeam ?? ''), wc: p.wallclock || null, yds: p.statYardage ?? null,
   };
 }
 function json(body, status = 200, maxAge = 0) {

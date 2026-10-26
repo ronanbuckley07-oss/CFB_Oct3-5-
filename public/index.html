@@ -147,13 +147,21 @@ tr.howrow td{border-top:0;padding-top:0}
 .find .small{font-size:13px;color:var(--muted)}
 .skel{height:230px;border-radius:12px;background:var(--card);border:1px solid var(--line);opacity:.6}
 @media (prefers-reduced-motion:no-preference){.card.flash{animation:flash 1.2s ease-out}@keyframes flash{from{box-shadow:0 0 0 2px var(--gold)}to{box-shadow:0 0 0 2px transparent}}}
+.engrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;font:600 14px Barlow,sans-serif;color:var(--muted)}
+.engrow .small{font-weight:500;font-size:13px;max-width:60ch}
+.engsw{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--card)}
+.engsw button{border:0;background:transparent;color:var(--ink);padding:7px 14px;font:700 14px Barlow,sans-serif;cursor:pointer}
+.engsw button+button{border-left:1px solid var(--line)}
+.engsw button[aria-pressed="true"]{background:#B05FD3;color:#fff}
+.engsw button[data-eng="mc"][aria-pressed="true"]{background:var(--gold);color:#0C2340}
 .buildwarn{background:#7a2e2e;color:#fff;padding:10px 14px;border-radius:10px;margin:0 0 12px;font:600 14px Barlow,sans-serif}
 </style></head>
 <body><div class="wrap">
 <header class="mast">
   <div>
     <a class="brand" href="/" id="brand" aria-label="Home"><img src="/logo.svg" alt="" width="34" height="34"><span id="brandName">CFB Live Sim</span></a>
-    <nav class="leaguebar" aria-label="League"><a href="/cfb" id="lgCfb">College football</a><a href="/nfl" id="lgNfl">NFL</a><a href="/ap">AP poll & seasons</a><a href="/ml">How it works</a></nav>
+    <nav class="leaguebar" aria-label="League"><a href="/cfb" id="lgCfb">College football</a><a href="/nfl" id="lgNfl">NFL</a><a href="/ap">AP poll & seasons</a><a href="/ml">How it works</a><a href="/ml/model">Inside the ML</a></nav>
+    <div class="engrow"><span>Model:</span><div class="engsw" role="group" aria-label="Which model picks the bets"><button type="button" data-eng="mc">Monte Carlo</button><button type="button" data-eng="mix">Mixed</button><button type="button" data-eng="ml">ML</button></div><span class="small" id="engNote"></span></div>
     <h1 id="h1">College football, live</h1>
     <p>Scores, down and distance, and ESPN's win probability for every game on the board, refreshed every few seconds. Open a game to run the simulator on it.</p>
   </div>
@@ -353,6 +361,12 @@ function betCard(b,o={}){
 }
 let REPLAY=null; // replayed 2025-26 NFL bets (public/replay_bets.json), loaded once
 async function loadReplay(){ if(REPLAY) return REPLAY; try{ const r=await fetch('/replay_bets.json'); if(r.ok) REPLAY=await r.json(); }catch(e){} return REPLAY||{bets:[]}; }
+// ===== Engine switch: which system picks the live bets. Saved per browser, shared with the game pages. =====
+let ENGINE='mc'; try{ ENGINE=localStorage.getItem('engine')||'mc'; }catch(e){}
+const ENG_NAME={mc:'Monte Carlo',mix:'Mixed',ml:'ML'}, ENG_NOTE={mc:'Simulates the rest of each game 25,000 times. The system that held up in testing.',mix:'The Monte Carlo and the ML model averaged, on moneylines.',ml:'A model trained on past games, no simulation, on moneylines. Experimental: in testing its steady picks lost money.'};
+function setEngine(e){ ENGINE=e; try{ localStorage.setItem('engine',e); }catch(x){} document.querySelectorAll('[data-eng]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.eng===e))); $('engNote').textContent=ENG_NOTE[e]; loadPicks(); }
+document.querySelectorAll('[data-eng]').forEach(b=>b.onclick=()=>setEngine(b.dataset.eng));
+document.querySelectorAll('[data-eng]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.eng===ENGINE))); $('engNote').textContent=ENG_NOTE[ENGINE];
 async function loadPicks(){
   const pc=v=>v==null?'–':(v*100).toFixed(1)+'%', c=v=>Math.round(v*100)+'¢', money=v=>`${v>0?'+':v<0?'−':''}$${Math.abs(v).toFixed(2)}`;
   const lg=NFL?'nfl':'cfb';
@@ -396,7 +410,7 @@ async function loadPicks(){
         el.insertAdjacentHTML('beforeend',`<details ${window.__duelOpen?'open':''} id="duelBox"><summary>Monte Carlo system vs ML system</summary>
           <table><thead><tr><th>Bets</th><th>Record</th><th>Return</th><th></th></tr></thead><tbody>
             ${ln('Monte Carlo: main bets',d.record)}${ln('ML system: main bets',M.edge.paper,M.edge.open?`${M.edge.open} open`:'')}
-            ${ln('Monte Carlo: steady',d.steady&&d.steady.paper)}${ln('ML system: steady',M.steady.paper,M.steady.open?`${M.steady.open} open`:'')}
+            ${ln('Monte Carlo: steady',d.steady&&d.steady.paper)}${ln('ML system: steady',M.steady.paper,M.steady.open?`${M.steady.open} open`:'')}${d.mixSystem?ln('Mixed system: main bets',d.mixSystem.edge.paper,d.mixSystem.edge.open?`${d.mixSystem.edge.open} open`:'')+ln('Mixed system: steady',d.mixSystem.steady.paper,d.mixSystem.steady.open?`${d.mixSystem.steady.open} open`:''):''}
             ${ln('Monte Carlo bets the ML model agreed with',Ag.main&&Ag.main.agrees,'moneylines only')}${ln('…and disagreed with',Ag.main&&Ag.main.disagrees)}
             ${ln('Steady picks the ML model agreed with',Ag.steady&&Ag.steady.agrees)}${ln('…and disagreed with',Ag.steady&&Ag.steady.disagrees)}
           </tbody></table><p class="sub" style="margin-top:6px">The ML system bets on its own (moneylines, same bars and checks, judged on the ML model) and is kept out of every other record. Replaying 2025-26 NFL games, ML-chosen steady picks lost 7% while Monte Carlo ones made 15%, so the Monte Carlo system stays in charge; these rows show whether that holds live. <a href="/ml#duel">Details ›</a></p></details>`);
@@ -417,12 +431,12 @@ async function loadPicks(){
     renderSteady(d, RP, lg);
   }catch(e){}
   try{
-    const r=await fetch(`/api/picks/leading?league=${lg}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json(), el=$('lead');
+    const r=await fetch(`/api/picks/leading?league=${lg}&engine=${ENGINE}`,{cache:'no-store'}); if(!r.ok) throw 0; const d=await r.json(), el=$('lead');
     const anyLive=data&&(data.games||[]).some(g=>g.state==='in');
     const leans=d.leans||[];
     if(!d.bets.length&&!leans.length&&!anyLive){ el.hidden=true; return; }
     const gm=b=>`<a href="${GAME}?event=${b.event}">${esc(b.matchup||'Open game')} ›</a>${b.clock?` · ${esc(b.clock)}`:''}${b.score?` · ${esc(b.score)}`:''}`;
-    el.innerHTML=`<h2>Leading bets right now <small>Every price is what a $10 order fills at on the live Polymarket US or Kalshi order book, fee included, re-checked every 10 seconds. Red OLD means don't count on it.</small></h2>
+    el.innerHTML=`<h2>Leading bets right now${ENGINE!=='mc'?` <span class="tagtier t-low" style="background:#B05FD3;color:#fff">${ENG_NAME[ENGINE]}</span>`:''} <small>Every price is what a $10 order fills at on the live Polymarket US or Kalshi order book, fee included, re-checked every 10 seconds. Red OLD means don't count on it.</small></h2>
       ${d.bets.length?`<div class="bcards">${d.bets.map(b=>betCard(b,{at:(b.book&&b.book.at)||b.at,game:gm(b)})).join('')}</div>`
         :'<p class="bc-none"><b>No main bets right now.</b> <span class="sub">Nothing on Polymarket US or Kalshi beats a price $10 can actually buy by the main bar.</span></p>'}
       <h3 style="margin:14px 0 4px;font-size:17px">Small edges <span class="sub" style="font-weight:500">more lines, lower confidence: the model prefers these by 1 to 3 points after fees. Untested; bet smaller.</span></h3>
@@ -434,7 +448,7 @@ async function loadPicks(){
 async function renderSteady(d, RP, lg){
   const el=$('steady'), pc=v=>v==null?'–':(v*100).toFixed(0)+'%', c=v=>Math.round(v*100)+'¢', money=v=>`${v>0?'+':v<0?'−':''}$${Math.abs(v).toFixed(2)}`;
   const st=d&&d.steady; if(!st){ el.hidden=true; return; }
-  let now={games:[]}; try{ const r=await fetch(`/api/picks/steady?league=${lg}`,{cache:'no-store'}); if(r.ok) now=await r.json(); }catch(e){}
+  let now={games:[]}; try{ const r=await fetch(`/api/picks/steady?league=${lg}&engine=${ENGINE}`,{cache:'no-store'}); if(r.ok) now=await r.json(); }catch(e){}
   const R=st.paper, n=R.w+R.l, rp=lg==='nfl'&&st.rule&&st.rule.replay, list=[...st.open,...st.settled];
   const gmS=g=>`<a href="${GAME}?event=${g.event}">${esc(g.matchup||'Open game')} ›</a>${g.clock?` · ${esc(g.clock)}`:''}${g.score?` · ${esc(g.score)}`:''}`;
   const cash=(now.held||[]).filter(h=>h.cashOut), cashT=cash.length?`<h3 style="margin:10px 0 4px;font-size:17px;color:#2E9E5B">Cash out now</h3><div class="bcards">${cash.map(h=>betCard({sel:h.sel,how:h.how||{venue:h.venue,url:h.url,buy:'Yes'}},{sell:true,game:gmS(h),
@@ -442,7 +456,7 @@ async function renderSteady(d, RP, lg){
   const live=now.games.length?`<div class="bcards">${now.games.map(g=>{const b=g.bets[0]; return betCard({...b,tier:'low'},{at:(b.book&&b.book.at)||g.at,game:gmS(g),extraTag:g.logged?' <span class="bc-tag t-low">logged</span>':''});}).join('')}</div>`
     :'<p class="bc-none"><b>No live steady picks right now.</b> <span class="sub">They show up here during live games, usually right after a score, a timeout or a quarter break, priced from the live Polymarket US or Kalshi order book.</span></p>';
   const row=p=>`<tr><td><b>${esc(p.sel)}</b> <span style="color:var(--muted)">${esc(p.matchup||'')}, ${esc(p.clock||'')}</span></td><td>${c(p.price)}</td><td>${pc(p.model)}</td><td class="${p.cashOut?'won':p.status}">${p.cashOut?`cashed at ${c(p.cashOut.bid)} +${Math.round(p.cashOut.pl*100)}¢`:p.status==='open'?'open':p.status==='push'?'push':`${p.status} ${p.pl>0?'+':''}${(p.pl*100).toFixed(0)}¢`}</td></tr>`;
-  el.innerHTML=`<h2>Steady picks <small>Low-risk favorites, from the one rule that held up on games the model had never seen. Not a sure thing.</small></h2>
+  el.innerHTML=`<h2>Steady picks${ENGINE!=='mc'?` <span class="tagtier t-low" style="background:#B05FD3;color:#fff">${ENG_NAME[ENGINE]}</span>`:''} <small>Low-risk favorites, from the one rule that held up on games the model had never seen. Not a sure thing.</small></h2>
     <ol class="how">
       <li>When a live game qualifies, the bet shows up below: a team <b>already leading by 4 or more</b>, from the 2nd quarter on, priced <b>65¢ to 85¢</b>, and the model agrees it's worth that price.</li>
       <li>Buy that team to win, and don't pay more than the price shown. If the price has moved past it, skip it.</li>
@@ -480,12 +494,12 @@ loadDuel(); setInterval(()=>{ if(!document.hidden) loadDuel(); },60000);
 loadPicks(); setInterval(()=>{ if(!document.hidden) loadPicks(); },10000); // 10s: steady picks and cash-outs are time-sensitive
 
 // ===== Deploy check: page and server must come from the same upload =====
-const BUILD='2026-10-25.6';
+const BUILD='2026-10-26.1';
 fetch('/api/version',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(v=>{
   const bad=!v||v.build!==BUILD;
   if(!bad) return;
   const d=document.createElement('div'); d.className='buildwarn';
-  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-25.6'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
+  d.textContent=`This page (${BUILD}) and the server (${v?v.build:'older than 2026-10-26.1'}) are from different uploads, so some panels may be missing. Re-upload every file in the zip and redeploy.`;
   const w=document.querySelector('.wrap'); w.insertBefore(d,w.firstChild);
 }).catch(()=>{});
 </script>

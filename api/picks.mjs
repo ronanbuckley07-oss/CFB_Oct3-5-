@@ -420,33 +420,50 @@ export function createPicks({ api, dir }) {
     return list;
   }
 
-  // ---------- the ML system: its own paper bets, same rules as the Monte Carlo system, judged on the ML model ----------
-  // Moneylines only. Main bets: the ML fair price (ML and market averaged) beats the cost by the tier's bar, the ML model
-  // within 10 points of the market. Steady: a 65-85c favorite leading by 4+, Q2 on, ML fair price at least the cost, one
-  // per game after a settled play, cashed out at 90c. Kept in their own record (report().mlSystem), never in the Monte
-  // Carlo records, never in the learning, and only bought by the autopilot when its "Follow" setting includes ML.
-  const asML = e => ({ ...e, mcModel: e.model, mcFair: e.fair, model: e.ml, edge: e.ml - e.cost, fair: e.mlFair, fairEdge: e.mlFair - e.cost });
-  const mlPasses = e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && Math.abs(e.model - (e.mid ?? e.cost)) <= MAX_GAP && e.fairEdge >= TIERS[e.tier].fairEdge;
-  const mlCands = (g, A, mk) => contracts(g, A, mk).filter(e => e.type === 'moneyline' && e.ml != null && BUYABLE.has(e.venue) && e.trade).map(asML).filter(mlPasses).sort((a, b) => b.fairEdge - a.fairEdge);
-  async function mlConsider(g, A, mk, S) {
+  // ---------- the ML and Mixed systems: their own paper bets, same rules as the Monte Carlo system ----------
+  // Engine 'ml' judges a moneyline on the ML model (api/wpml.mjs), engine 'mix' on the average of the Monte Carlo and the
+  // ML model. Main bets: the engine's fair price (its chance and the market averaged) beats the cost by the tier's bar,
+  // with its chance within 10 points of the market. Steady: a 65-85c favorite leading by 4+, Q2 on, fair price at least
+  // the cost, one per game after a settled play, cashed out at 90c. Each engine has its own record (report().mlSystem,
+  // report().mixSystem), kept out of the Monte Carlo records and the learning; the autopilot buys them only when its
+  // "Follow" setting says so. The live lists (leading bets, steady picks) are kept per engine for the site's engine switch.
+  const ENGINES = ['ml', 'mix'];
+  const sysKey = (eng, kind) => (eng === 'ml' ? kind : `mix-${kind}`); // ML keeps the original 'edge' / 'steady' tags
+  const engOfPick = p => (!p.mlSys ? 'mc' : p.mlSys.startsWith('mix') ? 'mix' : 'ml');
+  const asEng = (e, eng) => { const p = eng === 'ml' ? e.ml : (e.model + e.ml) / 2, mkt = e.mid ?? e.cost, fair = (p + mkt) / 2;
+    return { ...e, engine: eng, mcModel: e.model, mcFair: e.fair, model: p, edge: p - e.cost, fair, fairEdge: fair - e.cost }; };
+  const engPasses = e => tierActive(e.tier) && e.cost < 0.95 && e.model > 0.03 && e.model < 0.97 && Math.abs(e.model - (e.mid ?? e.cost)) <= MAX_GAP && e.fairEdge >= TIERS[e.tier].fairEdge;
+  const engCands = (g, A, mk, eng) => contracts(g, A, mk).filter(e => e.type === 'moneyline' && e.ml != null && BUYABLE.has(e.venue) && e.trade).map(e => asEng(e, eng)).filter(engPasses).sort((a, b) => b.fairEdge - a.fairEdge);
+  async function engineConsider(g, A, mk, S, eng) {
     if (!A || A.ml == null || !mk || quoteAge(g) > QUOTE_MAX_AGE || !(S.qtr >= 1 && S.qtr <= 4)) return [];
-    const id = `mlc:${g.league}:${g.event}`; if (busy.has(id)) return []; busy.add(id);
-    // verify() re-prices on the order book and recomputes edge and fairEdge from the ML model and ML fair price
-    try { const list = await verifyList(g, mlCands(g, A, mk), 4, mlPasses);
-      for (const e of list) logPick(g, A, S, e, { mlSys: 'edge' }); return list; } finally { busy.delete(id); }
+    const id = `${eng}c:${g.league}:${g.event}`; if (busy.has(id)) return []; busy.add(id);
+    // verify() re-prices on the order book and recomputes edge and fairEdge from the engine's chance and fair price
+    try { const list = await verifyList(g, engCands(g, A, mk, eng), 4, engPasses);
+      for (const e of list) logPick(g, A, S, e, { mlSys: sysKey(eng, 'edge') }); return list; } finally { busy.delete(id); }
   }
+  const mlConsider = (g, A, mk, S) => engineConsider(g, A, mk, S, 'ml');
+  // every engine's main bets for one game: [] for Monte Carlo is handled by the caller (consider)
+  const enginesConsider = async (g, A, mk, S) => Object.fromEntries(await Promise.all(ENGINES.map(async eng => [eng, await engineConsider(g, A, mk, S, eng).catch(() => [])])));
   if (!db.mlSteady || typeof db.mlSteady !== 'object') db.mlSteady = {};
-  const mlSteadyOk = e => e.cost >= STEADY.min && e.cost <= STEADY.max && e.fair - e.cost >= 0 && e.model < 0.97;
-  async function mlSteadyPick(g, A, mk, S, settled) {
-    const id = `${g.league}:${g.event}`;
-    if (!A || A.ml == null || !mk || db.mlSteady[id] || !(S.qtr >= STEADY.fromQtr && S.qtr <= 4) || !(settled >= STEADY.settleMs) || quoteAge(g) > QUOTE_MAX_AGE || busy.has('mls:' + id)) return null;
+  const engSteadyOk = e => e.cost >= STEADY.min && e.cost <= STEADY.max && e.fair - e.cost >= 0 && e.model < 0.97;
+  const steadyLiveEng = new Map(); // eng:league:event -> what qualifies right now for that engine
+  async function engineSteady(g, A, mk, S, settled, eng) {
+    const id = `${g.league}:${g.event}`, dkey = eng === 'ml' ? id : `${eng}:${id}`, lk = `${eng}:${id}`;
+    if (!A || A.ml == null || !mk || !(S.qtr >= STEADY.fromQtr && S.qtr <= 4) || quoteAge(g) > QUOTE_MAX_AGE || busy.has(`${eng}s:${id}`)) return null;
     const lead = slot => slot === 'ND' ? S.nd - S.unc : S.unc - S.nd;
-    const c = contracts(g, A, mk).filter(e => e.type === 'moneyline' && e.ml != null && BUYABLE.has(e.venue) && e.trade && lead(e.slot) >= STEADY.lead).map(asML).filter(mlSteadyOk);
-    if (!c.length) return null; busy.add('mls:' + id);
-    try { const list = await verifyList(g, c, 2, mlSteadyOk); if (!list.length) return null;
-      const pick = logPick(g, A, S, list[0], { mlSys: 'steady' }); db.mlSteady[id] = { key: pick && pick.key, at: new Date().toISOString() }; dirty = true; return pick; }
-    finally { busy.delete('mls:' + id); }
+    const c = contracts(g, A, mk).filter(e => e.type === 'moneyline' && e.ml != null && BUYABLE.has(e.venue) && e.trade && lead(e.slot) >= STEADY.lead).map(e => asEng(e, eng)).filter(engSteadyOk);
+    if (!c.length) { steadyLiveEng.delete(lk); return null; }
+    busy.add(`${eng}s:${id}`);
+    try { const list = await verifyList(g, c, 2, engSteadyOk); if (!list.length) { steadyLiveEng.delete(lk); return null; }
+      steadyLiveEng.set(lk, { at: Date.now(), league: g.league, event: g.event, matchup: g.title, clock: `Q${S.qtr} ${Math.floor(S.secs / 60)}:${String(S.secs % 60).padStart(2, '0')}`,
+        score: `${g.abbr.ND} ${S.nd}, ${g.abbr.UNC} ${S.unc}`, logged: !!db.mlSteady[dkey], bets: list.map(e => ({ sel: e.sel, venue: e.venue, url: e.url, price: +e.cost.toFixed(3),
+          model: +e.model.toFixed(3), fair: +e.fair.toFixed(3), fairEdge: +e.fairEdge.toFixed(3), team: e.team, book: e.book, how: e.how, mc: +e.mcModel.toFixed(3), ml: +e.ml.toFixed(3) })) });
+      if (db.mlSteady[dkey] || !(settled >= STEADY.settleMs)) return null;
+      const pick = logPick(g, A, S, list[0], { mlSys: sysKey(eng, 'steady') }); db.mlSteady[dkey] = { key: pick && pick.key, at: new Date().toISOString() }; dirty = true; return pick; }
+    finally { busy.delete(`${eng}s:${id}`); }
   }
+  const mlSteadyPick = (g, A, mk, S, settled) => engineSteady(g, A, mk, S, settled, 'ml');
+  const enginesSteady = (g, A, mk, S, settled) => Promise.all(ENGINES.map(eng => engineSteady(g, A, mk, S, settled, eng).catch(() => null)));
 
   // ---------- steady picks ----------
   if (!db.steady || typeof db.steady !== 'object') db.steady = {}; // league:event -> { key, at }
@@ -482,7 +499,7 @@ export function createPicks({ api, dir }) {
   const sellFee = { 'Polymarket US': p => TAKER_THETA * p * (1 - p), Kalshi: p => 0.07 * p * (1 - p) };
   function cashOuts(g, mk) {
     if (!mk || quoteAge(g) > QUOTE_MAX_AGE) return [];
-    const open = db.picks.filter(p => (p.steady || p.mlSys === 'steady') && p.status === 'open' && !p.cashOut && p.league === g.league && p.event === g.event);
+    const open = db.picks.filter(p => (p.steady || /steady$/.test(p.mlSys || '')) && p.status === 'open' && !p.cashOut && p.league === g.league && p.event === g.event);
     if (!open.length) return [];
     const aIsAway = String(mk.awayId) === String(g.slotId.ND), done = [];
     for (const p of open) {
@@ -508,12 +525,14 @@ export function createPicks({ api, dir }) {
       realistic: { n: real.length, w: real.filter(x => rpl(x) > 0).length, l: real.filter(x => rpl(x) <= 0).length, staked: +rs.toFixed(2), pl: +rp.toFixed(2), roi: rs ? rp / rs : null } };
   }
 
-  const steadyNow = league => { const now = Date.now(), out = [];
-    for (const [k, v] of steadyLive) { if (now - v.at > 60000) { steadyLive.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); }
-    // open steady picks, with a cash-out flag once the price has reached 90 cents
-    const held = db.picks.filter(p => p.steady && p.status === 'open' && (league === 'all' || p.league === league)).map(p => ({ event: p.event, league: p.league, matchup: p.matchup, sel: p.sel,
+  const steadyNow = (league, engine = 'mc') => { const now = Date.now(), out = [];
+    if (engine === 'mc') { for (const [k, v] of steadyLive) { if (now - v.at > 60000) { steadyLive.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); } }
+    else for (const [k, v] of steadyLiveEng) { if (!k.startsWith(engine + ':')) continue; if (now - v.at > 60000) { steadyLiveEng.delete(k); continue; } if (league === 'all' || v.league === league) out.push(v); }
+    // open steady picks of this engine, with a cash-out flag once the price has reached 90 cents
+    const mine = p => engine === 'mc' ? p.steady : engOfPick(p) === engine && /steady$/.test(p.mlSys || '');
+    const held = db.picks.filter(p => mine(p) && p.status === 'open' && (league === 'all' || p.league === league)).map(p => ({ event: p.event, league: p.league, matchup: p.matchup, sel: p.sel,
       venue: p.venue, url: p.url, price: p.price, clock: p.clock, cashOut: p.cashOut || null, how: p.how || null }));
-    return { updated: new Date().toISOString(), rule: STEADY, games: out.sort((a, b) => b.bets[0].fairEdge - a.bets[0].fairEdge), held }; };
+    return { updated: new Date().toISOString(), engine, rule: STEADY, games: out.sort((a, b) => b.bets[0].fairEdge - a.bets[0].fairEdge), held }; };
 
   // Settle open picks whose games are final
   async function settle() {
@@ -548,7 +567,7 @@ export function createPicks({ api, dir }) {
   }
   function report(league) {
     const all0 = db.picks.filter(p => p.status !== 'void' && (!league || league === 'all' || p.league === league)), mine = all0.filter(p => !p.mlSys), ps = mine.filter(p => !p.steady && !p.lean), sp = mine.filter(p => p.steady), lp = mine.filter(p => p.lean);
-    const me = all0.filter(p => p.mlSys === 'edge'), ms = all0.filter(p => p.mlSys === 'steady');
+    const me = all0.filter(p => p.mlSys === 'edge'), ms = all0.filter(p => p.mlSys === 'steady'), xe = all0.filter(p => p.mlSys === 'mix-edge'), xs = all0.filter(p => p.mlSys === 'mix-steady');
     const phases = {}; for (const p of ps) if (p.phase) (phases[p.phase] = phases[p.phase] || []).push(p);
     const passes = Object.entries(db.auto).filter(([k, v]) => v.status === 'pass' && (!league || league === 'all' || k.startsWith(league + ':'))).length;
     const real = ps.filter(p => p.fill && p.fill.qty > 0 && p.status !== 'open' && p.status !== 'push');
@@ -577,10 +596,12 @@ export function createPicks({ api, dir }) {
       // the ML system's own bets, and every Monte Carlo moneyline split by whether the ML model agreed
       mlSystem: { edge: { paper: summarize(me), realistic: realOf(me), open: me.filter(p => p.status === 'open').length }, steady: { paper: steadySummary(ms), open: ms.filter(p => p.status === 'open').length },
         list: [...me, ...ms].reverse().slice(0, 200) },
+      mixSystem: { edge: { paper: summarize(xe), realistic: realOf(xe), open: xe.filter(p => p.status === 'open').length }, steady: { paper: steadySummary(xs), open: xs.filter(p => p.status === 'open').length },
+        list: [...xe, ...xs].reverse().slice(0, 200) },
       agreement: { main: { agrees: summarize(ps.filter(p => p.mlAgrees === true)), disagrees: summarize(ps.filter(p => p.mlAgrees === false)) },
         steady: { agrees: steadySummary(sp.filter(p => p.mlAgrees === true)), disagrees: steadySummary(sp.filter(p => p.mlAgrees === false)) } } };
   }
   const forEvent = (league, event) => db.picks.filter(p => p.league === league && p.event === String(event) && p.status !== 'void');
   const autoDone = (league, event) => Object.keys(TIERS).filter(tierActive).every(t => db.auto[`${league}:${event}:${t}`]) || !!db.auto[`${league}:${event}`];
-  return { all: () => db.picks, removed: removedList, audit: () => ({ ...audit(), learned, rules: LEARN }), relearn: learn, anchorAgg, contracts, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, mlConsider, mlSteadyPick, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
+  return { all: () => db.picks, removed: removedList, audit: () => ({ ...audit(), learned, rules: LEARN }), relearn: learn, anchorAgg, contracts, edges, leanCands, verifyList, nowPrices, consider, considerLeans, logFound, MAX_CHECK, autoPick, autoDone, steadyPick, mlConsider, mlSteadyPick, engineConsider, enginesConsider, engineSteady, enginesSteady, ENGINES, steadyDone, steadyHeld, steadyNow, dropSteadyLive, cashOuts, settle, report, forEvent, flush: () => { dirty = true; save(); } };
 }

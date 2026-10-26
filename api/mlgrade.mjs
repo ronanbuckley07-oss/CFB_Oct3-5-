@@ -7,7 +7,7 @@ import path from 'node:path';
 const cl = p => Math.min(0.995, Math.max(0.005, p));
 const ll = (p, y) => -(y ? Math.log(cl(p)) : Math.log(1 - cl(p)));
 
-export function createGrader({ api, dataDir }) {
+export function createGrader({ api, dataDir, onGraded = null }) {
   const file = dataDir ? path.join(dataDir, 'mlgrade.json') : null;
   let db = { games: {} };
   try { if (file) db = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
@@ -17,13 +17,14 @@ export function createGrader({ api, dataDir }) {
   setInterval(save, 15000).unref();
 
   // g: a tracked game (league, event, title, homeSlot, slotId); S: engine state; mc / ml / mkt: the ND team's chance
-  function note(g, S, { mc, ml, mkt }) {
+  // st: the ML model's home-perspective state (with momentum), kept so finished games can teach the live-learning layer
+  function note(g, S, { mc, ml, mkt, mlBase = null, st = null }) {
     if (mc == null || ml == null || !g.homeSlot || !(S.qtr >= 1 && S.qtr <= 4)) return;
     const key = `${g.league}:${g.event}`, h = g.homeSlot === 'ND', toHome = p => (p == null ? null : +(h ? p : 1 - p).toFixed(4));
     const G = db.games[key] ||= { league: g.league, event: String(g.event), matchup: g.title, homeId: g.slotId && g.slotId[g.homeSlot], pts: [], y: null, at: Date.now() };
     const tl = (4 - S.qtr) * 900 + (S.secs ?? 0), k = `${S.qtr}|${S.secs}|${S.nd}|${S.unc}|${S.poss}|${S.down}`;
     const last = G.pts[G.pts.length - 1];
-    const row = [tl, toHome(mc), toHome(ml), toHome(mkt), k];
+    const row = [tl, toHome(mc), toHome(ml), toHome(mkt), k, st, toHome(mlBase)];
     if (last && last[4] === k) G.pts[G.pts.length - 1] = row; else if (G.pts.length < 400) G.pts.push(row);
     G.at = Date.now(); dirty = true;
   }
@@ -38,6 +39,7 @@ export function createGrader({ api, dataDir }) {
         const home = (sm.comps || []).find(c => c.homeAway === 'home'), away = (sm.comps || []).find(c => c.homeAway === 'away');
         if (!home || !away || home.score === away.score) { delete db.games[key]; dirty = true; continue; }
         G.y = home.score > away.score ? 1 : 0; G.final = `${away.abbr} ${away.score}, ${home.abbr} ${home.score}`; G.gradedAt = new Date().toISOString(); dirty = true;
+        if (onGraded) try { G.learned = onGraded(G); } catch (e) { console.error('ml: online learning failed', e.message); }
       } catch {}
     }
     save();
@@ -46,18 +48,18 @@ export function createGrader({ api, dataDir }) {
 
   function summary(league = 'all') {
     const gs = Object.values(db.games).filter(G => G.y != null && G.pts.length && (league === 'all' || G.league === league));
-    const agg = () => ({ n: 0, mc: 0, ml: 0, avg: 0, mkt: 0, nm: 0, bmc: 0, bml: 0 });
+    const agg = () => ({ n: 0, mc: 0, ml: 0, mlb: 0, avg: 0, mkt: 0, nm: 0, bmc: 0, bml: 0 });
     const tot = agg(), byPhase = {}, games = [];
     const phaseOf = tl => tl > 2700 ? 'Q1' : tl > 1800 ? 'Q2' : tl > 900 ? 'Q3' : tl > 300 ? 'Q4' : 'Last 5 min';
     for (const G of gs) {
       const gA = agg();
-      for (const [tl, mc, ml, mkt] of G.pts) for (const a of [tot, gA, byPhase[phaseOf(tl)] ||= agg()]) {
-        a.n++; a.mc += ll(mc, G.y); a.ml += ll(ml, G.y); a.avg += ll((mc + ml) / 2, G.y); a.bmc += (mc - G.y) ** 2; a.bml += (ml - G.y) ** 2;
+      for (const [tl, mc, ml, mkt, , , mlb] of G.pts) for (const a of [tot, gA, byPhase[phaseOf(tl)] ||= agg()]) {
+        a.n++; a.mc += ll(mc, G.y); a.ml += ll(ml, G.y); a.mlb += ll(mlb ?? ml, G.y); a.avg += ll((mc + ml) / 2, G.y); a.bmc += (mc - G.y) ** 2; a.bml += (ml - G.y) ** 2;
         if (mkt != null) { a.nm++; a.mkt += ll(mkt, G.y); }
       }
       games.push({ league: G.league, event: G.event, matchup: G.matchup, final: G.final, plays: gA.n, mc: +(gA.mc / gA.n).toFixed(4), ml: +(gA.ml / gA.n).toFixed(4), at: G.gradedAt });
     }
-    const fin = a => (a.n ? { n: a.n, mc: +(a.mc / a.n).toFixed(4), ml: +(a.ml / a.n).toFixed(4), avg: +(a.avg / a.n).toFixed(4), brierMc: +(a.bmc / a.n).toFixed(4), brierMl: +(a.bml / a.n).toFixed(4), mkt: a.nm ? +(a.mkt / a.nm).toFixed(4) : null, nMkt: a.nm } : { n: 0 });
+    const fin = a => (a.n ? { n: a.n, mc: +(a.mc / a.n).toFixed(4), ml: +(a.ml / a.n).toFixed(4), mlBase: +(a.mlb / a.n).toFixed(4), avg: +(a.avg / a.n).toFixed(4), brierMc: +(a.bmc / a.n).toFixed(4), brierMl: +(a.bml / a.n).toFixed(4), mkt: a.nm ? +(a.mkt / a.nm).toFixed(4) : null, nMkt: a.nm } : { n: 0 });
     games.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
     return { league, games: gs.length, open: Object.values(db.games).filter(G => G.y == null && (league === 'all' || G.league === league)).length,
       overall: fin(tot), phase: Object.fromEntries(Object.entries(byPhase).map(([k, v]) => [k, fin(v)])), mlWins: games.filter(g => g.ml < g.mc).length, recent: games.slice(0, 30) };

@@ -35,7 +35,7 @@ const TYPES = {
   '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json',
 };
 // Clean URLs: /game/401858250 and /game?event=401858250 both open the simulator; /nfl... is the same for the NFL
-const PAGES = { '/ml': 'ml.html', '/ap': 'ap.html', '/trade': 'trade.html', '/': 'index.html', '/cfb': 'index.html', '/college': 'index.html', '/game': 'game.html', '/nfl': 'index.html', '/nfl/game': 'nfl/game.html' };
+const PAGES = { '/ml': 'ml.html', '/ml/model': 'mlmodel.html', '/ap': 'ap.html', '/trade': 'trade.html', '/': 'index.html', '/cfb': 'index.html', '/college': 'index.html', '/game': 'game.html', '/nfl': 'index.html', '/nfl/game': 'nfl/game.html' };
 
 // Static files are read and compressed once, then served from memory. The sim page is ~1 MB raw, ~150 KB gzipped.
 const fileCache = new Map();
@@ -83,16 +83,19 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/espn' || u.pathname === '/.netlify/functions/espn') return await serveApi(req, res, u, 'cfb');
     if (u.pathname === '/api/nfl') return await serveApi(req, res, u, 'nfl');
     if (u.pathname === '/api/version') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ build: BUILD, live: LIVE.leagues })); return; }
-    if (u.pathname === '/api/picks/leading') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.leadingFor(u.searchParams.get('league') || 'all'))); return; }
+    if (u.pathname === '/api/picks/leading') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.leadingFor(u.searchParams.get('league') || 'all', u.searchParams.get('engine') || 'mc'))); return; }
     // The bet record is private: only the owner, logged in on /trade, gets it. Live bets stay public.
     if (['/api/picks/removed', '/api/picks/audit'].includes(u.pathname) && !TRADE.isOwner(req)) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end('{"error":"owner login required"}'); return; }
     if (u.pathname === '/api/picks/removed') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.removed(), null, 1)); return; }
     if (u.pathname === '/api/picks/audit') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.audit())); return; }
-    if (u.pathname === '/api/picks/steady') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.steadyNow(u.searchParams.get('league') || 'all'))); return; }
+    if (u.pathname === '/api/picks/steady') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.picks.steadyNow(u.searchParams.get('league') || 'all', ['mc', 'ml', 'mix'].includes(u.searchParams.get('engine')) ? u.searchParams.get('engine') : 'mc'))); return; }
     if (u.pathname === '/api/picks') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(TRADE.isOwner(req) ? LIVE.picks.report(u.searchParams.get('league') || 'all') : publicReport(LIVE.picks.report(u.searchParams.get('league') || 'all')))); return; }
     if (u.pathname.startsWith('/api/ap/')) return await AP.handle(req, res, u);
     // Monte Carlo vs machine learning: live grading of both win-probability systems, and the offline head-to-head
     if (u.pathname === '/api/ml/live') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.grader.summary(u.searchParams.get('league') || 'all'))); return; }
+    if (u.pathname === '/api/ml/online') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ cfb: LIVE.online.summary('cfb'), nfl: LIVE.online.summary('nfl') })); return; }
+    if (u.pathname === '/api/ml/games') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(LIVE.mlGames())); return; }
+    if (u.pathname === '/api/ml/model') { const lg = u.searchParams.get('league') === 'nfl' ? 'nfl' : 'cfb'; res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' }); res.end(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'api', `wpml_${lg}.json`))); return; }
     if (u.pathname === '/api/ml/compare') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' }); res.end(MLCOMPARE()); return; }
     if (u.pathname.startsWith('/api/trade')) return await TRADE.handle(req, res, u);
     if (u.pathname === '/api/live') return LIVE.handle(req, res, u, TRADE.isOwner(req));

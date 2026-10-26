@@ -82,7 +82,7 @@ export function clampConfig(c, limits, live) {
     steadyOnly: c.steadyOnly != null ? !!c.steadyOnly : c.mode === 'live',
     // which system's picks to buy: the Monte Carlo system (default), the ML system, or both; and whether a Monte Carlo
     // pick also needs the ML model to agree. Off by default: in the 2025-26 replay, ML-driven steady picks lost money.
-    follow: ['mc', 'ml', 'both'].includes(c.follow) ? c.follow : 'mc', mlAgree: !!c.mlAgree };
+    follow: ['mc', 'ml', 'mix', 'both', 'all'].includes(c.follow) ? c.follow : 'mc', mlAgree: !!c.mlAgree };
   if (!out.leagues.length) out.leagues = ['cfb', 'nfl'];
   if (out.mode === 'live') { out.maxPerBet = Math.min(out.maxPerBet, limits.maxOrder); out.budget = Math.min(out.budget, limits.maxDaily); }
   out.maxPerBet = Math.min(out.maxPerBet, out.budget); out.stopLoss = Math.min(out.stopLoss, out.budget);
@@ -93,7 +93,7 @@ export function clampConfig(c, limits, live) {
 export const describe = c => `${c.mode === 'live' ? 'LIVE money' : 'PAPER (no real orders)'}: up to $${c.budget} total, $${c.maxPerBet} a bet, `
   + `${RISK[c.risk].label}, ${c.leagues.map(l => l === 'nfl' ? 'NFL' : 'college').join(' and ')}, from ${new Date(c.start).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} `
   + `to ${new Date(c.end).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} ET, stop after losing $${c.stopLoss}.`
-  + `${c.oneGame ? ' One game only.' : ''}${c.steadyOnly ? ' Steady picks only.' : ''}${c.follow === 'ml' ? ' Following the ML system.' : c.follow === 'both' ? ' Following both systems.' : ''}${c.mlAgree ? ' Only when the ML model agrees.' : ''} Sell a position ${c.takeProfit || c.stopLossPct ? [c.takeProfit ? `when it's up ${c.takeProfit}%` : '', c.stopLossPct ? `when it's down ${c.stopLossPct}%` : ''].filter(Boolean).join(' or ') : 'only at the final'}${' (steady picks also at 90¢)'}.`;
+  + `${c.oneGame ? ' One game only.' : ''}${c.steadyOnly ? ' Steady picks only.' : ''}${c.follow === 'ml' ? ' Following the ML system.' : c.follow === 'mix' ? ' Following the Mixed system.' : c.follow === 'both' ? ' Following the Monte Carlo and ML systems.' : c.follow === 'all' ? ' Following all three systems.' : ''}${c.mlAgree ? ' Only when the ML model agrees.' : ''} Sell a position ${c.takeProfit || c.stopLossPct ? [c.takeProfit ? `when it's up ${c.takeProfit}%` : '', c.stopLossPct ? `when it's down ${c.stopLossPct}%` : ''].filter(Boolean).join(' or ') : 'only at the final'}${' (steady picks also at 90¢)'}.`;
 
 // ---------- learning how much to trust the model ----------
 export function learnTrust(picks) {
@@ -199,7 +199,9 @@ export function createAutopilot({ db, save, trader, api, limits, enabledLive, le
       // within 2 minutes on Polymarket US at no more than the logged price
       const kindOf = p => p.mlSys ? 'ml-' + p.mlSys : p.steady ? 'steady' : p.lean ? 'lean' : 'model';
       const follow = c.follow || 'mc', isSteady = p => p.steady || p.mlSys === 'steady';
-      const sysOk = p => (p.mlSys ? follow !== 'mc' : follow !== 'ml') && (!c.mlAgree || p.mlSys || p.mlAgrees === true);
+      // which engine logged the pick: Monte Carlo (no mlSys), ML ('edge' / 'steady') or Mixed ('mix-edge' / 'mix-steady')
+      const engOf = p => (!p.mlSys ? 'mc' : p.mlSys.startsWith('mix') ? 'mix' : 'ml'), FOLLOW = { mc: ['mc'], ml: ['ml'], mix: ['mix'], both: ['mc', 'ml'], all: ['mc', 'ml', 'mix'] };
+      const sysOk = p => (FOLLOW[follow] || ['mc']).includes(engOf(p)) && (!c.mlAgree || p.mlSys || p.mlAgrees === true);
       const cands = api.picksAll().filter(p => p.status === 'open' && !p.cashOut && p.venue === 'Polymarket US' && p.trade && p.trade.slug && c.leagues.includes(p.league)
           && Date.now() - Date.parse(p.at) < PICK_FRESH && sysOk(p) && (isSteady(p) || (!c.steadyOnly && (p.lean ? c.risk === 'high' : tiers.includes(p.tier) && tierActive(p.tier)))))
         .map(p => ({ src: kindOf(p), league: p.league, event: p.event, matchup: p.matchup, sel: p.sel, type: p.type, teamId: p.teamId, by: p.by, line: p.line, over: p.over,

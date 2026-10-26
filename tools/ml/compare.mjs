@@ -16,7 +16,7 @@ S.forEach((s, i) => {
   const st = s.st || { diff: s.nd - s.unc, tl: (4 - s.qtr) * 900 + s.secs, posH: s.poss === 'ND' ? 1 : -1, ytg: 100 - s.pos, down: s.down, dist: s.dist, toH: s.toND, toA: s.toUNC, spread: s.spread, total: s.totalLine, h2: s.qtr <= 2 ? (s.half2Recv === 'ND' ? 1 : -1) : 0 };
   const y = s.y ?? (s.hf > s.af ? 1 : s.hf < s.af ? 0 : null); if (y == null || s.v == null) return;
   const p = wpAll(M, st);
-  rows.push({ g: s.g, i, y, st, mc, ml: p.ml, trees: p.trees, lr: p.lr, mkt: s.v, qtr: s.qtr ?? (st.tl > 2700 ? 1 : st.tl > 1800 ? 2 : st.tl > 900 ? 3 : 4), secs: s.secs, lead: st.diff });
+  rows.push({ g: s.g, i, y, st, mc, ml: p.ml, trees: p.trees, lr: p.lr, nn: p.nn ?? p.ml, mkt: s.v, qtr: s.qtr ?? (st.tl > 2700 ? 1 : st.tl > 1800 ? 2 : st.tl > 900 ? 3 : 4), secs: s.secs, lead: st.diff });
 });
 const cl = p => Math.min(0.995, Math.max(0.005, p));
 const LL = (k, R = rows) => R.reduce((a, r) => a - (r.y ? Math.log(cl(r[k])) : Math.log(1 - cl(r[k]))), 0) / R.length;
@@ -44,7 +44,7 @@ export function fitLogit(X, y, l2 = 1) { // Newton's method
   for (let f = 0; f < 5; f++) { const tr = rows.filter(r => fold[r.g] !== f), w = fitLogit(tr.map(stackX), tr.map(r => r.y));
     for (const r of rows) if (fold[r.g] === f) { const x = stackX(r); let z = 0; for (let j = 0; j < x.length; j++) z += w[j] * x[j]; r.stack = 1 / (1 + Math.exp(-z)); } } }
 const stackW = fitLogit(rows.map(stackX), rows.map(r => r.y));
-const MODELS = [['stack', 'Stacked: learned mix of all three'], ['mc', 'Monte Carlo'], ['ml', 'ML (trees + logistic)'], ['trees', 'ML: trees only'], ['lr', 'ML: logistic only'], ['mkt', lg === 'nfl' ? 'Vegas market' : 'ESPN win probability'],
+const MODELS = [['stack', 'Stacked: learned mix of all three'], ['mc', 'Monte Carlo'], ['ml', 'ML (trees + logistic + network)'], ['trees', 'ML: trees only'], ['lr', 'ML: logistic only'], ['nn', 'ML: network only'], ['mkt', lg === 'nfl' ? 'Vegas market' : 'ESPN win probability'],
   ['mcmkt', 'Monte Carlo + market (fair price today)'], ['mlmkt', 'ML + market'], ['mcml', 'Monte Carlo + ML'], ['all3', 'All three averaged']];
 // game-level bootstrap for "how sure": share of resamples where ML beats Monte Carlo on log loss
 const games = [...new Set(rows.map(r => r.g))], byG = {}; for (const r of rows) (byG[r.g] ||= []).push(r);
